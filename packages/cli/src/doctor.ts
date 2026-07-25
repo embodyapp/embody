@@ -1,28 +1,22 @@
 /**
- * `embody doctor` — the check that turns the ownership boundary from a convention
- * into something mechanical.
+ * `embody doctor` — the checks that catch the failures an app cannot see itself.
  *
- * embody's promise is that you customize your instance and still take upstream
- * upgrades. That holds for exactly one reason: your changes live in directories
- * upstream never writes to. The moment you edit a file under framework/, catalog/ or
- * examples/, the next `git merge upstream/main` has a conflict to resolve, and the
- * promise quietly stops being true.
+ * This used to police a directory boundary, because embody was distributed as a repo
+ * you cloned and upgraded with `git merge upstream/main`. Under npm distribution the
+ * runtime lives in node_modules, there is no boundary to drift across, and that check
+ * has nothing left to say.
  *
- * So this reports what you have changed outside your own zones — before you upgrade,
- * not during. It is advisory: it prints findings and sets an exit code, and never
- * touches your working tree.
+ * What replaces it is the failure mode a plugin ecosystem actually has. A plugin
+ * registers hooks against the `@embody/plugin-sdk` it resolved. If an app ends up with
+ * two copies of the SDK, the plugin registers against a different registry than the one
+ * the kernel boots — and then it installs cleanly, logs nothing, and silently never
+ * fires. Nothing in a stack trace points at it, because nothing throws.
+ *
+ * Everything here is advisory: it reports findings and sets an exit code, and never
+ * touches the working tree.
  */
-import { execFile } from "node:child_process";
-import { readFile, readdir, access } from "node:fs/promises";
+import { readFile, readdir, access, realpath } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
-
-const exec = promisify(execFile);
-
-/** Directories that come from upstream and are replaced wholesale on upgrade. */
-export const UPSTREAM_ZONES = ["framework/", "catalog/", "examples/"] as const;
-/** Directories you own. Upstream never writes here. */
-export const USER_ZONES = ["custom/", "deploy/"] as const;
 
 export interface Finding {
   level: "error" | "warn";
@@ -32,114 +26,217 @@ export interface Finding {
 
 export interface DoctorReport {
   findings: Finding[];
-  /** False when git is unavailable, so the drift check could not run at all. */
-  gitChecked: boolean;
+  /** How many checks actually ran, so a report can say what it did NOT look at. */
+  checksRun: string[];
   ok: boolean;
 }
 
-async function git(root: string, args: string[]): Promise<string | null> {
+/** The one package every plugin must share exactly one copy of. */
+const SDK = "@embody/plugin-sdk";
+
+interface Manifest {
+  name?: string;
+  version?: string;
+  dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  keywords?: string[];
+}
+
+async function readManifest(path: string): Promise<Manifest | null> {
   try {
-    const { stdout } = await exec("git", args, { cwd: root });
-    return stdout;
+    return JSON.parse(await readFile(path, "utf8")) as Manifest;
   } catch {
     return null;
   }
 }
 
 /**
- * Pick the ref representing upstream. Prefers a real `upstream` remote, falls back to
- * `origin`, so both the fork-and-track and clone-directly workflows work.
+ * Every distinct on-disk copy of a package reachable from `root`.
+ *
+ * Resolved through realpath because pnpm's node_modules is a forest of symlinks into
+ * a content-addressed store: the same physical package appears at many paths, and only
+ * two different real directories mean two different module instances.
  */
-async function upstreamRef(root: string): Promise<string | null> {
-  for (const ref of ["upstream/main", "upstream/master", "origin/main", "origin/master"]) {
-    if ((await git(root, ["rev-parse", "--verify", "--quiet", ref])) !== null) return ref;
-  }
-  return null;
-}
+async function copiesOf(root: string, pkgName: string): Promise<Map<string, string>> {
+  const found = new Map<string, string>(); // realpath -> version
+  const seen = new Set<string>();
 
-function inZone(path: string, zones: readonly string[]): boolean {
-  return zones.some((z) => path.startsWith(z));
-}
-
-/** Which files differ from upstream, including uncommitted work. */
-async function changedFiles(root: string, ref: string): Promise<string[]> {
-  const committed = (await git(root, ["diff", "--name-only", `${ref}...HEAD`])) ?? "";
-  const working = (await git(root, ["status", "--porcelain"])) ?? "";
-  const fromStatus = working
-    .split("\n")
-    .map((l) => l.slice(3).trim())
-    .filter(Boolean);
-  return [...new Set([...committed.split("\n"), ...fromStatus].filter(Boolean))];
-}
-
-/** Packages in your zones must not claim the vendor's npm scope. */
-async function checkUserPackageNames(root: string): Promise<Finding[]> {
-  const findings: Finding[] = [];
-  for (const zone of USER_ZONES) {
-    const dir = join(root, zone);
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (depth > 6) return;
     let entries: string[];
     try {
       entries = await readdir(dir);
     } catch {
-      continue;
+      return;
     }
-    for (const entry of entries) {
-      const pkgPath = join(dir, entry, "package.json");
+    if (!entries.includes("node_modules")) return;
+
+    const nm = join(dir, "node_modules");
+    const candidate = join(nm, pkgName, "package.json");
+    try {
+      await access(candidate);
+      const real = await realpath(join(nm, pkgName));
+      if (!found.has(real)) {
+        const m = await readManifest(candidate);
+        found.set(real, m?.version ?? "unknown");
+      }
+    } catch {
+      /* not installed at this level */
+    }
+
+    // Descend into installed packages, which may carry their own nested copies.
+    let nested: string[];
+    try {
+      nested = await readdir(nm);
+    } catch {
+      return;
+    }
+    for (const entry of nested) {
+      if (entry === ".bin" || entry === ".pnpm") continue;
+      const sub = join(nm, entry);
+      let real: string;
       try {
-        await access(pkgPath);
+        real = await realpath(sub);
       } catch {
         continue;
       }
-      const pkg = JSON.parse(await readFile(pkgPath, "utf8")) as { name?: string };
-      if (pkg.name?.startsWith("@embody/")) {
-        findings.push({
-          level: "warn",
-          message: `${zone}${entry} is named "${pkg.name}" — @embody/* is the vendor's npm scope, not yours.`,
-          detail: [`Rename it to something unscoped, e.g. "${entry}", in ${zone}${entry}/package.json.`],
-        });
+      if (seen.has(real)) continue;
+      seen.add(real);
+      if (entry.startsWith("@")) {
+        let scoped: string[];
+        try {
+          scoped = await readdir(sub);
+        } catch {
+          continue;
+        }
+        for (const s of scoped) await walk(join(sub, s), depth + 1);
+      } else {
+        await walk(sub, depth + 1);
       }
+    }
+  }
+
+  await walk(root, 0);
+  return found;
+}
+
+/** The check that nothing else can perform: is there exactly one SDK instance? */
+async function checkSingleSdkInstance(root: string): Promise<Finding[]> {
+  const copies = await copiesOf(root, SDK);
+  if (copies.size <= 1) return [];
+  return [
+    {
+      level: "error",
+      message: `${copies.size} separate copies of ${SDK} are installed.`,
+      detail: [
+        ...[...copies].map(([path, version]) => `  ${version}  ${path}`),
+        "",
+        "A plugin registers its hooks against the SDK instance it resolved. With more",
+        "than one, a plugin can register against a registry the kernel never boots — so",
+        "it loads without error and its rules silently never run.",
+        "",
+        `Fix: make sure every plugin declares ${SDK} as a peerDependency (not a`,
+        "dependency), and that their ranges overlap so the installer can dedupe them.",
+      ],
+    },
+  ];
+}
+
+/** A plugin that depends on the SDK rather than peering it is what causes the above. */
+async function checkPluginDependencyShape(root: string): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  const nm = join(root, "node_modules");
+  const roots: string[] = [];
+  for (const scope of ["@embody", ""]) {
+    const dir = scope ? join(nm, scope) : nm;
+    try {
+      for (const entry of await readdir(dir)) {
+        if (entry.startsWith(".") || entry.startsWith("@")) continue;
+        roots.push(join(dir, entry));
+      }
+    } catch {
+      /* nothing installed under this scope */
+    }
+  }
+
+  for (const dir of roots) {
+    const m = await readManifest(join(dir, "package.json"));
+    if (!m?.name || !(m.keywords ?? []).includes("embody-plugin")) continue;
+    if (m.dependencies?.[SDK]) {
+      findings.push({
+        level: "warn",
+        message: `${m.name} declares ${SDK} as a dependency.`,
+        detail: [
+          `It must be a peerDependency, or the installer may give ${m.name} its own`,
+          "copy of the SDK and its hooks will never reach your kernel.",
+        ],
+      });
     }
   }
   return findings;
 }
 
-export async function runDoctor(root: string): Promise<DoctorReport> {
-  const findings: Finding[] = [];
-
-  const ref = await upstreamRef(root);
-  const gitChecked = ref !== null;
-
-  if (!gitChecked) {
-    findings.push({
-      level: "warn",
-      message: "Could not determine an upstream ref, so upgrade safety was NOT checked.",
+/** Two plugins owning the same Postgres schema will overwrite each other's tables. */
+function checkSchemaCollisions(
+  plugins: { id: string; schema?: string }[],
+): Finding[] {
+  const bySchema = new Map<string, string[]>();
+  for (const p of plugins) {
+    if (!p.schema) continue;
+    bySchema.set(p.schema, [...(bySchema.get(p.schema) ?? []), p.id]);
+  }
+  return [...bySchema]
+    .filter(([, ids]) => ids.length > 1)
+    .map(([schema, ids]) => ({
+      level: "error" as const,
+      message: `Plugins ${ids.join(", ")} all claim the Postgres schema "${schema}".`,
       detail: [
-        "This needs a git repository with an upstream remote:",
-        "  git remote add upstream <embody repo url> && git fetch upstream",
+        "Each plugin owns its schema outright and migrates it independently, so two",
+        "claiming the same one will overwrite each other's tables.",
       ],
-    });
-  } else {
-    const changed = await changedFiles(root, ref);
-    const drifted = changed.filter((f) => inZone(f, UPSTREAM_ZONES));
-    if (drifted.length) {
+    }));
+}
+
+export interface DoctorOptions {
+  /** Path to the app's config. Skipped entirely when absent. */
+  configPath?: string;
+  /** Injected so this module needs no dependency on the host. */
+  loadPlugins?: (
+    configPath: string,
+  ) => Promise<{ id: string; schema?: string }[]>;
+}
+
+export async function runDoctor(
+  root: string,
+  options: DoctorOptions = {},
+): Promise<DoctorReport> {
+  const findings: Finding[] = [];
+  const checksRun: string[] = [];
+
+  findings.push(...(await checkSingleSdkInstance(root)));
+  checksRun.push("one shared @embody/plugin-sdk instance");
+
+  findings.push(...(await checkPluginDependencyShape(root)));
+  checksRun.push("plugins peer-depend on the SDK");
+
+  if (options.configPath && options.loadPlugins) {
+    try {
+      const plugins = await options.loadPlugins(options.configPath);
+      checksRun.push(`config loads (${plugins.length} plugins)`);
+      findings.push(...checkSchemaCollisions(plugins));
+      checksRun.push("no two plugins claim one schema");
+    } catch (err) {
       findings.push({
         level: "error",
-        message: `${drifted.length} file(s) modified in upstream-owned directories — these will conflict on upgrade.`,
-        detail: [
-          ...drifted.map((f) => `  ${f}`),
-          "",
-          "Move the change into custom/ (a plugin) or deploy/ (your deployment).",
-          "If it genuinely belongs upstream, contribute it there instead of carrying a local edit.",
-        ],
+        message: `Could not load ${options.configPath}.`,
+        detail: [String(err instanceof Error ? err.message : err)],
       });
     }
   }
 
-  findings.push(...(await checkUserPackageNames(root)));
-
   return {
     findings,
-    gitChecked,
+    checksRun,
     ok: !findings.some((f) => f.level === "error"),
   };
 }
@@ -152,11 +249,9 @@ export function formatReport(report: DoctorReport): { text: string; code: number
     if (f.detail) lines.push(...f.detail);
     lines.push("");
   }
-  if (report.ok && report.gitChecked && report.findings.length === 0) {
-    lines.push("✓ All changes are confined to custom/ and deploy/.");
-    lines.push("  `git merge upstream/main` should apply cleanly.");
-  } else if (report.ok) {
-    lines.push("✓ No upgrade-blocking problems found.");
+  if (report.findings.length === 0) {
+    lines.push("✓ No problems found.");
+    lines.push(...report.checksRun.map((c) => `  checked: ${c}`));
   }
   return { text: lines.join("\n") + "\n", code: report.ok ? 0 : 1 };
 }

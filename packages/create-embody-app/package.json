@@ -1,0 +1,39 @@
+{
+  "name": "create-embody-app",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "bin": {
+    "create-embody-app": "./src/bin.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsup"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "types": "./dist/index.d.ts",
+    "bin": {
+      "create-embody-app": "./dist/bin.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nimrod4278/embody.git",
+    "directory": "packages/create-embody-app"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1"
+  }
+}

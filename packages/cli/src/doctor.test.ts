@@ -1,158 +1,151 @@
 /**
- * Doctor tests, against REAL git repositories in a temp directory.
+ * `embody doctor` against real directory trees in a tmpdir.
  *
- * The whole value of `embody doctor` is that it catches an upgrade-breaking edit
- * before you merge, so testing it against a fake git would test nothing. Each case
- * builds a bare "upstream", clones it, edits something, and checks the verdict.
+ * The duplicate-SDK case is the one that matters. It is the only failure in the whole
+ * system that produces no error at runtime — a plugin whose hooks registered against a
+ * second SDK copy simply never fires — so the check is worth testing against an actual
+ * node_modules layout rather than a mock.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { execFile } from "node:child_process";
-import { mkdtemp, rm, mkdir, writeFile, appendFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
-import { runDoctor } from "./doctor.ts";
+import { runDoctor, formatReport } from "./doctor.ts";
 
-const exec = promisify(execFile);
+let root: string;
 
-let dir: string;
-let repo: string;
-let seedDir: string;
-
-const git = (cwd: string, ...args: string[]) => exec("git", args, { cwd });
+const pkg = async (dir: string, body: Record<string, unknown>) => {
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "package.json"), JSON.stringify(body, null, 2));
+};
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), "embody-doctor-"));
-  const origin = join(dir, "upstream.git");
-  const seed = join(dir, "seed");
-  seedDir = seed;
-  repo = join(dir, "clone");
-
-  // Build an upstream repo with the five buckets populated.
-  await mkdir(seed, { recursive: true });
-  await writeFile(join(seed, "pnpm-workspace.yaml"), "packages:\n  - 'custom/*'\n");
-  for (const [path, body] of [
-    ["framework/kernel/index.ts", "export const version = 1;\n"],
-    ["catalog/crm/index.ts", "export const crm = true;\n"],
-    ["examples/service-crm/embody.config.ts", "export default {};\n"],
-    ["custom/.keep", ""],
-    ["deploy/.keep", ""],
-  ] as const) {
-    await mkdir(join(seed, path, ".."), { recursive: true });
-    await writeFile(join(seed, path), body);
-  }
-  await git(seed, "init", "-q", "-b", "main");
-  await git(seed, "config", "user.email", "t@t");
-  await git(seed, "config", "user.name", "T");
-  await git(seed, "add", ".");
-  await git(seed, "commit", "-qm", "base");
-  await exec("git", ["clone", "-q", "--bare", seed, origin]);
-  await git(seed, "remote", "add", "origin", origin);
-
-  await exec("git", ["clone", "-q", origin, repo]);
-  await git(repo, "config", "user.email", "you@acme");
-  await git(repo, "config", "user.name", "You");
-  await git(repo, "remote", "add", "upstream", origin);
-  await git(repo, "fetch", "-q", "upstream");
+  root = await mkdtemp(join(tmpdir(), "embody-doctor-"));
+  await pkg(root, { name: "an-app", private: true });
 });
 
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true });
 });
 
-/** Add a package under one of the user zones. */
-async function addUserPackage(name: string, zone = "custom", pkgName = name) {
-  await mkdir(join(repo, zone, name), { recursive: true });
-  await writeFile(
-    join(repo, zone, name, "package.json"),
-    JSON.stringify({ name: pkgName, private: true }, null, 2),
-  );
-}
-
 describe("embody doctor", () => {
-  it("passes on a clean clone", async () => {
-    const report = await runDoctor(repo);
-    expect(report.gitChecked).toBe(true);
+  it("passes a clean app with one SDK copy", async () => {
+    await pkg(join(root, "node_modules/@embody/plugin-sdk"), {
+      name: "@embody/plugin-sdk",
+      version: "1.0.0",
+    });
+
+    const report = await runDoctor(root);
     expect(report.ok).toBe(true);
+    expect(report.findings).toEqual([]);
+    expect(formatReport(report).code).toBe(0);
+  });
+
+  it("FAILS when two copies of the SDK are installed, and prints both paths", async () => {
+    await pkg(join(root, "node_modules/@embody/plugin-sdk"), {
+      name: "@embody/plugin-sdk",
+      version: "1.0.0",
+    });
+    // A plugin that dragged in its own copy — the shape that breaks hook registration.
+    await pkg(join(root, "node_modules/embody-plugin-billing"), {
+      name: "embody-plugin-billing",
+      version: "1.0.0",
+      keywords: ["embody-plugin"],
+    });
+    await pkg(
+      join(root, "node_modules/embody-plugin-billing/node_modules/@embody/plugin-sdk"),
+      { name: "@embody/plugin-sdk", version: "2.0.0" },
+    );
+
+    const report = await runDoctor(root);
+    expect(report.ok).toBe(false);
+    const { text, code } = formatReport(report);
+    expect(code).toBe(1);
+    expect(text).toContain("2 separate copies");
+    expect(text).toContain("1.0.0");
+    expect(text).toContain("2.0.0");
+    // The message has to explain the silence, or a reader will not believe it matters.
+    expect(text).toMatch(/silently never run/);
+  });
+
+  it("counts a symlinked SDK as one copy, not two", async () => {
+    // pnpm's node_modules is a forest of symlinks into one store. Resolving through
+    // realpath is what keeps this from reporting a false positive on every pnpm app.
+    const real = join(root, "node_modules/@embody/plugin-sdk");
+    await pkg(real, { name: "@embody/plugin-sdk", version: "1.0.0" });
+    await pkg(join(root, "node_modules/embody-plugin-billing"), {
+      name: "embody-plugin-billing",
+      keywords: ["embody-plugin"],
+    });
+    await mkdir(join(root, "node_modules/embody-plugin-billing/node_modules/@embody"), {
+      recursive: true,
+    });
+    await symlink(
+      real,
+      join(root, "node_modules/embody-plugin-billing/node_modules/@embody/plugin-sdk"),
+    );
+
+    const report = await runDoctor(root);
+    expect(report.ok).toBe(true);
+  });
+
+  it("warns when a plugin depends on the SDK instead of peering it", async () => {
+    await pkg(join(root, "node_modules/@embody/plugin-sdk"), {
+      name: "@embody/plugin-sdk",
+      version: "1.0.0",
+    });
+    await pkg(join(root, "node_modules/embody-plugin-billing"), {
+      name: "embody-plugin-billing",
+      keywords: ["embody-plugin"],
+      dependencies: { "@embody/plugin-sdk": "^1.0.0" },
+    });
+
+    const report = await runDoctor(root);
+    const { text, code } = formatReport(report);
+    // A warning, not an error: it is the cause of a duplicate, not a duplicate itself.
+    expect(code).toBe(0);
+    expect(text).toContain("embody-plugin-billing declares @embody/plugin-sdk as a dependency");
+  });
+
+  it("ignores packages that are not plugins", async () => {
+    await pkg(join(root, "node_modules/some-lib"), {
+      name: "some-lib",
+      dependencies: { "@embody/plugin-sdk": "^1.0.0" },
+    });
+    const report = await runDoctor(root);
     expect(report.findings).toEqual([]);
   });
 
-  it("passes when your changes stay inside custom/ and deploy/", async () => {
-    await addUserPackage("hipaa-rules");
-    await addUserPackage("acme", "deploy", "acme-deployment");
-    await git(repo, "add", ".");
-    await git(repo, "commit", "-qm", "our customization");
-
-    const report = await runDoctor(repo);
-    expect(report.ok).toBe(true);
-    expect(report.findings).toEqual([]);
-  });
-
-  it("FAILS and names the file when you edit an upstream-owned directory", async () => {
-    await appendFile(join(repo, "catalog/crm/index.ts"), "export const hacked = true;\n");
-    await git(repo, "add", ".");
-    await git(repo, "commit", "-qm", "local hack");
-
-    const report = await runDoctor(repo);
+  it("FAILS when two plugins claim the same Postgres schema", async () => {
+    const report = await runDoctor(root, {
+      configPath: "embody.config.ts",
+      loadPlugins: async () => [
+        { id: "crm", schema: "crm" },
+        { id: "billing", schema: "shared" },
+        { id: "invoicing", schema: "shared" },
+      ],
+    });
     expect(report.ok).toBe(false);
-    const error = report.findings.find((f) => f.level === "error")!;
-    expect(error.message).toMatch(/upstream-owned directories/);
-    expect(error.detail?.join("\n")).toContain("catalog/crm/index.ts");
+    const { text } = formatReport(report);
+    expect(text).toContain("billing, invoicing");
+    expect(text).toContain('"shared"');
   });
 
-  it("catches an uncommitted edit too, not just committed ones", async () => {
-    await appendFile(join(repo, "framework/kernel/index.ts"), "// tweak\n");
-    const report = await runDoctor(repo);
+  it("reports a config that will not load, rather than crashing", async () => {
+    const report = await runDoctor(root, {
+      configPath: "embody.config.ts",
+      loadPlugins: async () => {
+        throw new Error("Cannot find module './nope.ts'");
+      },
+    });
     expect(report.ok).toBe(false);
-    expect(report.findings[0]!.detail?.join("\n")).toContain("framework/kernel/index.ts");
+    expect(formatReport(report).text).toContain("Cannot find module");
   });
 
-  it("warns when a package in your zone claims the vendor's npm scope", async () => {
-    await addUserPackage("rules", "custom", "@embody/custom-rules");
-    const report = await runDoctor(repo);
-    const warn = report.findings.find((f) => f.level === "warn")!;
-    expect(warn.message).toMatch(/@embody\/\* is the vendor's npm scope/);
-    // A naming smell should not block an upgrade.
-    expect(report.ok).toBe(true);
-  });
-
-  /**
-   * The claim the whole boundary exists to support. Not "doctor is happy" — an actual
-   * upstream release landing on top of a customized clone without a conflict.
-   */
-  it("lets a real upstream release merge cleanly into a customized clone", async () => {
-    // You customize your instance.
-    await addUserPackage("hipaa-rules");
-    await addUserPackage("acme", "deploy", "acme-deployment");
-    await git(repo, "add", ".");
-    await git(repo, "commit", "-qm", "our customization");
-
-    // Upstream ships a release touching the framework and the catalog.
-    await appendFile(join(seedDir, "framework/kernel/index.ts"), "export const added = 2;\n");
-    await appendFile(join(seedDir, "catalog/crm/index.ts"), "export const feature = true;\n");
-    await git(seedDir, "add", ".");
-    await git(seedDir, "commit", "-qm", "upstream release");
-    await git(seedDir, "push", "-q", "origin", "main");
-
-    // You upgrade.
-    await git(repo, "fetch", "-q", "upstream");
-    await expect(git(repo, "merge", "--no-edit", "upstream/main")).resolves.toBeDefined();
-
-    // No conflict markers anywhere, and the tree still holds both sides.
-    const { stdout: conflicts } = await git(repo, "diff", "--name-only", "--diff-filter=U");
-    expect(conflicts.trim()).toBe("");
-    const { stdout: files } = await git(repo, "ls-files");
-    expect(files).toContain("custom/hipaa-rules/package.json");
-    expect(files).toContain("framework/kernel/index.ts");
-
-    expect((await runDoctor(repo)).ok).toBe(true);
-  });
-
-  it("says plainly that it could NOT check, rather than reporting a false pass", async () => {
-    const notGit = await mkdtemp(join(tmpdir(), "embody-nogit-"));
-    const report = await runDoctor(notGit);
-    expect(report.gitChecked).toBe(false);
-    expect(report.findings[0]!.message).toMatch(/NOT checked/);
-    await rm(notGit, { recursive: true, force: true });
+  it("says which checks it ran, so a pass is not mistaken for a full audit", async () => {
+    const { text } = formatReport(await runDoctor(root));
+    expect(text).toContain("checked: one shared @embody/plugin-sdk instance");
+    // Config checks did not run here; the report must not imply they did.
+    expect(text).not.toContain("config loads");
   });
 });

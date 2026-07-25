@@ -17,7 +17,7 @@ import {
 } from "@embody/host";
 import { startMcpStdio } from "@embody/mcp-server";
 import { buildPrincipal, type IdentityOptions } from "./identity.ts";
-import { newApp, newCustom, newDeployment, findRepoRoot } from "./scaffold.ts";
+import { newPlugin, findProjectRoot } from "./scaffold.ts";
 import { runDoctor, formatReport } from "./doctor.ts";
 
 /** Boot the runtime with a STDERR logger (so STDOUT stays clean for JSON), run, close. */
@@ -182,64 +182,37 @@ export function buildProgram(): Command {
 
   program
     .command("doctor")
-    .description("Check that your changes stay inside custom/ and deploy/ (upgrade safety)")
-    .action(async () => {
-      const report = await runDoctor(await findRepoRoot());
+    .description("Check this app's plugin wiring (one shared SDK, no schema collisions)")
+    .action(async (_opts: unknown, cmd: Command) => {
+      const { config } = globals(cmd);
+      const report = await runDoctor(await findProjectRoot(), {
+        configPath: config,
+        loadPlugins: async (path) => {
+          // Booting is avoided on purpose: resolving the plugin list is enough to
+          // check ids and schemas, and it works without a database.
+          const { resolvePlugins } = await import("@embody/host");
+          return resolvePlugins(await loadConfig(path));
+        },
+      });
       const { text, code } = formatReport(report);
       process.stderr.write(text);
       process.exitCode = code;
     });
 
-  const csv = (s: string): string[] =>
-    s.split(",").map((v) => v.trim()).filter(Boolean);
   const list = (paths: string[]): string => paths.map((w) => "  " + w).join("\n");
 
-  const nw = program.command("new").description("Scaffold plugins and deployments");
+  const nw = program.command("new").description("Scaffold a plugin in this app");
 
-  nw.command("custom <name>")
-    .description("Create YOUR OWN plugin under custom/ (the usual way to customize embody)")
-    .option("--for <deployment>", "also enable it in this deployment, e.g. deploy/acme")
-    .action(async (name: string, opts: { for?: string }) => {
-      const written = await newCustom(name, opts.for);
+  nw.command("plugin <name>")
+    .description("Create a plugin in this app and enable it in your config")
+    .action(async (name: string, _opts: unknown, cmd: Command) => {
+      const { config } = globals(cmd);
+      const written = await newPlugin(name, config);
       process.stderr.write(`Created ${name}:\n${list(written)}\n`);
       process.stderr.write(
-        opts.for
-          ? `\nEnabled in ${opts.for}. Run \`pnpm install\`, then \`pnpm --filter ${name} test\`.\n`
-          : `\nNot enabled anywhere yet. Add it to a deployment:\n` +
-            `  embody new custom ${name} --for deploy/<yours>\n`,
+        `\nEnabled in ${config}. Add its rules in plugins/${name}/plugin.ts,\n` +
+          `then apply its migration with: npx embody-host ${config} --mode migrate-only\n`,
       );
-    });
-
-  nw.command("deployment <name>")
-    .description("Create YOUR OWN deployable under deploy/")
-    .option("--apps <csv>", "catalog apps to enable, e.g. crm,b2b-saas", "")
-    .option("--custom <csv>", "your own custom/ plugins to enable", "")
-    .action(async (name: string, opts: { apps: string; custom: string }) => {
-      const apps = csv(opts.apps);
-      const customs = csv(opts.custom);
-      const written = await newDeployment(name, apps, customs);
-      process.stderr.write(
-        `Created ${name}-deployment (apps: ${apps.join(", ") || "none"}` +
-          `${customs.length ? `; custom: ${customs.join(", ")}` : ""}):\n${list(written)}\n`,
-      );
-    });
-
-  nw.command("app <name>")
-    .description("Create a first-party app under catalog/ — UPSTREAM-OWNED, see --internal")
-    .option("--internal", "yes, I am contributing this app upstream")
-    .action(async (name: string, opts: { internal?: boolean }) => {
-      if (!opts.internal) {
-        process.stderr.write(
-          `catalog/ is upstream-owned: anything you add there conflicts when you merge\n` +
-            `upstream. To customize your own instance, use:\n\n` +
-            `  embody new custom ${name} --for deploy/<yours>\n\n` +
-            `If you really are contributing a first-party app, re-run with --internal.\n`,
-        );
-        process.exitCode = 1;
-        return;
-      }
-      const written = await newApp(name);
-      process.stderr.write(`Created @embody/${name}:\n${list(written)}\n`);
     });
 
   return program;

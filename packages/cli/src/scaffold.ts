@@ -1,22 +1,20 @@
 /**
- * Scaffolding — the developer half of the CLI.
+ * Scaffolding — adding a plugin to an app you already have.
  *
- * Every generator here writes into exactly one bucket, and which bucket it is decides
- * who owns the result (see OWNERSHIP.md):
- *   - `new custom`     -> custom/  — YOURS. The normal way to change how embody behaves.
- *   - `new deployment` -> deploy/  — YOURS. What you actually run.
- *   - `new app`        -> catalog/ — UPSTREAM. Only for contributing a first-party app;
- *                                   anything you write there conflicts on upgrade.
+ * This used to write into sibling directories of a cloned monorepo (`custom/`,
+ * `deploy/`, `catalog/`) and emit `workspace:*` dependencies, because your app WAS the
+ * embody repo. It is not any more: embody arrives from npm, and your app is an ordinary
+ * project. So there is exactly one generator left, and it writes inside whatever
+ * project you happen to be standing in.
  *
- * Templates mirror catalog/crm and examples/service-crm so a scaffolded package
- * matches the conventions exactly.
+ * Creating the project itself is `npm create embody-app`, not this.
  */
 import { mkdir, writeFile, readFile, access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
-/** "b2b-saas" -> "b2bSaas". Kebab package names are not valid JS identifiers. */
+/** "field-service" -> "fieldService". Kebab names are not valid JS identifiers. */
 function camel(name: string): string {
   return name.replace(/-([a-z0-9])/g, (_, c: string) => c.toUpperCase());
 }
@@ -26,21 +24,26 @@ function schemaName(name: string): string {
   return name.replace(/-/g, "_");
 }
 
-/** The banner stamped on generated files that the user owns. */
-const OWNED_BY_YOU =
-  " * YOURS. Upstream never writes to this directory, so `git merge upstream/main`\n" +
-  " * cannot conflict with anything here. See OWNERSHIP.md.";
-
-/** Walk up from cwd to the workspace root (the dir containing pnpm-workspace.yaml). */
-export async function findRepoRoot(start = process.cwd()): Promise<string> {
+/**
+ * Walk up to the nearest package.json — the root of the developer's app.
+ *
+ * Deliberately not pnpm-workspace.yaml. That assumed the app lived inside a clone of
+ * this monorepo, which is exactly the assumption npm distribution removes.
+ */
+export async function findProjectRoot(start = process.cwd()): Promise<string> {
   let dir = resolve(start);
   for (;;) {
     try {
-      await access(join(dir, "pnpm-workspace.yaml"));
+      await access(join(dir, "package.json"));
       return dir;
     } catch {
       const parent = dirname(dir);
-      if (parent === dir) throw new Error("Not inside an embody workspace (no pnpm-workspace.yaml found).");
+      if (parent === dir) {
+        throw new Error(
+          "Not inside a project (no package.json found). Create one first:\n" +
+            "  npm create embody-app <name>",
+        );
+      }
       dir = parent;
     }
   }
@@ -52,138 +55,24 @@ async function writeNew(path: string, contents: string): Promise<void> {
     await access(path);
     throw new Error(`Refusing to overwrite existing file: ${path}`);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      if (String(err).includes("Refusing")) throw err;
-    }
+    if (String(err).includes("Refusing")) throw err;
   }
   await writeFile(path, contents, "utf8");
 }
 
-export async function newApp(name: string): Promise<string[]> {
-  if (!NAME_RE.test(name)) throw new Error(`Invalid app name "${name}"`);
-  const root = await findRepoRoot();
-  const dir = join(root, "catalog", name);
-  const ident = camel(name);
-  const schema = schemaName(name);
-  const written: string[] = [];
-  const put = async (rel: string, body: string) => {
-    const p = join(dir, rel);
-    await writeNew(p, body);
-    written.push(p);
-  };
-
-  await put(
-    "package.json",
-    JSON.stringify(
-      {
-        name: `@embody/${name}`,
-        version: "0.0.0",
-        type: "module",
-        exports: { ".": "./src/index.ts" },
-        types: "./src/index.ts",
-        scripts: { typecheck: "tsc --noEmit" },
-        dependencies: { "@embody/kernel": "workspace:*", zod: "^3.24.1" },
-      },
-      null,
-      2,
-    ) + "\n",
-  );
-  await put("tsconfig.json", `{\n  "extends": "../../tsconfig.base.json",\n  "include": ["src"]\n}\n`);
-  await put(
-    "migrations/0001_init.sql",
-    `-- @embody/${name} — initial schema.\ncreate schema if not exists ${schema};\n`,
-  );
-  await put(
-    "src/plugin.ts",
-    `import { fileURLToPath } from "node:url";\nimport type { EmbodyPlugin } from "@embody/kernel";\n\nexport const ${ident}MigrationsDir = fileURLToPath(new URL("../migrations", import.meta.url));\n\nexport const ${ident}Plugin: EmbodyPlugin = {\n  id: "${name}",\n  schema: "${schema}",\n  dependsOn: ["core"],\n  capabilities: {},\n  migrations: { dir: ${ident}MigrationsDir, schema: "${schema}" },\n  init(ctx) {\n    ctx.logger.info("${name} plugin initialised");\n  },\n};\n`,
-  );
-  await put("src/index.ts", `export { ${ident}Plugin, ${ident}MigrationsDir } from "./plugin.ts";\n`);
-  return written;
-}
-
 /**
- * Stamp a deployable under `deploy/` — the thing you actually run, and yours to edit.
- * `apps` names catalog packages (`@embody/<app>`); `customs` names your own plugins
- * under `custom/`, which are workspace packages with plain unscoped names.
+ * Stamp a new plugin inside the current app and enable it.
+ *
+ * The wiring is the part worth automating: without it you would add the import and the
+ * array entry to embody.config.ts by hand, and a plugin that is not in that array does
+ * nothing at all, silently.
  */
-export async function newDeployment(
-  name: string,
-  apps: string[] = [],
-  customs: string[] = [],
-): Promise<string[]> {
-  if (!NAME_RE.test(name)) throw new Error(`Invalid deployment name "${name}"`);
-  const root = await findRepoRoot();
-  const dir = join(root, "deploy", name);
-  const written: string[] = [];
-  const put = async (rel: string, body: string) => {
-    const p = join(dir, rel);
-    await writeNew(p, body);
-    written.push(p);
-  };
-
-  const deps: Record<string, string> = {
-    "@embody/core": "workspace:*",
-    "@embody/host": "workspace:*",
-  };
-  for (const a of apps) deps[`@embody/${a}`] = "workspace:*";
-  for (const c of customs) deps[c] = "workspace:*";
-
-  await put(
-    "package.json",
-    JSON.stringify(
-      {
-        // Unscoped: this is your deployment, not a vendor package.
-        name: `${name}-deployment`,
-        version: "0.0.0",
-        private: true,
-        type: "module",
-        scripts: {
-          typecheck: "tsc --noEmit",
-          start: "embody-host ./embody.config.ts",
-          dev: "embody-host ./embody.config.ts",
-          migrate: "embody-host ./embody.config.ts --mode migrate-only",
-        },
-        dependencies: Object.fromEntries(Object.entries(deps).sort()),
-      },
-      null,
-      2,
-    ) + "\n",
-  );
-  await put("tsconfig.json", `{\n  "extends": "../../tsconfig.base.json",\n  "include": ["embody.config.ts"]\n}\n`);
-
-  const importLines = [
-    ...apps.map((a) => `import { ${camel(a)}Plugin } from "@embody/${a}";`),
-    ...customs.map((c) => `import { ${camel(c)}Plugin } from "${c}";`),
-  ];
-  const list = [...apps, ...customs].map((n) => `${camel(n)}Plugin`).join(", ");
-  await put(
-    "embody.config.ts",
-    `/**\n * ${name} deployment.\n *\n${OWNED_BY_YOU}\n *\n` +
-      ` * A deployment is the embody host plus this list — there is no server code to fork.\n` +
-      ` * Enable a catalog app:  pnpm add @embody/<app>, then add its plugin below.\n` +
-      ` * Enable your own:       embody new custom <name> --for deploy/${name}\n */\n` +
-      `import { defineConfig } from "@embody/host";\n${importLines.join("\n")}\n\n` +
-      `export default defineConfig({\n  plugins: [${list}],\n});\n`,
-  );
-  return written;
-}
-
-/** @deprecated Renamed to `newDeployment` (it writes to deploy/, not services/). */
-export const newService = newDeployment;
-
-/**
- * Stamp a customization under `custom/` — the normal way to bend embody to your own
- * process. With `forDeployment` it also does the wiring that is otherwise four manual
- * steps: adds the workspace dependency, and inserts the import + array entry into that
- * deployment's embody.config.ts.
- */
-export async function newCustom(
-  name: string,
-  forDeployment?: string,
-): Promise<string[]> {
-  if (!NAME_RE.test(name)) throw new Error(`Invalid plugin name "${name}"`);
-  const root = await findRepoRoot();
-  const dir = join(root, "custom", name);
+export async function newPlugin(name: string, configPath = "embody.config.ts"): Promise<string[]> {
+  if (!NAME_RE.test(name)) {
+    throw new Error(`Invalid plugin name "${name}" (lowercase letters, digits, hyphens).`);
+  }
+  const root = await findProjectRoot();
+  const dir = join(root, "plugins", name);
   const schema = schemaName(name);
   const ident = camel(name);
   const written: string[] = [];
@@ -194,33 +83,8 @@ export async function newCustom(
   };
 
   await put(
-    "package.json",
-    JSON.stringify(
-      {
-        // Unscoped and private: `@embody/*` is the vendor's npm scope, never yours,
-        // and this package is only ever consumed inside this workspace.
-        name,
-        version: "0.0.0",
-        private: true,
-        type: "module",
-        exports: { ".": "./src/index.ts" },
-        types: "./src/index.ts",
-        scripts: { typecheck: "tsc --noEmit", test: "vitest run" },
-        dependencies: {
-          "@embody/kernel": "workspace:*",
-          "@embody/plugin-sdk": "workspace:*",
-          zod: "^3.24.1",
-        },
-      },
-      null,
-      2,
-    ) + "\n",
-  );
-  await put("tsconfig.json", `{\n  "extends": "../../tsconfig.base.json",\n  "include": ["src"]\n}\n`);
-
-  await put(
     "migrations/0001_init.sql",
-    `-- ${name} — your own schema. Owned by you; embody never migrates it for you.\n` +
+    `-- ${name} — this plugin's own schema. It owns these tables outright.\n` +
       `-- Every table carries org_id and enables RLS, so a bug in application code\n` +
       `-- cannot leak another tenant's rows (Decision D1).\n\n` +
       `create schema if not exists ${schema};\n\n` +
@@ -236,15 +100,15 @@ export async function newCustom(
   );
 
   await put(
-    "src/plugin.ts",
-    `/**\n * ${name} — your customization.\n *\n${OWNED_BY_YOU}\n *\n` +
-      ` * It rides the same plugin SPI a first-party app uses. Enable it from your\n` +
-      ` * deployment's embody.config.ts; nothing under framework/ or catalog/ changes.\n */\n` +
+    "plugin.ts",
+    `/**\n * ${name} — your own plugin.\n *\n` +
+      ` * It rides the same SPI a published plugin uses; the kernel cannot tell the\n` +
+      ` * difference. Nothing in node_modules needs to change for this to take effect.\n */\n` +
       `import { fileURLToPath } from "node:url";\n` +
-      `import type { EmbodyPlugin } from "@embody/kernel";\n\n` +
-      `export const ${ident}MigrationsDir = fileURLToPath(new URL("../migrations", import.meta.url));\n\n` +
+      `import type { EmbodyPlugin } from "@embody/plugin-sdk";\n\n` +
+      `export const ${ident}MigrationsDir = fileURLToPath(new URL("./migrations", import.meta.url));\n\n` +
       `export const ${ident}Plugin: EmbodyPlugin = {\n` +
-      `  id: "${name}",\n  schema: "${schema}",\n  dependsOn: ["core", "crm"],\n` +
+      `  id: "${name}",\n  schema: "${schema}",\n  dependsOn: ["core"],\n` +
       `  // The kernel REJECTS anything you touch that is not declared here.\n` +
       `  capabilities: {\n` +
       `    // hooks: ["crm.deal.beforeUpdate"],\n` +
@@ -263,11 +127,11 @@ export async function newCustom(
       `  //   });\n  // },\n};\n`,
   );
   await put(
-    "src/index.ts",
+    "index.ts",
     `export { ${ident}Plugin, ${ident}MigrationsDir } from "./plugin.ts";\n`,
   );
   await put(
-    "src/plugin.test.ts",
+    "plugin.test.ts",
     `import { describe, it, expect } from "vitest";\nimport { ${ident}Plugin } from "./plugin.ts";\n\n` +
       `describe("${name}", () => {\n` +
       `  it("declares an id and a schema it owns", () => {\n` +
@@ -275,52 +139,44 @@ export async function newCustom(
       `    expect(${ident}Plugin.schema).toBe("${schema}");\n  });\n});\n`,
   );
 
-  if (forDeployment) written.push(...(await wireIntoDeployment(root, name, forDeployment)));
+  written.push(...(await wireIntoConfig(root, name, configPath)));
   return written;
 }
 
 /**
- * Add a custom plugin to a deployment: workspace dependency + import + array entry.
- * Edits the two files in place rather than asking the developer to do it by hand.
+ * Add the plugin's import and array entry to the app's config, in place.
+ *
+ * Edits rather than instructs, because a plugin missing from `plugins: [...]` fails
+ * silently — it simply does not run, with no error to notice.
  */
-async function wireIntoDeployment(
+async function wireIntoConfig(
   root: string,
   pluginName: string,
-  target: string,
+  configPath: string,
 ): Promise<string[]> {
-  // Accept "acme", "deploy/acme" or an absolute path.
-  const rel = target.replace(/^\.?\/?deploy\//, "");
-  const dir = join(root, "deploy", rel);
-  const pkgPath = join(dir, "package.json");
-  const cfgPath = join(dir, "embody.config.ts");
-
+  const cfgPath = join(root, configPath);
   try {
     await access(cfgPath);
   } catch {
     throw new Error(
-      `No deployment at deploy/${rel} (expected ${cfgPath}). ` +
-        `Create one first: embody new deployment ${rel}`,
+      `No config at ${configPath}. An embody app needs one that default-exports\n` +
+        `defineConfig({ plugins: [...] }). Create a project with: npm create embody-app <name>`,
     );
   }
 
-  const pkg = JSON.parse(await readFile(pkgPath, "utf8")) as {
-    dependencies?: Record<string, string>;
-  };
-  pkg.dependencies = Object.fromEntries(
-    Object.entries({ ...pkg.dependencies, [pluginName]: "workspace:*" }).sort(),
-  );
-  await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf8");
-
   const ident = `${camel(pluginName)}Plugin`;
+  const specifier = `./plugins/${pluginName}/index.ts`;
   let cfg = await readFile(cfgPath, "utf8");
-  if (!cfg.includes(`from "${pluginName}"`)) {
-    const importLine = `import { ${ident} } from "${pluginName}";`;
+
+  if (!cfg.includes(`from "${specifier}"`)) {
+    const importLine = `import { ${ident} } from "${specifier}";`;
     const imports = [...cfg.matchAll(/^import .*$/gm)];
     const last = imports.at(-1);
-    if (!last?.index) throw new Error(`Could not find imports in ${cfgPath}`);
+    if (last?.index === undefined) throw new Error(`Could not find imports in ${cfgPath}`);
     const at = last.index + last[0].length;
     cfg = cfg.slice(0, at) + "\n" + importLine + cfg.slice(at);
   }
+
   if (!new RegExp(`\\b${ident}\\b\\s*[,\\]]`).test(cfg)) {
     const list = cfg.match(/plugins:\s*\[([^\]]*)\]/);
     if (!list) throw new Error(`Could not find a \`plugins: [...]\` array in ${cfgPath}`);
@@ -330,7 +186,7 @@ async function wireIntoDeployment(
       `plugins: [${inner ? `${inner.replace(/,\s*$/, "")}, ` : ""}${ident}]`,
     );
   }
-  await writeFile(cfgPath, cfg, "utf8");
 
-  return [pkgPath, cfgPath];
+  await writeFile(cfgPath, cfg, "utf8");
+  return [cfgPath];
 }

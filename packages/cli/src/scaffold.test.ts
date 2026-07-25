@@ -1,25 +1,31 @@
 /**
- * Scaffolding tests. These run against a throwaway workspace in a temp directory, so
- * they exercise the real filesystem writes without touching the repo.
+ * `embody new plugin` against a real project directory.
  *
- * The behaviour worth pinning is the wiring: `new custom --for` must leave a
- * deployment that actually compiles — a valid JS identifier for a kebab-case package
- * name, the import present, and the plugin in the `plugins` array.
+ * The wiring assertions carry the weight: a plugin that exists on disk but is missing
+ * from `plugins: [...]` does nothing at all, and says nothing about it. Generating the
+ * files without enabling them would be the worst of both outcomes.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { newApp, newCustom, newDeployment } from "./scaffold.ts";
+import { newPlugin, findProjectRoot } from "./scaffold.ts";
 
 let root: string;
 let cwd: string;
 
+const CONFIG = `import { defineConfig } from "@embody/host";
+import { crmPlugin } from "@embody/crm";
+
+export default defineConfig({
+  plugins: [crmPlugin],
+});
+`;
+
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "embody-scaffold-"));
-  await writeFile(join(root, "pnpm-workspace.yaml"), "packages:\n  - 'custom/*'\n");
-  await mkdir(join(root, "custom"), { recursive: true });
-  await mkdir(join(root, "deploy"), { recursive: true });
+  await writeFile(join(root, "package.json"), JSON.stringify({ name: "an-app" }));
+  await writeFile(join(root, "embody.config.ts"), CONFIG);
   cwd = process.cwd();
   process.chdir(root);
 });
@@ -29,92 +35,85 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-const readJson = async (p: string) => JSON.parse(await readFile(join(root, p), "utf8"));
+const config = () => readFile(join(root, "embody.config.ts"), "utf8");
 
-describe("newCustom", () => {
-  it("names the package unscoped and private — @embody/* is the vendor's scope", async () => {
-    await newCustom("hipaa-rules");
-    const pkg = await readJson("custom/hipaa-rules/package.json");
-    expect(pkg.name).toBe("hipaa-rules");
-    expect(pkg.private).toBe(true);
-    expect(JSON.stringify(pkg)).not.toContain("@embody/hipaa");
+describe("findProjectRoot", () => {
+  it("finds the nearest package.json, not a workspace file", async () => {
+    // The old implementation required pnpm-workspace.yaml, which assumed your app was
+    // a clone of the embody monorepo. An installed app has no such file.
+    await mkdir(join(root, "src/deep"), { recursive: true });
+    expect(await findProjectRoot(join(root, "src/deep"))).toBe(root);
   });
 
-  it("converts a kebab name into a legal schema and identifier", async () => {
-    await newCustom("hipaa-rules");
-    const plugin = await readFile(join(root, "custom/hipaa-rules/src/plugin.ts"), "utf8");
-    expect(plugin).toContain("export const hipaaRulesPlugin");
-    expect(plugin).toContain('schema: "hipaa_rules"');
-    expect(plugin).toContain('id: "hipaa-rules"');
-    const sql = await readFile(join(root, "custom/hipaa-rules/migrations/0001_init.sql"), "utf8");
-    expect(sql).toContain("create schema if not exists hipaa_rules;");
-  });
-
-  it("rejects a name that is not a legal package name", async () => {
-    await expect(newCustom("Not Valid")).rejects.toThrow(/Invalid plugin name/);
-  });
-
-  it("leaves the plugin disabled when no deployment is given", async () => {
-    const written = await newCustom("standalone");
-    expect(written.every((p) => p.includes("custom/standalone"))).toBe(true);
+  it("explains how to create a project when there is no package.json", async () => {
+    const orphan = await mkdtemp(join(tmpdir(), "embody-orphan-"));
+    await expect(findProjectRoot(orphan)).rejects.toThrow(/npm create embody-app/);
+    await rm(orphan, { recursive: true, force: true });
   });
 });
 
-describe("newCustom --for", () => {
-  it("adds the dependency, the import and the array entry in one step", async () => {
-    await newDeployment("northwind", ["crm"]);
-    await newCustom("hipaa-rules", "deploy/northwind");
-
-    const pkg = await readJson("deploy/northwind/package.json");
-    expect(pkg.dependencies["hipaa-rules"]).toBe("workspace:*");
-
-    const cfg = await readFile(join(root, "deploy/northwind/embody.config.ts"), "utf8");
-    expect(cfg).toContain('import { hipaaRulesPlugin } from "hipaa-rules";');
-    expect(cfg).toMatch(/plugins: \[crmPlugin, hipaaRulesPlugin\]/);
-  });
-
-  it("wires into an empty plugin list without leaving a stray comma", async () => {
-    await newDeployment("bare");
-    await newCustom("only-one", "deploy/bare");
-    const cfg = await readFile(join(root, "deploy/bare/embody.config.ts"), "utf8");
-    expect(cfg).toMatch(/plugins: \[onlyOnePlugin\]/);
-  });
-
-  it("accepts the deployment name with or without the deploy/ prefix", async () => {
-    await newDeployment("northwind");
-    await newCustom("rules-a", "northwind");
-    const cfg = await readFile(join(root, "deploy/northwind/embody.config.ts"), "utf8");
-    expect(cfg).toContain("rulesAPlugin");
-  });
-
-  it("fails clearly when the deployment does not exist", async () => {
-    await expect(newCustom("orphan", "deploy/nope")).rejects.toThrow(
-      /No deployment at deploy\/nope/,
+describe("newPlugin", () => {
+  it("writes the plugin inside the project, not a sibling bucket", async () => {
+    const written = await newPlugin("field-service");
+    expect(written.some((p) => p.endsWith("plugins/field-service/plugin.ts"))).toBe(true);
+    expect(written.some((p) => p.endsWith("plugins/field-service/migrations/0001_init.sql"))).toBe(
+      true,
     );
   });
-});
 
-describe("newDeployment", () => {
-  it("emits `plugins:` and camel-cases hyphenated catalog apps", async () => {
-    await newDeployment("acme", ["crm", "field-service"]);
-    const cfg = await readFile(join(root, "deploy/acme/embody.config.ts"), "utf8");
-    expect(cfg).toContain('import { fieldServicePlugin } from "@embody/field-service";');
+  it("enables the plugin in the config, since an unlisted plugin fails silently", async () => {
+    await newPlugin("field-service");
+    const cfg = await config();
+    expect(cfg).toContain(
+      'import { fieldServicePlugin } from "./plugins/field-service/index.ts";',
+    );
     expect(cfg).toMatch(/plugins: \[crmPlugin, fieldServicePlugin\]/);
-    expect(cfg).not.toContain("apps:");
   });
 
-  it("writes an unscoped, private package", async () => {
-    await newDeployment("acme");
-    const pkg = await readJson("deploy/acme/package.json");
-    expect(pkg.name).toBe("acme-deployment");
-    expect(pkg.private).toBe(true);
+  it("camel-cases hyphenated names into valid identifiers", async () => {
+    await newPlugin("field-service");
+    const src = await readFile(join(root, "plugins/field-service/plugin.ts"), "utf8");
+    expect(src).toContain("export const fieldServicePlugin");
+    // Postgres schemas cannot contain hyphens.
+    expect(src).toContain('schema: "field_service"');
   });
-});
 
-describe("newApp", () => {
-  it("writes into catalog/ and keeps the vendor scope", async () => {
-    await newApp("billing");
-    const pkg = await readJson("catalog/billing/package.json");
-    expect(pkg.name).toBe("@embody/billing");
+  it("imports only the SDK, so a generated plugin obeys the one-package rule", async () => {
+    await newPlugin("billing");
+    const src = await readFile(join(root, "plugins/billing/plugin.ts"), "utf8");
+    expect(src).toContain('from "@embody/plugin-sdk"');
+    expect(src).not.toMatch(/@embody\/(kernel|core|db|host)/);
+  });
+
+  it("generates no workspace: dependencies or repo-relative tsconfig paths", async () => {
+    // Both were artifacts of scaffolding into a clone of this monorepo.
+    const written = await newPlugin("billing");
+    for (const path of written) {
+      const body = await readFile(path, "utf8");
+      expect(body).not.toContain("workspace:*");
+      expect(body).not.toContain("../../tsconfig.base.json");
+    }
+  });
+
+  it("is idempotent about the config when run twice for different plugins", async () => {
+    await newPlugin("billing");
+    await newPlugin("field-service");
+    const cfg = await config();
+    expect(cfg).toMatch(/plugins: \[crmPlugin, billingPlugin, fieldServicePlugin\]/);
+  });
+
+  it("rejects names that are not valid package or schema names", async () => {
+    await expect(newPlugin("Field Service")).rejects.toThrow(/Invalid plugin name/);
+    await expect(newPlugin("9lives")).rejects.toThrow(/Invalid plugin name/);
+  });
+
+  it("refuses to overwrite an existing plugin", async () => {
+    await newPlugin("billing");
+    await expect(newPlugin("billing")).rejects.toThrow(/Refusing to overwrite/);
+  });
+
+  it("fails clearly when the project has no embody config", async () => {
+    await rm(join(root, "embody.config.ts"));
+    await expect(newPlugin("billing")).rejects.toThrow(/No config at embody\.config\.ts/);
   });
 });
