@@ -1,20 +1,70 @@
 /**
  * Proves the agent path end-to-end over a REAL MCP client/server pair (in-memory
- * transport) against a REAL Postgres: an agent lists tools, creates a party + a deal,
- * and finds both via cross-app registry search — all through the same tenant-scoped,
- * RLS-enforced executor a REST call would use.
+ * transport) against a REAL Postgres: an agent lists tools, creates a party and a
+ * second plugin's entity, and finds both via cross-plugin registry search — all
+ * through the same tenant-scoped, RLS-enforced executor a REST call would use.
+ *
+ * The second plugin is a fixture defined below rather than a real one. This package
+ * must not depend on any plugin: plugins depend on the runtime, so a runtime package
+ * reaching back for one would be a circular dependency the moment both are published.
+ * A fixture also states the requirement honestly — what is under test is that ANY
+ * plugin's entities join the graph, not that one particular plugin's do.
  *
  * Requires the docker-compose Postgres. Skips cleanly if unreachable.
  * Run: `pnpm --filter @embody/mcp-server exec vitest run`
  */
+import { randomUUID } from "node:crypto";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createSilentLogger, type Principal } from "@embody/kernel";
+import { createSilentLogger, type EmbodyPlugin, type Principal } from "@embody/kernel";
 import { defineConfig, bootRuntime, type Runtime } from "@embody/host";
 import { createDb } from "@embody/db";
-import { crmPlugin } from "@embody/crm";
+import type { RegistryService } from "@embody/core";
 import { buildMcpServer } from "./index.ts";
+
+/**
+ * A minimal plugin: one MCP tool that writes a registry pointer. It needs no schema
+ * and no migrations, because `core.registry` records source coordinates without a
+ * foreign key to the source row.
+ */
+const fixturePlugin: EmbodyPlugin = {
+  id: "fixture",
+  // Declared but never created: with no `migrations` the kernel never runs a migration
+  // pass for this plugin, so no schema is touched. Same shape as any hook-only plugin.
+  schema: "fixture",
+  dependsOn: ["core"],
+  capabilities: {
+    entities: ["fixture.widget"],
+    services: { consume: ["core.registry"] },
+  },
+
+  registerMcpTools(mcp, ctx) {
+    const registry = ctx.services.get<RegistryService>("core.registry");
+
+    mcp.tool({
+      name: "fixture_create_widget",
+      description: "Create a widget and register it in the cross-plugin entity graph.",
+      input: z.object({ label: z.string().min(1) }),
+      handler: async (input, req) => {
+        req.assert("write", "fixture:widget");
+        return req.tx(async (tx) => {
+          const sourceId = randomUUID();
+          const entityId = await registry.register(tx, {
+            orgId: req.orgId,
+            type: "fixture.widget",
+            sourceSchema: "fixture",
+            sourceTable: "widgets",
+            sourceId,
+            displayLabel: input.label,
+          });
+          return { id: sourceId, entityId, label: input.label };
+        });
+      },
+    });
+  },
+};
 
 const OWNER_URL =
   process.env.DATABASE_URL ?? "postgres://embody:embody@localhost:5432/embody";
@@ -46,7 +96,7 @@ suite("mcp-server agent path (integration)", () => {
 
   beforeAll(async () => {
     runtime = await bootRuntime({
-      config: defineConfig({ plugins: [crmPlugin] }),
+      config: defineConfig({ plugins: [fixturePlugin] }),
       logger: createSilentLogger(),
     });
 
@@ -70,20 +120,15 @@ suite("mcp-server agent path (integration)", () => {
     await runtime?.close();
   });
 
-  it("exposes core + crm tools", async () => {
+  it("exposes core's tools alongside the enabled plugin's", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
     expect(names).toEqual(
-      expect.arrayContaining([
-        "core_create_party",
-        "core_search",
-        "crm_create_deal",
-        "crm_query_deals",
-      ]),
+      expect.arrayContaining(["core_create_party", "core_search", "fixture_create_widget"]),
     );
   });
 
-  it("creates a party + deal and finds both via cross-app search", async () => {
+  it("creates entities in two plugins and finds both via cross-plugin search", async () => {
     const party = textOf(
       await client.callTool({
         name: "core_create_party",
@@ -92,24 +137,19 @@ suite("mcp-server agent path (integration)", () => {
     ) as { id: string; displayName: string };
     expect(party.displayName).toBe("Acme");
 
-    const deal = textOf(
+    const widget = textOf(
       await client.callTool({
-        name: "crm_create_deal",
-        arguments: { title: "Acme expansion", amount: 5000, partyId: party.id },
+        name: "fixture_create_widget",
+        arguments: { label: "Acme expansion" },
       }),
-    ) as { id: string; title: string; stage: string };
-    expect(deal.title).toBe("Acme expansion");
-    expect(deal.stage).toBe("lead");
+    ) as { id: string; entityId: string; label: string };
+    expect(widget.label).toBe("Acme expansion");
 
-    const deals = textOf(
-      await client.callTool({ name: "crm_query_deals", arguments: {} }),
-    ) as { id: string }[];
-    expect(deals.some((d) => d.id === deal.id)).toBe(true);
-
+    // One search spans both plugins' entity types — neither knows about the other.
     const hits = textOf(
       await client.callTool({ name: "core_search", arguments: { query: "Acme" } }),
     ) as { type: string; displayLabel: string }[];
     const types = hits.map((h) => h.type);
-    expect(types).toEqual(expect.arrayContaining(["core.party", "crm.deal"]));
+    expect(types).toEqual(expect.arrayContaining(["core.party", "fixture.widget"]));
   });
 });

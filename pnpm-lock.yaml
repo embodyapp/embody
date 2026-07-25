@@ -262,9 +262,9 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
-      '@embody/crm':
+      '@embody/core':
         specifier: workspace:*
-        version: link:../../plugins/crm
+        version: link:../core
       '@embody/db':
         specifier: workspace:*
         version: link:../db

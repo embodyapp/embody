@@ -17,7 +17,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@embody/crm": "workspace:*",
+    "@embody/core": "workspace:*",
     "@embody/db": "workspace:*"
   }
 }
