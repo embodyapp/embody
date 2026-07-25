@@ -15,24 +15,17 @@
  * Run: `pnpm --filter @embody/crm exec vitest run`
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { createSilentLogger, type EmbodyPlugin, type Principal } from "@embody/kernel";
-import { defineConfig, bootRuntime, makeExecutor, type Runtime } from "@embody/host";
-import { createDb } from "@embody/db";
+import {
+  bootRuntime,
+  createSilentLogger,
+  databaseReachable,
+  defineConfig,
+  makeExecutor,
+  type EmbodyPlugin,
+  type Principal,
+  type Runtime,
+} from "@embody/testing";
 import { crmPlugin, type DealRow } from "./plugin.ts";
-
-const OWNER_URL =
-  process.env.DATABASE_URL ?? "postgres://embody:embody@localhost:5432/embody";
-
-async function reachable(url: string): Promise<boolean> {
-  try {
-    const h = createDb(url, { max: 1 });
-    await h.sql`select 1`;
-    await h.close();
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /** Payloads the veto plugin actually observed, so we can assert what hooks are shown. */
 const seen: Record<string, unknown>[] = [];
@@ -61,7 +54,7 @@ const complianceGate: EmbodyPlugin = {
   },
 };
 
-const canRun = await reachable(OWNER_URL);
+const canRun = await databaseReachable();
 const suite = canRun ? describe : describe.skip;
 
 suite("crm deal writes run the hook chain (integration)", () => {

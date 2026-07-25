@@ -20,8 +20,11 @@
  */
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import type { EmbodyPlugin, KernelContext } from "@embody/kernel";
-import type { RegistryService } from "@embody/core";
+import type {
+  EmbodyPlugin,
+  KernelContext,
+  RegistryService,
+} from "@embody/plugin-sdk";
 
 /** Absolute path to this plugin's SQL migration directory. */
 export const acmeCrmMigrationsDir = fileURLToPath(new URL("../migrations", import.meta.url));

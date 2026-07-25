@@ -10,8 +10,12 @@
  * A hook that throws rolls the transaction back; nothing is persisted.
  */
 import { fileURLToPath } from "node:url";
-import type { EmbodyPlugin, KernelContext } from "@embody/kernel";
-import { defineEntity, type EntityRepository } from "@embody/plugin-sdk";
+import {
+  defineEntity,
+  type EmbodyPlugin,
+  type EntityRepository,
+  type KernelContext,
+} from "@embody/plugin-sdk";
 // Schemas live in a browser-safe leaf module (zod only), so a UI can import the very
 // shapes the server validates against instead of hand-copying them.
 import {

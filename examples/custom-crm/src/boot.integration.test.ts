@@ -5,9 +5,13 @@
  * hook composition — rather than a hand-assembled registry. No database required.
  */
 import { describe, it, expect, beforeAll } from "vitest";
-import { EmbodyKernel, createSilentLogger } from "@embody/kernel";
-import type { BootedKernel, KernelContext } from "@embody/kernel";
-import { corePlugin } from "@embody/core";
+import {
+  EmbodyKernel,
+  corePlugin,
+  createSilentLogger,
+  type BootedKernel,
+  type KernelContext,
+} from "@embody/testing";
 import { crmPlugin } from "@embody/crm";
 import { b2bSaasPlugin } from "embody-plugin-b2b-saas";
 import { acmeCrmPlugin } from "./plugin.ts";

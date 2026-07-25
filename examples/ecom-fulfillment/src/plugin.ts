@@ -10,7 +10,7 @@
  * 5. Registers `ecom:track` CLI subcommand for support agents executing terminal package lookups.
  */
 import { z } from "zod";
-import type { EmbodyPlugin } from "@embody/kernel";
+import type { EmbodyPlugin } from "@embody/plugin-sdk";
 
 export const ecomFulfillmentPlugin: EmbodyPlugin = {
   id: "ecom-fulfillment",

@@ -7,18 +7,20 @@
     "./schemas": "./src/schemas.ts"
   },
   "types": "./src/index.ts",
+  "keywords": [
+    "embody-plugin"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@embody/core": "workspace:*",
-    "@embody/kernel": "workspace:*",
+  "peerDependencies": {
     "@embody/plugin-sdk": "workspace:*",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@embody/db": "workspace:*",
-    "@embody/host": "workspace:*"
+    "@embody/plugin-sdk": "workspace:*",
+    "@embody/testing": "workspace:*",
+    "zod": "^3.24.1"
   }
 }

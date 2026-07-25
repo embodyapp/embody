@@ -10,7 +10,7 @@
  * 5. Registers `b2b:quote` CLI subcommand for terminal pricing calculations.
  */
 import { z } from "zod";
-import type { EmbodyPlugin } from "@embody/kernel";
+import type { EmbodyPlugin } from "@embody/plugin-sdk";
 
 export const b2bSaasPlugin: EmbodyPlugin = {
   id: "b2b-saas",

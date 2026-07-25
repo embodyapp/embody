@@ -14,26 +14,18 @@
  * Requires the docker-compose Postgres. Skips cleanly if unreachable.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { createSilentLogger, type Principal } from "@embody/kernel";
-import { defineConfig, bootRuntime, makeExecutor, type Runtime } from "@embody/host";
-import { createDb } from "@embody/db";
+import {
+  bootRuntime,
+  createSilentLogger,
+  databaseReachable,
+  defineConfig,
+  makeExecutor,
+  type Principal,
+  type Runtime,
+} from "@embody/testing";
 import { crmPlugin } from "@embody/crm";
 import { b2bSaasPlugin } from "embody-plugin-b2b-saas";
 import { acmeCrmPlugin } from "./plugin.ts";
-
-const OWNER_URL =
-  process.env.DATABASE_URL ?? "postgres://embody:embody@localhost:5432/embody";
-
-async function reachable(url: string): Promise<boolean> {
-  try {
-    const h = createDb(url, { max: 1 });
-    await h.sql`select 1`;
-    await h.close();
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 interface DealRow {
   id: string;
@@ -41,7 +33,7 @@ interface DealRow {
   custom_fields: Record<string, unknown>;
 }
 
-const canRun = await reachable(OWNER_URL);
+const canRun = await databaseReachable();
 const suite = canRun ? describe : describe.skip;
 
 suite("acme-crm gates a real write (integration)", () => {

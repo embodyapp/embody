@@ -14,16 +14,14 @@
   },
   "dependencies": {
     "@embody/cli": "workspace:*",
-    "@embody/core": "workspace:*",
     "@embody/crm": "workspace:*",
     "@embody/host": "workspace:*",
-    "@embody/kernel": "workspace:*",
     "@embody/plugin-sdk": "workspace:*",
     "embody-plugin-b2b-saas": "workspace:*",
     "embody-plugin-ecom-fulfillment": "workspace:*",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@embody/db": "workspace:*"
+    "@embody/testing": "workspace:*"
   }
 }

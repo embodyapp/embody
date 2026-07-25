@@ -22,15 +22,15 @@
  * Run: `pnpm --filter custom-crm exec vitest run`
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { createSilentLogger } from "@embody/kernel";
 import {
   bootRuntime,
+  createDevIdentity,
+  createSilentLogger,
+  databaseReachable,
   defineConfig,
   mountApi,
-  createDevIdentity,
   type Runtime,
-} from "@embody/host";
-import { createDb } from "@embody/db";
+} from "@embody/testing";
 import { crmPlugin } from "@embody/crm";
 import { b2bSaasPlugin } from "embody-plugin-b2b-saas";
 import { ecomFulfillmentPlugin } from "embody-plugin-ecom-fulfillment";
@@ -40,26 +40,12 @@ const config = defineConfig({
   plugins: [crmPlugin, b2bSaasPlugin, ecomFulfillmentPlugin],
 });
 
-const OWNER_URL =
-  process.env.DATABASE_URL ?? "postgres://embody:embody@localhost:5432/embody";
-
-async function reachable(url: string): Promise<boolean> {
-  try {
-    const h = createDb(url, { max: 1 });
-    await h.sql`select 1`;
-    await h.close();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 interface Ids {
   orgId: string;
   userId: string;
 }
 
-const canRun = await reachable(OWNER_URL);
+const canRun = await databaseReachable();
 const suite = canRun ? describe : describe.skip;
 
 suite("the /api tool bridge (integration)", () => {
