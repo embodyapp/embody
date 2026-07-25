@@ -5,8 +5,9 @@ packages:
   # ── published to npm ────────────────────────────────────────────────────────
   - "packages/*" # the runtime and the SPI: plugin-sdk, kernel, core, db, auth, host, cli, mcp-server
   - "plugins/*" # first-party plugins, built on the public SPI exactly as a stranger would
-  - "framework/*" # (transitional) react — moves to ui/ in the next step
+  - "ui/*" # browser packages, on their own version line — not part of the embody package
   # ── never published ─────────────────────────────────────────────────────────
+  - "demo/*" # showcase apps, to look at rather than copy
   - "examples/*" # reference code to copy: the canonical app, example plugins
   - "custom/*" # (transitional) folds into examples/custom-crm
   - "deploy/*" # (transitional) folds into examples/custom-crm

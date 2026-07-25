@@ -74,6 +74,46 @@ importers:
         specifier: workspace:*
         version: link:../../examples/b2b-saas
 
+  demo/demo-ui:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.114.0
+        version: 0.114.0(zod@3.25.76)
+      '@embody/crm':
+        specifier: workspace:*
+        version: link:../../plugins/crm
+      '@embody/react':
+        specifier: workspace:*
+        version: link:../../ui/react
+      lucide-react:
+        specifier: ^1.26.0
+        version: 1.26.0(react@19.2.8)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.8(react@19.2.8)
+      react-router-dom:
+        specifier: ^7.1.0
+        version: 7.18.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.17)
+      '@vitejs/plugin-react':
+        specifier: ^4.3.0
+        version: 4.7.0(vite@6.4.3(@types/node@22.20.1)(lightningcss@1.33.0)(tsx@4.23.1))
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vite:
+        specifier: ^6.0.0
+        version: 6.4.3(@types/node@22.20.1)(lightningcss@1.33.0)(tsx@4.23.1)
+
   deploy/acme:
     dependencies:
       '@embody/cli':
@@ -112,46 +152,6 @@ importers:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
-
-  examples/demo-ui:
-    dependencies:
-      '@anthropic-ai/sdk':
-        specifier: ^0.114.0
-        version: 0.114.0(zod@3.25.76)
-      '@embody/crm':
-        specifier: workspace:*
-        version: link:../../plugins/crm
-      '@embody/react':
-        specifier: workspace:*
-        version: link:../../framework/react
-      lucide-react:
-        specifier: ^1.26.0
-        version: 1.26.0(react@19.2.8)
-      react:
-        specifier: ^19.0.0
-        version: 19.2.8
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.8(react@19.2.8)
-      react-router-dom:
-        specifier: ^7.1.0
-        version: 7.18.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-    devDependencies:
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.2.17
-      '@types/react-dom':
-        specifier: ^19.0.0
-        version: 19.2.3(@types/react@19.2.17)
-      '@vitejs/plugin-react':
-        specifier: ^4.3.0
-        version: 4.7.0(vite@6.4.3(@types/node@22.20.1)(lightningcss@1.33.0)(tsx@4.23.1))
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-      vite:
-        specifier: ^6.0.0
-        version: 6.4.3(@types/node@22.20.1)(lightningcss@1.33.0)(tsx@4.23.1)
 
   examples/ecom-fulfillment:
     dependencies:
@@ -198,24 +198,6 @@ importers:
       '@embody/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
-
-  framework/react:
-    devDependencies:
-      '@testing-library/react':
-        specifier: ^16.1.0
-        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@types/react':
-        specifier: ^19.2.17
-        version: 19.2.17
-      happy-dom:
-        specifier: ^15.11.7
-        version: 15.11.7
-      react:
-        specifier: ^19.2.8
-        version: 19.2.8
-      react-dom:
-        specifier: ^19.2.8
-        version: 19.2.8(react@19.2.8)
 
   packages/auth:
     dependencies:
@@ -379,6 +361,24 @@ importers:
       '@embody/host':
         specifier: workspace:*
         version: link:../../packages/host
+
+  ui/react:
+    devDependencies:
+      '@testing-library/react':
+        specifier: ^16.1.0
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@types/react':
+        specifier: ^19.2.17
+        version: 19.2.17
+      happy-dom:
+        specifier: ^15.11.7
+        version: 15.11.7
+      react:
+        specifier: ^19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.8
+        version: 19.2.8(react@19.2.8)
 
 packages:
 
