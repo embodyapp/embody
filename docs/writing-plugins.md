@@ -2,7 +2,7 @@
 
 This tutorial walks you step-by-step through writing your own custom plugin for **Embody**!
 
-Whether you are building a first-party app in `catalog/` or a custom company feature in `custom/my-plugin`, every feature in Embody is built using the exact same **`EmbodyPlugin`** contract.
+Whether you are building a plugin to publish or one that stays in your own app, every feature in Embody is built using the exact same **`EmbodyPlugin`** contract.
 
 ---
 

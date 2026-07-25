@@ -2,6 +2,7 @@
   "name": "@embody/crm",
   "version": "0.0.0",
   "type": "module",
+  "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
     "./schemas": "./src/schemas.ts"

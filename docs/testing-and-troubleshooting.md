@@ -69,8 +69,8 @@ const { result } = await res.json();
 
 Two levels are worth keeping separate:
 
-- **No database.** Hand-build a fake `Runtime` whose `booted.mcp.tools` are real Zod schemas with handlers that throw the failures you care about, and never touch `req.tx`. See `framework/host/src/api.test.ts` — it covers the whole request path in milliseconds.
-- **Real Postgres.** Only for what a fake cannot show: RLS, RBAC and genuine vetoes over HTTP. See `examples/service-crm/src/api.integration.test.ts`.
+- **No database.** Hand-build a fake `Runtime` whose `booted.mcp.tools` are real Zod schemas with handlers that throw the failures you care about, and never touch `req.tx`. See `packages/host/src/api.test.ts` — it covers the whole request path in milliseconds.
+- **Real Postgres.** Only for what a fake cannot show: RLS, RBAC and genuine vetoes over HTTP. See `examples/custom-crm/src/api.integration.test.ts`.
 
 ### Testing React hooks
 
@@ -87,7 +87,7 @@ import { cleanup } from "@testing-library/react";
 afterEach(cleanup);
 ```
 
-Most hook behaviour is really cache behaviour, and is covered without React at all in `framework/react/src/cache.test.ts`. Keep the rendered tests for what only React can show — StrictMode's double mount, and optimistic rollback.
+Most hook behaviour is really cache behaviour, and is covered without React at all in `ui/react/src/cache.test.ts`. Keep the rendered tests for what only React can show — StrictMode's double mount, and optimistic rollback.
 
 ---
 

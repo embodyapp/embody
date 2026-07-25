@@ -99,7 +99,7 @@ registerMcpResources(mcp, ctx) {
 
 ## 🖥️ Running the MCP Server Process
 
-Embody includes a universal stdio MCP server package located in [`framework/mcp-server`](file:///Users/nimrodfeldman/playground/embody/framework/mcp-server).
+Embody includes a universal stdio MCP server package located in [`packages/mcp-server`](file:///Users/nimrodfeldman/playground/embody/packages/mcp-server).
 
 Run the stdio MCP server runner filtered by plugins:
 

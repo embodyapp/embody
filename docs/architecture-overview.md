@@ -85,7 +85,7 @@ Plugins extend the system using 4 interception mechanisms:
 > **Capability Manifests**: Every plugin declares what entities, services, hooks, and events it touches. The kernel sandboxes plugins and rejects unauthorized calls at boot time!
 
 ### D8. Customization Without Forking
-- Companies can build custom plugins inside the `custom/` directory.
+- Companies can build their own plugins, in their own repository.
 - Companies can also add dynamic fields to existing entities using GIN-indexed `custom_fields` (JSONB) without writing database migrations.
 - Custom code stays separate from upstream code, allowing smooth version updates!
 

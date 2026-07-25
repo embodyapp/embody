@@ -2,6 +2,7 @@
   "name": "create-embody-app",
   "version": "0.0.0",
   "type": "module",
+  "license": "MIT",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -27,7 +28,11 @@
       "create-embody-app": "./dist/bin.js"
     }
   },
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nimrod4278/embody.git",

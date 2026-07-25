@@ -12,7 +12,7 @@ Imagine you are building software for a growing company. Usually, companies buy 
 1. **Tiny Core (Microkernel)**: A lightweight engine (`@embody/kernel`) that manages security, database connections, background tasks, and AI integrations, but contains zero specific business logic.
 2. **Modular Plugins**: Every business feature (like CRM, ERP, or Billing) is built as a plug-in module.
 3. **Unified System of Record**: Customers, products, and users live in one shared place (`@embody/core`), while individual apps attach their own custom details ("facets").
-4. **No Forking Required**: Companies can write their own custom plugins in the `custom/` directory or add custom fields without ever editing or forking the core codebase.
+4. **No Forking Required**: Companies can write their own plugins or add custom fields without ever editing or forking the core codebase.
 
 ---
 
@@ -70,45 +70,78 @@ pnpm test
 
 ## 🗺️ Project Directory Map
 
-The top level is split by **ownership**. Upgrades replace the upstream buckets wholesale
-and never touch yours — see [OWNERSHIP.md](OWNERSHIP.md).
+> This is the layout of **this repository** — the one that publishes embody. You do not
+> need it to build an app; see [Build your own app](#-build-your-own-app) below.
+
+Each bucket answers one question: *does this ship, and to whom?* See
+[PLUGINS.md](PLUGINS.md).
 
 ```text
 embody/
 │
-├── framework/          ⚙️  UPSTREAM — the runtime. Do not edit.
+├── packages/           📦  Published as @embody/*. The runtime and the SPI.
+│   ├── plugin-sdk/        @embody/plugin-sdk  THE public contract a plugin builds on
 │   ├── kernel/            @embody/kernel      Microkernel: lifecycle, DI, hooks, capabilities
 │   ├── core/              @embody/core        Shared entities, parties, registry
 │   ├── db/                @embody/db          Drizzle ORM, RLS helpers, migration runner
 │   ├── auth/              @embody/auth        Principals, RBAC, req.assert() checks
 │   ├── host/              @embody/host        HTTP engine + the /api tool bridge
-│   ├── react/             @embody/react       React hooks over that bridge
 │   ├── cli/               @embody/cli         The `embody` binary
 │   ├── mcp-server/        @embody/mcp-server  Stdio MCP runner for AI agents
-│   └── plugin-sdk/        @embody/plugin-sdk  defineEntity: runs hooks around real writes
+│   ├── testing/           @embody/testing     Boot a real runtime in your plugin's tests
+│   └── create-embody-app/ create-embody-app   The project generator
 │
-├── catalog/            📦  UPSTREAM — first-party apps you can enable.
-│   ├── crm/               @embody/crm               Deals, contact profiles
-│   ├── b2b-saas/          @embody/b2b-saas          Enterprise B2B SaaS rules
-│   └── ecom-fulfillment/  @embody/ecom-fulfillment  E-commerce fulfillment
+├── plugins/            📦  Published. First-party plugins, on the PUBLIC SPI.
+│   └── crm/               @embody/crm         Deals, contact profiles
 │
-├── examples/           📖  UPSTREAM — copy these, don't edit them.
-│   ├── service-crm/       A reference deployment (catalog apps only)
+├── ui/                 📦  Published, separate version line. Not part of embody itself.
+│   └── react/             @embody/react       Hooks over the /api bridge
+│
+├── demo/               🖥️  Never published. Look at it.
 │   └── demo-ui/           The demo SPA: two full CRMs + AI copilot + a live page
 │
-├── custom/             🛠️  YOURS — your plugins.
-│   └── acme-crm/          Worked example: a HIPAA gate on deal closes
-│
-└── deploy/             🚀  YOURS — your deployables.
-    └── acme/              Worked example: catalog apps + acme-crm
+└── examples/           📖  Never published. Copy it.
+    ├── custom-crm/        A complete app: config + its own plugin + its own schema
+    ├── b2b-saas/          A plugin written the way a community plugin is
+    └── ecom-fulfillment/  Another one
 ```
 
-Two commands take you from a clone to your own customized instance:
+`plugins/crm` depends on `@embody/plugin-sdk` by version range rather than by workspace
+link, so it continuously proves the public SPI is enough to build a real plugin.
+
+---
+
+## 🧩 Build your own app
+
+You never clone this repo to use embody. It comes from npm:
 
 ```bash
-embody new deployment acme --apps crm,b2b-saas
-embody new custom hipaa-rules --for deploy/acme
+npm create embody-app my-crm
 ```
+
+That gives you a project you own outright — a config listing which plugins run, your own
+plugin, and your own schema:
+
+```text
+my-crm/
+├── embody.config.ts      which plugins run
+├── src/plugin.ts         your rules, tools, extra fields
+└── migrations/           your schema
+```
+
+Add another plugin and enable it in one step:
+
+```bash
+npx embody new plugin compliance
+```
+
+Check your wiring — most importantly, that every plugin shares one copy of the SDK:
+
+```bash
+npx embody doctor
+```
+
+Upgrade with `npm update`. There is no fork to maintain and nothing to merge.
 
 ---
 
@@ -121,6 +154,8 @@ We have created comprehensive, step-by-step guides for developers of all experie
 | 🚀 [**Getting Started Guide**](file:///Users/nimrodfeldman/playground/embody/docs/getting-started.md) | Detailed installation, Docker setup, running local services, and running CLI commands. |
 | 🏗️ [**Architecture Overview**](file:///Users/nimrodfeldman/playground/embody/docs/architecture-overview.md) | Beginners' deep-dive into the 8 design decisions, plugin lifecycle, and data model. |
 | 📁 [**Directory Structure**](file:///Users/nimrodfeldman/playground/embody/docs/directory-structure.md) | Folder-by-folder breakdown of every file, package, app, and service in the repository. |
+| 🧩 [**Plugins: the contract**](file:///Users/nimrodfeldman/playground/embody/PLUGINS.md) | What publishes, the one-package SPI rule, peer dependencies, and publishing a plugin others can install. |
+| 📦 [**Writing a Plugin Others Can Use**](file:///Users/nimrodfeldman/playground/embody/docs/writing-a-plugin-others-can-use.md) | Packaging, peer dependencies, schema naming, and the pre-publish checks that catch a broken plugin. |
 | 🧩 [**Writing Plugins**](file:///Users/nimrodfeldman/playground/embody/docs/writing-plugins.md) | Complete step-by-step tutorial on building a custom plugin from scratch. |
 | 🪝 [**Middleware & Hooks**](file:///Users/nimrodfeldman/playground/embody/docs/middleware-and-hooks.md) | How to write HTTP middlewares, vetoable synchronous hooks, and post-commit events. |
 | 💻 [**CLI Guide**](file:///Users/nimrodfeldman/playground/embody/docs/cli-guide.md) | Complete guide for running the `embody` CLI binary, invoking tools, seeding data, and scaffolding apps. |

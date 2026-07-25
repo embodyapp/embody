@@ -1,12 +1,16 @@
-# examples/ — 📖 UPSTREAM. Copy these; don't edit them.
+# examples/ — 📖 never published
 
-- `service-crm` — a reference deployment enabling catalog apps only.
-- `demo-ui` — the demo SPA (two CRMs), served by its own Vite dev server.
+Reference code to copy.
 
-These are here to be read and copied. Your own deployment belongs in `deploy/`:
+- `custom-crm` — a complete app: its config, its own plugin, its own schema. This is the
+  shape `npm create embody-app` generates, and the two are pinned together by a test.
+- `b2b-saas`, `ecom-fulfillment` — two plugins written the way a community plugin is
+  written, down to the `embody-plugin-*` name and the peer dependencies.
+
+Your own app does not belong here. Create one anywhere you like:
 
 ```bash
-embody new deployment <yours> --apps crm,b2b-saas
+npm create embody-app my-crm
 ```
 
-Editing anything here conflicts on upgrade. See [../OWNERSHIP.md](../OWNERSHIP.md).
+See [../PLUGINS.md](../PLUGINS.md).

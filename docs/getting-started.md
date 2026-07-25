@@ -132,7 +132,7 @@ pnpm typecheck
 
 ## 💻 Using the `embody` CLI
 
-Embody includes a command-line interface binary located in `framework/cli`.
+Embody includes a command-line interface binary located in `packages/cli`.
 
 ### Build the Monorepo Packages First
 ```bash

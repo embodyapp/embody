@@ -6,7 +6,7 @@ with `useToolQuery` / `useToolMutation`. All four get the same tenant scoping (R
 same authorization, and the same vetoable hook chain.
 
 The practical consequence: a rule another plugin registered — including a company's own,
-under `custom/` — refuses a write from your UI **without your UI containing any code for
+you wrote — refuses a write from your UI **without your UI containing any code for
 it**. You do not re-implement business rules in the browser, and you cannot accidentally
 bypass them.
 
@@ -68,7 +68,7 @@ function Deals() {
 }
 ```
 
-A working example is `examples/demo-ui/src/live/` — the "Live data" page in the B2B CRM.
+A working example is `demo/demo-ui/src/live/` — the "Live data" page in the B2B CRM.
 See §7 to run it.
 
 ---
@@ -155,7 +155,7 @@ without parsing the sentence:
 
 `HookRegistry.run` wraps **every** throw from a hook handler in `HookVetoError`, carrying
 the original on `cause`. That happens in the kernel, not in plugins — a design that
-required customers to `throw new HookVetoError(...)` in their own `custom/` code to get a
+required customers to `throw new HookVetoError(...)` in their own plugin code to get a
 correct HTTP status would silently produce 500s in every real deployment.
 
 `toHttpError` then unwraps: if the cause is an `AuthorizationError`, `EntityNotFoundError`
@@ -273,12 +273,12 @@ startHost({ config, identity: myOidcProvider });
 
 - Bridge unit tests need no database: build a fake `Runtime` whose `booted.mcp.tools` are
   real Zod schemas with handlers that throw the interesting errors, and drive it with
-  `app.fetch(new Request(...))` — no socket, no port. See `framework/host/src/api.test.ts`.
+  `app.fetch(new Request(...))` — no socket, no port. See `packages/host/src/api.test.ts`.
 - The properties that need Postgres — RLS, RBAC and real vetoes over HTTP — are in
-  `examples/service-crm/src/api.integration.test.ts`.
+  `examples/custom-crm/src/api.integration.test.ts`.
 - Hook tests use `@testing-library/react` with a `// @vitest-environment happy-dom`
   docblock pragma (this repo has no vitest config files). Most behaviour is covered
-  without React in `framework/react/src/cache.test.ts`.
+  without React in `ui/react/src/cache.test.ts`.
 
 ---
 
@@ -304,11 +304,11 @@ Open **http://localhost:5173/b2b/live**, sign in with the ids `seed` printed, an
 "Create 3 demo deals". Then move **Brightpath Health** to *closed won* and watch four
 things happen in order:
 
-1. **409 veto** from `catalog/b2b-saas` — over $50k without a security review. The
+1. **409 veto** from `examples/b2b-saas` — over $50k without a security review. The
    optimistic row snaps back.
 2. Click **Security review** → succeeds. The jsonb merge preserves `industry_vertical`,
    which the caller never re-sent.
-3. Retry → **409 veto** from `custom/acme-crm` — a *customer's* rule, reaching the browser
+3. Retry → **409 veto** from `examples/custom-crm` — a *customer's* rule, reaching the browser
    through a page that contains no code for it.
 4. Click **HIPAA review** → retry → closed won.
 

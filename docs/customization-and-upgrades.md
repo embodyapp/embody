@@ -6,10 +6,10 @@ A major design goal of **Embody** is allowing companies to heavily customize bus
 
 ## 🏢 Real-World Scenario: B2B SaaS vs. E-Commerce Customization
 
-To see how Embody adapts to completely different business models, examine the two fully-functional reference app plugins included in the codebase under `catalog/`:
+To see how Embody adapts to completely different business models, examine the two fully-functional reference plugins under `examples/`:
 
-1. [**`catalog/b2b-saas`**](file:///Users/nimrodfeldman/playground/embody/catalog/b2b-saas/src/plugin.ts): Enterprise B2B SaaS CRM customization.
-2. [**`catalog/ecom-fulfillment`**](file:///Users/nimrodfeldman/playground/embody/catalog/ecom-fulfillment/src/plugin.ts): E-Commerce Retailer CRM customization.
+1. [**`examples/b2b-saas`**](file:///Users/nimrodfeldman/playground/embody/examples/b2b-saas/src/plugin.ts): Enterprise B2B SaaS CRM customization.
+2. [**`examples/ecom-fulfillment`**](file:///Users/nimrodfeldman/playground/embody/examples/ecom-fulfillment/src/plugin.ts): E-Commerce Retailer CRM customization.
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -32,7 +32,7 @@ To see how Embody adapts to completely different business models, examine the tw
 
 ---
 
-### Scenario A: B2B SaaS Company ([`catalog/b2b-saas/src/plugin.ts`](file:///Users/nimrodfeldman/playground/embody/catalog/b2b-saas/src/plugin.ts))
+### Scenario A: B2B SaaS Company ([`examples/b2b-saas/src/plugin.ts`](file:///Users/nimrodfeldman/playground/embody/examples/b2b-saas/src/plugin.ts))
 
 A B2B SaaS company sells enterprise software subscriptions to mid-market and enterprise businesses.
 
@@ -59,7 +59,7 @@ await tx`
 `;
 ```
 
-#### 2. Runnable Plugin Code ([`catalog/b2b-saas/src/plugin.ts`](file:///Users/nimrodfeldman/playground/embody/catalog/b2b-saas/src/plugin.ts))
+#### 2. Runnable Plugin Code ([`examples/b2b-saas/src/plugin.ts`](file:///Users/nimrodfeldman/playground/embody/examples/b2b-saas/src/plugin.ts))
 The B2B company exports `b2bSaasPlugin` to enforce security review rules and expose ARR calculation AI tools:
 
 ```typescript
@@ -107,7 +107,7 @@ export const b2bSaasPlugin: EmbodyPlugin = {
 
 ---
 
-### Scenario B: E-Commerce Retailer ([`catalog/ecom-fulfillment/src/plugin.ts`](file:///Users/nimrodfeldman/playground/embody/catalog/ecom-fulfillment/src/plugin.ts))
+### Scenario B: E-Commerce Retailer ([`examples/ecom-fulfillment/src/plugin.ts`](file:///Users/nimrodfeldman/playground/embody/examples/ecom-fulfillment/src/plugin.ts))
 
 An E-Commerce company sells consumer goods to thousands of online shoppers.
 
@@ -134,7 +134,7 @@ await tx`
 `;
 ```
 
-#### 2. Runnable Plugin Code ([`catalog/ecom-fulfillment/src/plugin.ts`](file:///Users/nimrodfeldman/playground/embody/catalog/ecom-fulfillment/src/plugin.ts))
+#### 2. Runnable Plugin Code ([`examples/ecom-fulfillment/src/plugin.ts`](file:///Users/nimrodfeldman/playground/embody/examples/ecom-fulfillment/src/plugin.ts))
 The E-Commerce company exports `ecomFulfillmentPlugin` to auto-apply VIP discounts and trigger warehouse dispatches:
 
 ```typescript
@@ -193,7 +193,7 @@ export const ecomFulfillmentPlugin: EmbodyPlugin = {
 
 ## 📊 Summary Comparison Matrix
 
-| Aspect | 🏢 B2B SaaS Company ([`catalog/b2b-saas`](file:///Users/nimrodfeldman/playground/embody/catalog/b2b-saas/src/plugin.ts)) | 🛒 E-Commerce Retailer ([`catalog/ecom-fulfillment`](file:///Users/nimrodfeldman/playground/embody/catalog/ecom-fulfillment/src/plugin.ts)) |
+| Aspect | 🏢 B2B SaaS Company ([`examples/b2b-saas`](file:///Users/nimrodfeldman/playground/embody/examples/b2b-saas/src/plugin.ts)) | 🛒 E-Commerce Retailer ([`examples/ecom-fulfillment`](file:///Users/nimrodfeldman/playground/embody/examples/ecom-fulfillment/src/plugin.ts)) |
 | :--- | :--- | :--- |
 | **Shared Party (`core.parties`)** | Represents an **Enterprise Account** (e.g. Acme Corp) | Represents an **Individual Shopper** (e.g. Jane Doe) |
 | **CRM Deal Entity** | Represents a **Multi-Month Sales Opportunity** | Represents a **Single Shopping Cart Order** |
@@ -222,7 +222,7 @@ Embody provides two customization tiers that stay completely separate from upstr
                                │ Stable SemVer SPI Contract
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Customer Workspace (custom/)             │
+│                    Your app (your repository)               │
 │   (Custom Plugins, JSONB Custom Fields, Custom Workflows)   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -260,49 +260,54 @@ WHERE org_id = '...'::uuid
 
 ---
 
-## 🔌 Tier 2: Custom Plugins in the `custom/` Workspace
+## 🔌 Tier 2: Your Own Plugin
 
 When you need full power (new Postgres tables, vetoable rules, DI services, MCP tools,
-CLI commands), write a plugin under **`custom/`** — a directory upstream never writes to.
+CLI commands), write a plugin. It lives in your own project — there is no vendor
+directory to put it in, because embody arrives from npm.
 
-One command creates it *and* wires it into your deployment:
+One command creates it *and* enables it:
 
 ```bash
-embody new custom acme-logistics --for deploy/acme
+npx embody new plugin acme-logistics
 ```
 
 ```text
-custom/
-└── acme-logistics/
-    ├── package.json          # private, UNSCOPED — @embody/* is the vendor's scope
-    ├── src/
-    │   ├── plugin.ts
-    │   └── plugin.test.ts
-    └── migrations/
-        └── 0001_init.sql     # your own schema, with RLS
+my-crm/
+├── embody.config.ts          # edited for you: import + plugins entry
+└── plugins/
+    └── acme-logistics/
+        ├── plugin.ts
+        ├── index.ts
+        ├── plugin.test.ts
+        └── migrations/
+            └── 0001_init.sql # your own schema, with RLS
 ```
+
+The generated plugin imports from `@embody/plugin-sdk` and nothing else. That is the
+whole SPI — see [PLUGINS.md](../PLUGINS.md).
 
 ### Enabling it
 
-`--for` already did this, but here is what it wrote to
-`deploy/acme/embody.config.ts` — **your** file, in **your** directory:
+`embody new plugin` already did this, but here is what it wrote to your
+`embody.config.ts` — the only file that decides what runs:
 
 ```typescript
 import { defineConfig } from "@embody/host";
 import { crmPlugin } from "@embody/crm";
-import { acmeLogisticsPlugin } from "acme-logistics";
+import { acmeLogisticsPlugin } from "./plugins/acme-logistics/index.ts";
 
 export default defineConfig({
   plugins: [
     crmPlugin,
-    acmeLogisticsPlugin, // mounted alongside first-party apps
+    acmeLogisticsPlugin, // mounted alongside published plugins; the kernel sees no difference
   ],
 });
 ```
 
-Note where this file lives. If enabling your plugin required editing a file that ships
-from upstream, every upgrade would conflict on it — and the promise below would be
-false. Deployments belong in `deploy/`, which is yours. See [OWNERSHIP.md](../OWNERSHIP.md).
+Note where this file lives: your repository. Enabling a plugin never touches anything
+inside `node_modules`, which is why an upgrade cannot disturb it. See
+[PLUGINS.md](../PLUGINS.md).
 
 ### Your rules gate real writes
 
@@ -315,30 +320,32 @@ tenant transaction**, having first merged your patch onto the stored row:
 - it applies to every caller: AI agents, the CLI, and a UI over the `/api` bridge;
 - your hook receives the transaction (`ctx.tx`) and may query before deciding.
 
-`custom/acme-crm` is a worked example, with `write-path.integration.test.ts` proving
+`examples/custom-crm` is a worked example, with `write-path.integration.test.ts` proving
 against a real Postgres that a rejected close leaves the row untouched.
 
 ---
 
-## 🔄 Upgrade Strategy (Pulling Upstream Updates)
+## 🔄 Upgrading
 
-Upgrades are safe for a structural reason, not a stylistic one: **`git merge` can only
-conflict on files you have edited**, and your code lives in directories upstream never
-writes to (`custom/`, `deploy/`).
+There is no merge, because there is no copy of embody in your repository to merge into.
+The runtime lives in `node_modules`:
 
 ```bash
-git remote add upstream <embody repo url>   # once
-git fetch upstream
-embody doctor                                # ← before you merge
-git merge upstream/main
-pnpm --filter <yours>-deployment migrate
+npm update @embody/crm
+npx embody doctor
+npm run migrate
 ```
 
-1. **`embody doctor`** lists every file you have changed under `framework/`,
-   `catalog/` or `examples/` — committed or not — and exits non-zero. Those are exactly
-   the files a merge can conflict on. Clean doctor, clean merge. If it can't find an
-   upstream ref it says so and checks nothing, rather than reporting a false pass.
-2. **Migrations** are topologically sorted on boot (`core` first, then apps, then your
-   plugins), so your schema changes apply after the ones they depend on.
-3. **Zero conflicts** — provided doctor is clean. If it isn't, it tells you which file
-   to move into `custom/` or contribute upstream.
+1. **Nothing happens to your database when you run `npm update`.** The new version's
+   migrations apply the next time your app boots, inside an advisory lock, topologically
+   sorted so `core` runs before plugins that depend on it and yours run last.
+2. **Migrations only roll forward.** Installing an older version leaves the newer schema
+   in place — the package downgrades, the database does not. If you would rather a
+   dependency bump never changed schema implicitly, make
+   `embody-host ./embody.config.ts --mode migrate-only` an explicit deploy step.
+3. **`embody doctor`** checks the wiring that a version bump can break: that every
+   plugin still shares one `@embody/plugin-sdk` instance, and that no two plugins claim
+   the same Postgres schema.
+
+Your own code is never involved in an upgrade. It was never in the same repository as
+the thing being upgraded.

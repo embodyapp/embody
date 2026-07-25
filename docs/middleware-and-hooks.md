@@ -18,7 +18,7 @@ Embody provides three distinct extension mechanisms for intercepting requests, m
 > need to name yourself in the text. See [React Hooks & the HTTP Bridge](./react-hooks.md#3-errors-the-taxonomy).
 >
 > You never need to `throw new HookVetoError(...)` yourself — a plain `throw new Error("…")`
-> is typed for you, including from a plugin under `custom/`.
+> is typed for you, including from a plugin you wrote yourself.
 
 ---
 

@@ -2,7 +2,7 @@
 
 The **`embody` CLI binary** (`@embody/cli`) serves a dual purpose:
 1. **Agent-First Tool Execution**: Allows AI agents and terminal scripts to discover tools, run database queries, and invoke plugin actions directly as JSON outputs.
-2. **Developer & Operational Workflows**: Provides commands to start web servers, run database migrations, seed test data, scaffold new app packages, and execute custom plugin CLI subcommands.
+2. **Developer & Operational Workflows**: Provides commands to start web servers, run database migrations, seed test data, scaffold plugins, and execute plugin-contributed CLI subcommands.
 
 ---
 
@@ -61,7 +61,7 @@ pnpm embody call crm_create_deal \
 Connect AI assistants (Claude Desktop, Cursor, Antigravity) via stdio:
 
 ```bash
-pnpm embody mcp -c ./examples/service-crm/embody.config.ts
+pnpm embody mcp -c ./examples/custom-crm/embody.config.ts
 ```
 
 ---
@@ -102,8 +102,8 @@ pnpm embody serve
 Plugins register custom CLI subcommands via **`registerCliCommands`**. 
 
 See the reference app implementations:
-- [**`catalog/b2b-saas/src/plugin.ts`**](file:///Users/nimrodfeldman/playground/embody/catalog/b2b-saas/src/plugin.ts): Registers `b2b:quote`.
-- [**`catalog/ecom-fulfillment/src/plugin.ts`**](file:///Users/nimrodfeldman/playground/embody/catalog/ecom-fulfillment/src/plugin.ts): Registers `ecom:track`.
+- [**`examples/b2b-saas/src/plugin.ts`**](file:///Users/nimrodfeldman/playground/embody/examples/b2b-saas/src/plugin.ts): Registers `b2b:quote`.
+- [**`examples/ecom-fulfillment/src/plugin.ts`**](file:///Users/nimrodfeldman/playground/embody/examples/ecom-fulfillment/src/plugin.ts): Registers `ecom:track`.
 
 ### Example 1: B2B Quote Calculation (`b2b:quote`)
 Calculate an annual recurring revenue discount for an enterprise contract:
@@ -145,63 +145,61 @@ pnpm embody run ecom:track 9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d
 
 ---
 
-## 🏗️ Code Scaffolding Subcommands
+## 🏗️ Code Scaffolding
 
-Each generator writes into exactly one bucket, and the bucket decides who owns the
-result. See [OWNERSHIP.md](../OWNERSHIP.md).
+There are two, and which you need depends on whether you already have an app. See
+[PLUGINS.md](../PLUGINS.md).
 
-### Scaffold Your Own Plugin (`embody new custom <name>`)
+### Start a New App (`npm create embody-app`)
 
-**This is the one you want.** It creates a plugin package under `custom/` — yours, and
-untouched by upgrades:
+Not a subcommand of this CLI — it is how you get a project in the first place, before
+any of the above applies:
 
 ```bash
-embody new custom hipaa-rules --for deploy/acme
+npm create embody-app my-crm
 ```
 
-With `--for`, it also does the wiring that would otherwise be four manual steps: adds
-the workspace dependency, and inserts the import and the `plugins` array entry into that
-deployment's `embody.config.ts`.
-
-Without `--for` it just creates the package, and tells you it isn't enabled anywhere yet.
+That writes a project you own outright: a `package.json` depending on `@embody/*`, an
+`embody.config.ts` listing which plugins run, your own plugin under `src/`, and your own
+`migrations/`. Nothing is checked into it from the embody repository, so there is no
+fork to maintain.
 
 ---
 
-### Scaffold Your Own Deployment (`embody new deployment <name>`)
-Creates a deployable under `deploy/` — the thing you actually run:
+### Scaffold a Plugin (`embody new plugin <name>`)
+
+Creates a plugin **inside the app you are standing in** and enables it in your config:
 
 ```bash
-embody new deployment acme --apps crm,b2b-saas
-embody new deployment acme --apps crm --custom hipaa-rules   # or wire it up front
+npx embody new plugin compliance
 ```
+
+It writes `plugins/compliance/{plugin.ts,index.ts,plugin.test.ts,migrations/}` and then
+edits `embody.config.ts` to import and list it. The wiring is the part worth automating:
+a plugin missing from `plugins: [...]` does nothing at all, and says nothing about it.
 
 ---
 
-### Scaffold a First-Party App (`embody new app <name>`)
-Creates a plugin package in `catalog/` — **upstream-owned**. Anything you add there
-conflicts when you merge upstream, so this refuses unless you pass `--internal`:
+## 🩺 Checking Your Wiring (`embody doctor`)
 
 ```bash
-embody new app billing --internal    # only when contributing upstream
+npx embody doctor
 ```
 
-To customize your own instance, use `embody new custom` instead.
+Four checks, and the first is the one that matters:
 
----
+| Check | Why |
+| :--- | :--- |
+| One shared `@embody/plugin-sdk` | With two copies, a plugin registers hooks against a registry your kernel never boots — it loads cleanly and its rules **silently never run**. Nothing throws. |
+| Plugins peer-depend on the SDK | Declaring it as a `dependency` is what causes the duplicate above. |
+| Config loads, plugins resolve | A typo in `embody.config.ts` otherwise surfaces at boot. |
+| No two plugins claim one schema | Each plugin owns and migrates its Postgres schema; a collision means overwritten tables. |
 
-## 🩺 Upgrade Safety (`embody doctor`)
+It resolves through `realpath`, because pnpm symlinks the same package to many paths and
+only distinct real directories are distinct module instances.
 
-Reports any file you have changed inside an upstream bucket (`framework/`, `catalog/`,
-`examples/`) — committed or not — and exits non-zero. Those are exactly the files a
-merge can conflict on:
-
-```bash
-git fetch upstream
-embody doctor && git merge upstream/main
-```
-
-If it cannot find an upstream ref it says so and checks nothing, rather than reporting
-a false pass.
+Exits non-zero on an error, zero on warnings, and lists which checks it actually ran so
+a pass is not mistaken for a full audit.
 
 ---
 
@@ -222,11 +220,10 @@ embody seed --name "Dev Org"                # Create test org & print exports
 embody migrate                              # Apply SQL migrations
 embody serve                                # Run HTTP server
 
-# Scaffolding (yours)
-embody new custom <name> --for deploy/<svc>   # Your plugin + wire it in (the usual path)
-embody new deployment <name> --apps crm,b2b-saas
-embody new app <name> --internal              # First-party catalog app (upstream only)
+# Scaffolding
+npm create embody-app <name>                  # A new app you own outright
+npx embody new plugin <name>                  # A plugin in this app + wire it in
 
-# Upgrade safety
-embody doctor                                 # Any edits outside custom/ and deploy/?
+# Wiring health
+npx embody doctor                             # One SDK copy? schemas unique? config loads?
 ```

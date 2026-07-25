@@ -83,7 +83,7 @@ plugins that each re-silo the same customer."
 role). Authorization is resolved centrally in the kernel and exposed to plugins as
 `ctx.can(action, resource)`. **Every transport passes through the same check** — an AI
 agent over MCP, a script over the CLI, and a browser over the HTTP tool bridge
-(`framework/host/src/api.ts`) all reach a handler through the one executor, so the AI
+(`packages/host/src/api.ts`) all reach a handler through the one executor, so the AI
 tools are not a back door around permissions and neither is the UI.
 
 Identity itself is a swappable seam: the host ships a dev-grade provider (session cookie,
@@ -130,12 +130,14 @@ architecture makes customization easy and upgrade-safe:
   migration and no edit to that plugin (easy tier).
 - **Logic:** custom behavior comes from the D7 surfaces — hooks, events, services —
   plus a thin `automation` helper (`when <event> [if <condition>] do <action>`).
-- **Upgradeability:** the repo is split into five buckets by owner. `framework/`,
-  `catalog/` and `examples/` come from upstream; `custom/` (your plugins) and `deploy/`
-  (your deployables) are yours, and upstream never writes to them. Since `git merge`
-  can only conflict on files you have edited, a customized instance takes upstream
-  releases cleanly. This is the difference between "customizable" and "forked and
-  stranded."
+- **Upgradeability:** embody is installed from npm, not cloned. The runtime lives in
+  `node_modules` and your app is an ordinary project that depends on it, so there is no
+  copy of the framework in your repository for an upgrade to conflict with. Upgrading is
+  `npm update`, not a merge. This is the difference between "customizable" and "forked
+  and stranded."
+- **Reusability:** the same SPI that lets you bend the CRM lets you publish what you
+  built. A plugin is a plugin whether it comes from `@embody/*`, from npm, or from your
+  own `plugins/` directory — the kernel cannot tell them apart.
 
 **What makes this real rather than aspirational** — three properties, each mechanical:
 
@@ -143,17 +145,19 @@ architecture makes customization easy and upgrade-safe:
    (`@embody/plugin-sdk`), which merges the caller's patch onto the stored row and then
    runs the `before*` hook chain **inside the tenant transaction**. Your handler sees
    the whole row — including fields the caller never sent — and throwing rolls the write
-   back. So you change how a catalog app behaves without editing it, and the rule binds
-   every caller identically — an AI agent, the CLI, and a browser (where it surfaces as a
-   409 carrying your own message).
-2. **Enabling a customization touches only your files.** A deployment lives in
-   `deploy/`, so the line that turns your plugin on is never in an upstream file. (If it
-   were, every upgrade would conflict on it, and the promise above would be false.)
-3. **Drift is detectable.** `embody doctor` lists every file you have changed inside an
-   upstream bucket — committed or not — and exits non-zero, before you merge rather than
-   during. Clean doctor, clean merge.
+   back. So you change how an installed plugin behaves without editing it, and the rule
+   binds every caller identically — an AI agent, the CLI, and a browser (where it
+   surfaces as a 409 carrying your own message).
+2. **Enabling a customization touches only your files.** Your `embody.config.ts` is the
+   selection mechanism, and it lives in your repository. Nothing in `node_modules`
+   changes when you turn a plugin on.
+3. **One SPI, and the tooling to keep it one.** A plugin depends on
+   `@embody/plugin-sdk` alone, declared as a peer dependency. That single constraint is
+   what makes a stranger's plugin work in your app — and `embody doctor` enforces it,
+   because two copies of the SDK produce a plugin that loads cleanly and then silently
+   never fires.
 
-See [OWNERSHIP.md](OWNERSHIP.md).
+See [PLUGINS.md](PLUGINS.md).
 
 ---
 
@@ -166,7 +170,7 @@ is fully set up before `crm`).
 ```
 1.  select                The host registers `core` (always) + the apps a deployment
                           enables in its `embody.config.ts` (config-driven, not a
-                          filesystem scan). Customer plugins in custom/ register too.
+                          filesystem scan). Your app's own plugins register the same way.
 2.  topo-sort             Order them by dependsOn (core first)
 ── per plugin, in order ──
 3.  validate capabilities Reject a plugin that declares grants it isn't allowed
@@ -380,67 +384,79 @@ One indexed table covers search across every entity type. Proves the registry's
 
 ## 7. Where things live (repo map)
 
-The top level is split by **owner**. Upgrades replace the upstream buckets wholesale and
-never touch yours (D8).
+The top level is split by **role in the ecosystem** — each bucket answers "does this
+ship, and to whom?" (D8). `@embody/*` means published.
 
 ```
-── UPSTREAM ─ do not edit; `git merge upstream/main` replaces these ──────────────
+── PUBLISHED to npm ──────────────────────────────────────────────────────────────
 
-framework/      Framework / runtime — not user-selectable.
+packages/       The runtime and the SPI. One version line.
+  plugin-sdk/   THE PUBLIC CONTRACT. Re-exports everything a plugin author touches, so a
+                plugin depends on this package and nothing else from embody. Also owns
+                defineEntity — the write path that runs before*/after* hook chains inside
+                the tenant transaction, so a veto rolls the write back.
   kernel/       Kernel, PluginManager, EmbodyPlugin contract, hooks, DI, middleware,
                 EventBus interface, MCP registrar, request context/authz. No business logic.
+  core/         @embody/core plugin: shared entities + identity + registry. FOUNDATION —
+                always registered by the host; every plugin dependsOn it. Not selectable.
   db/           Drizzle base: connection, RLS helpers, migration runner, seed utils
   auth/         Principals, RBAC, req.assert() (swappable provider)
+  host/         @embody/host: reusable server engine. Boots the kernel, reads an app's
+                embody.config.ts, registers core + enabled plugins, serves. Also mounts
+                the /api tool bridge: every plugin tool over HTTP, on the same executor
+                as MCP and the CLI.
+  cli/          `embody` binary (Commander): agent actions, new plugin, doctor
   mcp-server/   Universal stdio MCP runner
-  cli/          `embody` binary (Commander): agent actions, scaffolds, doctor
-  plugin-sdk/   defineEntity — the write path plugins build on. Runs the before*/after*
-                hook chains inside the tenant transaction, so a veto rolls the write back.
-  core/         @embody/core plugin: shared entities + identity + registry. FOUNDATION —
-                always registered by the host; every app dependsOn it. Not selectable.
-  host/         @embody/host: reusable server engine. Boots the kernel, reads a
-                deployment's embody.config.ts, registers core + enabled plugins, serves.
-                Also mounts the /api tool bridge: every plugin tool over HTTP, on the
-                same executor as MCP and the CLI.
-  react/        @embody/react: React hooks over that bridge (useToolQuery/useToolMutation,
-                useCan, useTools). Zero runtime deps; react is a peer dependency.
+  testing/      Boot a real runtime inside a plugin's tests. Separate from plugin-sdk
+                because host depends on the SDK, so the SDK cannot re-export host.
+  create-embody-app/  The project generator — what replaces forking.
 
-catalog/        THE CATALOG — selectable business apps.
-  crm/          @embody/crm plugin: deals + contact/account facets on core.parties
-  b2b-saas/     @embody/b2b-saas: enterprise rules (InfoSec gate on large closes)
-  ecom-fulfillment/  @embody/ecom-fulfillment: VIP pricing + warehouse dispatch
+plugins/        First-party plugins, built on the PUBLIC SPI.
+  crm/          @embody/crm: deals + contact/account facets on core.parties.
+                Depends on @embody/plugin-sdk by version range, not workspace link, so
+                it continuously proves the public SPI suffices to build a real plugin.
 
-examples/       REFERENCE — copy these, don't edit them.
-  service-crm/  A deployment enabling catalog apps only
-  demo-ui/      The demo SPA: two complete CRMs + AI copilot (Vite, port 5173).
-                Its /b2b/live page is the worked @embody/react example.
+ui/             Browser packages, on their own version line — not part of embody itself.
+  react/        @embody/react: hooks over the /api bridge (useToolQuery/useToolMutation,
+                useCan, useTools). Imports nothing from other embody packages; react is
+                a peer dependency.
 
-── YOURS ─ upstream never writes here ────────────────────────────────────────────
+── NEVER PUBLISHED ───────────────────────────────────────────────────────────────
 
-custom/         Your plugins.
-  acme-crm/     Worked example: own schema + RLS, a HIPAA gate on deal closes,
-                MCP tools, a CLI command. Private and UNSCOPED — @embody/* is ours.
-deploy/         Your deployables. Thin: host + an embody.config.ts + env.
-  acme/         Worked example: catalog apps + acme-crm.
+demo/           Showcase apps, to look at.
+  demo-ui/      Two complete CRMs + AI copilot (Vite, port 5173). Its /b2b/live page is
+                the worked @embody/react example.
+
+examples/       Reference code, to copy.
+  custom-crm/   A complete app: config + its own plugin (own schema + RLS, a HIPAA gate
+                on deal closes, MCP tools, a CLI command). The shape create-embody-app
+                generates; a test pins the two together.
+  b2b-saas/     A plugin written as a community plugin is: embody-plugin-* name,
+                peer dependencies. Enterprise rules (InfoSec gate on large closes).
+  ecom-fulfillment/  Likewise. VIP pricing + warehouse dispatch.
 ```
 
-**Installing / selecting plugins.** A deployment is a `deploy/*` package: install a
-catalog app with `pnpm add @embody/erp` and enable it by adding its plugin to `plugins`
-in that deployment's `embody.config.ts`. Your own plugins go in the same list — the
-kernel does not distinguish them. Run one app per deployment, or list several to
-co-locate them (in-process hooks/DI between them). `core` is always present.
+**Installing / selecting plugins.** An app is an ordinary npm project: install a plugin
+with `npm i @embody/erp` and enable it by adding its plugin to `plugins` in your
+`embody.config.ts`. Your own plugins go in the same list — the kernel does not
+distinguish them, and neither does anything else. `core` is always present.
 
-Two commands cover the normal path; neither writes to an upstream bucket:
+Two commands cover the normal path, and neither touches anything you did not write:
 
 ```bash
-embody new deployment acme --apps crm,b2b-saas
-embody new custom hipaa-rules --for deploy/acme   # creates it AND wires it in
+npm create embody-app my-crm       # a project you own outright
+npx embody new plugin hipaa-rules  # creates it AND wires it into your config
 ```
 
 ---
 
 ## 8. Cross-references
 
-The full build plan (milestones M0–M8, verification steps) lives at
-`~/.claude/plans/how-would-you-redesign-cuddly-babbage.md`. This document (D1–D8)
-is the "why"; the plan is the "when." Plugin-authoring and customization guides
-(`PLUGINS.md`, `CUSTOMIZING.md`) land in M8 once the shapes are stable.
+This document (D1–D8) is the "why"; the code is the "how".
+
+- [PLUGINS.md](PLUGINS.md) — the plugin contract: what publishes, the one-package SPI
+  rule, peer dependencies, and publishing a plugin others can install.
+- [docs/writing-a-plugin-others-can-use.md](docs/writing-a-plugin-others-can-use.md) —
+  the walkthrough.
+- [docs/directory-structure.md](docs/directory-structure.md) — this repository's layout,
+  and separately what an app's own layout looks like.
