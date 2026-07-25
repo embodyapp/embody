@@ -11,7 +11,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build": "tsup"
   },
   "dependencies": {
     "@embody/auth": "workspace:*",
@@ -21,10 +22,35 @@
     "@embody/plugin-sdk": "workspace:*",
     "@hono/node-server": "^1.13.7",
     "hono": "^4.6.14",
+    "tsx": "^4.19.2",
     "zod": "^3.24.1",
     "zod-to-json-schema": "^3.24.1"
   },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "types": "./dist/index.d.ts",
+    "bin": {
+      "embody-host": "./dist/bin.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "migrations",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nimrod4278/embody.git",
+    "directory": "packages/host"
+  },
   "devDependencies": {
-    "tsx": "^4.19.2"
+    "tsup": "^8.5.1"
   }
 }

@@ -42,13 +42,54 @@ export function resolveDbUrls(databaseUrl?: string): { owner: string; app: strin
   return { owner, app };
 }
 
+/** Set once we have installed the TypeScript loader, so we never install it twice. */
+let typeScriptLoaderInstalled = false;
+
+/**
+ * Make `import()` able to load TypeScript, and say so only when it is actually needed.
+ *
+ * An app's `embody.config.ts` is TypeScript, and it imports the app's own plugins,
+ * which are TypeScript too. Three things can be true of the process loading it:
+ *
+ *   - it is already running under `tsx` (the dev path) — nothing to do;
+ *   - it is Node 22.6+ with type stripping — also nothing to do;
+ *   - it is plain Node running our published, compiled bin — which throws on a `.ts`
+ *     file, and is the case that would otherwise break every developer's first command.
+ *
+ * Rather than detect which, we try the import and install the loader only if it fails.
+ * That way the fast paths stay free and we never register a redundant ESM hook.
+ */
+async function importWithTypeScriptSupport(href: string): Promise<unknown> {
+  try {
+    return await import(href);
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    // Node refuses TypeScript in two distinct ways, and which one you get depends on
+    // the version: older Node does not know the extension at all, while Node 22.6+
+    // strips types natively and then rejects anything that needs real transformation
+    // (parameter properties, enums, namespaces). Both mean "install the loader".
+    const isLoaderGap =
+      code === "ERR_UNKNOWN_FILE_EXTENSION" ||
+      code === "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX" ||
+      code === "ERR_MODULE_NOT_FOUND";
+    if (typeScriptLoaderInstalled || !isLoaderGap) throw err;
+
+    const { register } = await import("tsx/esm/api");
+    register();
+    typeScriptLoaderInstalled = true;
+    return await import(href);
+  }
+}
+
 /**
  * Load a deployment config module (`embody.config.ts`) and return its default export.
  * Shared by the CLI and the host bin so config loading behaves identically everywhere.
  */
 export async function loadConfig(configPath: string): Promise<EmbodyConfig> {
   const absolute = resolve(process.cwd(), configPath);
-  const module = (await import(pathToFileURL(absolute).href)) as { default?: EmbodyConfig };
+  const module = (await importWithTypeScriptSupport(
+    pathToFileURL(absolute).href,
+  )) as { default?: EmbodyConfig };
   const config = module.default;
   if (!config || !(Array.isArray(config.plugins) || Array.isArray(config.apps))) {
     throw new Error(

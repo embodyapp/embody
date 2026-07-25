@@ -12,7 +12,8 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build": "tsup"
   },
   "peerDependencies": {
     "@embody/plugin-sdk": "workspace:*",
@@ -21,6 +22,32 @@
   "devDependencies": {
     "@embody/plugin-sdk": "workspace:*",
     "@embody/testing": "workspace:*",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "tsup": "^8.5.1"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./schemas": {
+        "types": "./dist/schemas.d.ts",
+        "default": "./dist/schemas.js"
+      }
+    },
+    "types": "./dist/index.d.ts"
+  },
+  "files": [
+    "dist",
+    "src",
+    "migrations",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nimrod4278/embody.git",
+    "directory": "plugins/crm"
   }
 }

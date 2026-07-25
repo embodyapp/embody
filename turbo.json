@@ -6,7 +6,11 @@
       "outputs": ["dist/**"]
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      // Deliberately NOT dependsOn ^build. Inside the workspace every package's
+      // `exports` still points at src/, and only `publishConfig` swaps that to dist/
+      // at publish time — so typechecking reads a dependency's source directly and
+      // building first would just make the loop slower.
+      "dependsOn": []
     },
     "test": {
       "dependsOn": [],
