@@ -1,0 +1,12 @@
+# Which directories hold workspace packages. The five buckets are split by OWNERSHIP
+# — see OWNERSHIP.md. framework/, catalog/ and examples/ come from upstream and are
+# replaced wholesale by `git merge upstream/main`; custom/ and deploy/ are yours, and
+# upstream never writes to them.
+packages:
+  # ── upstream: do not edit ───────────────────────────────────────────────────
+  - "framework/*" # the runtime: kernel, core, db, auth, host, cli, mcp-server, plugin-sdk
+  - "catalog/*" # first-party apps a deployment can enable
+  - "examples/*" # reference deployment + demo UI — copy them, don't edit them
+  # ── yours ──────────────────────────────────────────────────────────────────
+  - "custom/*" # your plugins
+  - "deploy/*" # your deployables

@@ -1,0 +1,27 @@
+{
+  "name": "@embody/host",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "bin": {
+    "embody-host": "./src/bin.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@embody/auth": "workspace:*",
+    "@embody/core": "workspace:*",
+    "@embody/db": "workspace:*",
+    "@embody/kernel": "workspace:*",
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

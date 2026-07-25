@@ -1,0 +1,23 @@
+{
+  "name": "@embody/service-crm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "start": "embody-host ./embody.config.ts",
+    "dev": "embody-host ./embody.config.ts",
+    "migrate": "embody-host ./embody.config.ts --mode migrate-only",
+    "agent": "embody mcp",
+    "seed": "embody seed"
+  },
+  "dependencies": {
+    "@embody/auth": "workspace:*",
+    "@embody/b2b-saas": "workspace:*",
+    "@embody/cli": "workspace:*",
+    "@embody/core": "workspace:*",
+    "@embody/crm": "workspace:*",
+    "@embody/ecom-fulfillment": "workspace:*",
+    "@embody/host": "workspace:*"
+  }
+}

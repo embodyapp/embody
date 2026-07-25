@@ -1,0 +1,18 @@
+{
+  "name": "@embody/kernel",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@embody/db": "workspace:*",
+    "hono": "^4.6.14",
+    "zod": "^3.24.1"
+  }
+}

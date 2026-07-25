@@ -1,0 +1,18 @@
+{
+  "name": "@embody/plugin-sdk",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@embody/core": "workspace:*",
+    "@embody/db": "workspace:*",
+    "@embody/kernel": "workspace:*"
+  }
+}
