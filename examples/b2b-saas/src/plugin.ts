@@ -1,5 +1,5 @@
 /**
- * @embody/b2b-saas plugin.
+ * embody-plugin-b2b-saas plugin.
  * 
  * Reference B2B Enterprise SaaS extension plugin demonstrating how a B2B company
  * customizes the CRM without editing or forking core code:

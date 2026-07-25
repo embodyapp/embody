@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { HookRegistry, createSilentLogger } from "@embody/kernel";
 import type { KernelContext } from "@embody/kernel";
-import { b2bSaasPlugin } from "@embody/b2b-saas";
+import { b2bSaasPlugin } from "embody-plugin-b2b-saas";
 import { acmeCrmPlugin, hipaaVetoReason } from "./plugin.ts";
 
 const ctx = (pluginId: string): KernelContext =>

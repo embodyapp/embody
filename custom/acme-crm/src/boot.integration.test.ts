@@ -9,7 +9,7 @@ import { EmbodyKernel, createSilentLogger } from "@embody/kernel";
 import type { BootedKernel, KernelContext } from "@embody/kernel";
 import { corePlugin } from "@embody/core";
 import { crmPlugin } from "@embody/crm";
-import { b2bSaasPlugin } from "@embody/b2b-saas";
+import { b2bSaasPlugin } from "embody-plugin-b2b-saas";
 import { acmeCrmPlugin } from "./plugin.ts";
 
 const runCtx = { pluginId: "test", logger: createSilentLogger() } as unknown as KernelContext;

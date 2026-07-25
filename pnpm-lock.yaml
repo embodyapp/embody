@@ -46,58 +46,6 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)(happy-dom@15.11.7)(lightningcss@1.33.0)
 
-  catalog/b2b-saas:
-    dependencies:
-      '@embody/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@embody/crm':
-        specifier: workspace:*
-        version: link:../crm
-      '@embody/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      zod:
-        specifier: ^3.24.1
-        version: 3.25.76
-
-  catalog/crm:
-    dependencies:
-      '@embody/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@embody/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      '@embody/plugin-sdk':
-        specifier: workspace:*
-        version: link:../../packages/plugin-sdk
-      zod:
-        specifier: ^3.24.1
-        version: 3.25.76
-    devDependencies:
-      '@embody/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@embody/host':
-        specifier: workspace:*
-        version: link:../../packages/host
-
-  catalog/ecom-fulfillment:
-    dependencies:
-      '@embody/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@embody/crm':
-        specifier: workspace:*
-        version: link:../crm
-      '@embody/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      zod:
-        specifier: ^3.24.1
-        version: 3.25.76
-
   custom/acme-crm:
     dependencies:
       '@embody/core':
@@ -105,7 +53,7 @@ importers:
         version: link:../../packages/core
       '@embody/crm':
         specifier: workspace:*
-        version: link:../../catalog/crm
+        version: link:../../plugins/crm
       '@embody/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
@@ -116,21 +64,18 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
-      '@embody/b2b-saas':
-        specifier: workspace:*
-        version: link:../../catalog/b2b-saas
       '@embody/db':
         specifier: workspace:*
         version: link:../../packages/db
       '@embody/host':
         specifier: workspace:*
         version: link:../../packages/host
+      embody-plugin-b2b-saas:
+        specifier: workspace:*
+        version: link:../../examples/b2b-saas
 
   deploy/acme:
     dependencies:
-      '@embody/b2b-saas':
-        specifier: workspace:*
-        version: link:../../catalog/b2b-saas
       '@embody/cli':
         specifier: workspace:*
         version: link:../../packages/cli
@@ -139,16 +84,34 @@ importers:
         version: link:../../packages/core
       '@embody/crm':
         specifier: workspace:*
-        version: link:../../catalog/crm
-      '@embody/ecom-fulfillment':
-        specifier: workspace:*
-        version: link:../../catalog/ecom-fulfillment
+        version: link:../../plugins/crm
       '@embody/host':
         specifier: workspace:*
         version: link:../../packages/host
       acme-crm:
         specifier: workspace:*
         version: link:../../custom/acme-crm
+      embody-plugin-b2b-saas:
+        specifier: workspace:*
+        version: link:../../examples/b2b-saas
+      embody-plugin-ecom-fulfillment:
+        specifier: workspace:*
+        version: link:../../examples/ecom-fulfillment
+
+  examples/b2b-saas:
+    dependencies:
+      '@embody/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@embody/crm':
+        specifier: workspace:*
+        version: link:../../plugins/crm
+      '@embody/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
 
   examples/demo-ui:
     dependencies:
@@ -157,7 +120,7 @@ importers:
         version: 0.114.0(zod@3.25.76)
       '@embody/crm':
         specifier: workspace:*
-        version: link:../../catalog/crm
+        version: link:../../plugins/crm
       '@embody/react':
         specifier: workspace:*
         version: link:../../framework/react
@@ -190,14 +153,26 @@ importers:
         specifier: ^6.0.0
         version: 6.4.3(@types/node@22.20.1)(lightningcss@1.33.0)(tsx@4.23.1)
 
+  examples/ecom-fulfillment:
+    dependencies:
+      '@embody/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@embody/crm':
+        specifier: workspace:*
+        version: link:../../plugins/crm
+      '@embody/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+
   examples/service-crm:
     dependencies:
       '@embody/auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@embody/b2b-saas':
-        specifier: workspace:*
-        version: link:../../catalog/b2b-saas
       '@embody/cli':
         specifier: workspace:*
         version: link:../../packages/cli
@@ -206,13 +181,16 @@ importers:
         version: link:../../packages/core
       '@embody/crm':
         specifier: workspace:*
-        version: link:../../catalog/crm
-      '@embody/ecom-fulfillment':
-        specifier: workspace:*
-        version: link:../../catalog/ecom-fulfillment
+        version: link:../../plugins/crm
       '@embody/host':
         specifier: workspace:*
         version: link:../../packages/host
+      embody-plugin-b2b-saas:
+        specifier: workspace:*
+        version: link:../b2b-saas
+      embody-plugin-ecom-fulfillment:
+        specifier: workspace:*
+        version: link:../ecom-fulfillment
     devDependencies:
       '@embody/db':
         specifier: workspace:*
@@ -363,7 +341,7 @@ importers:
     devDependencies:
       '@embody/crm':
         specifier: workspace:*
-        version: link:../../catalog/crm
+        version: link:../../plugins/crm
       '@embody/db':
         specifier: workspace:*
         version: link:../db
@@ -379,6 +357,28 @@ importers:
       '@embody/kernel':
         specifier: workspace:*
         version: link:../kernel
+
+  plugins/crm:
+    dependencies:
+      '@embody/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@embody/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@embody/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@embody/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@embody/host':
+        specifier: workspace:*
+        version: link:../../packages/host
 
 packages:
 

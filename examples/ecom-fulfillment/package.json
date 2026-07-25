@@ -1,6 +1,7 @@
 {
-  "name": "@embody/b2b-saas",
+  "name": "embody-plugin-ecom-fulfillment",
   "version": "0.0.0",
+  "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

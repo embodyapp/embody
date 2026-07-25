@@ -12,11 +12,11 @@
     "seed": "embody seed"
   },
   "dependencies": {
-    "@embody/b2b-saas": "workspace:*",
+    "embody-plugin-b2b-saas": "workspace:*",
     "@embody/cli": "workspace:*",
     "@embody/core": "workspace:*",
     "@embody/crm": "workspace:*",
-    "@embody/ecom-fulfillment": "workspace:*",
+    "embody-plugin-ecom-fulfillment": "workspace:*",
     "@embody/host": "workspace:*",
     "acme-crm": "workspace:*"
   }

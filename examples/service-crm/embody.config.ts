@@ -16,8 +16,8 @@
  */
 import { defineConfig } from "@embody/host";
 import { crmPlugin } from "@embody/crm";
-import { b2bSaasPlugin } from "@embody/b2b-saas";
-import { ecomFulfillmentPlugin } from "@embody/ecom-fulfillment";
+import { b2bSaasPlugin } from "embody-plugin-b2b-saas";
+import { ecomFulfillmentPlugin } from "embody-plugin-ecom-fulfillment";
 
 export default defineConfig({
   plugins: [crmPlugin, b2bSaasPlugin, ecomFulfillmentPlugin],

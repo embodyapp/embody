@@ -1,5 +1,5 @@
 /**
- * @embody/ecom-fulfillment plugin.
+ * embody-plugin-ecom-fulfillment plugin.
  * 
  * Reference E-Commerce Retailer extension plugin demonstrating how an e-commerce company
  * customizes the CRM without editing or forking core code:

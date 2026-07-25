@@ -96,10 +96,10 @@ describe("newCustom --for", () => {
 
 describe("newDeployment", () => {
   it("emits `plugins:` and camel-cases hyphenated catalog apps", async () => {
-    await newDeployment("acme", ["crm", "b2b-saas"]);
+    await newDeployment("acme", ["crm", "field-service"]);
     const cfg = await readFile(join(root, "deploy/acme/embody.config.ts"), "utf8");
-    expect(cfg).toContain('import { b2bSaasPlugin } from "@embody/b2b-saas";');
-    expect(cfg).toMatch(/plugins: \[crmPlugin, b2bSaasPlugin\]/);
+    expect(cfg).toContain('import { fieldServicePlugin } from "@embody/field-service";');
+    expect(cfg).toMatch(/plugins: \[crmPlugin, fieldServicePlugin\]/);
     expect(cfg).not.toContain("apps:");
   });
 

@@ -18,7 +18,7 @@ import { createSilentLogger, type Principal } from "@embody/kernel";
 import { defineConfig, bootRuntime, makeExecutor, type Runtime } from "@embody/host";
 import { createDb } from "@embody/db";
 import { crmPlugin } from "@embody/crm";
-import { b2bSaasPlugin } from "@embody/b2b-saas";
+import { b2bSaasPlugin } from "embody-plugin-b2b-saas";
 import { acmeCrmPlugin } from "./plugin.ts";
 
 const OWNER_URL =

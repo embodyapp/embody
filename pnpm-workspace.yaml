@@ -4,9 +4,9 @@
 packages:
   # ── published to npm ────────────────────────────────────────────────────────
   - "packages/*" # the runtime and the SPI: plugin-sdk, kernel, core, db, auth, host, cli, mcp-server
+  - "plugins/*" # first-party plugins, built on the public SPI exactly as a stranger would
   - "framework/*" # (transitional) react — moves to ui/ in the next step
-  # ── not published ───────────────────────────────────────────────────────────
-  - "catalog/*" # first-party apps a deployment can enable
-  - "examples/*" # reference deployment + demo UI
-  - "custom/*" # your plugins
-  - "deploy/*" # your deployables
+  # ── never published ─────────────────────────────────────────────────────────
+  - "examples/*" # reference code to copy: the canonical app, example plugins
+  - "custom/*" # (transitional) folds into examples/custom-crm
+  - "deploy/*" # (transitional) folds into examples/custom-crm

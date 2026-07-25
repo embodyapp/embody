@@ -13,8 +13,8 @@
  */
 import { defineConfig } from "@embody/host";
 import { crmPlugin } from "@embody/crm";
-import { b2bSaasPlugin } from "@embody/b2b-saas";
-import { ecomFulfillmentPlugin } from "@embody/ecom-fulfillment";
+import { b2bSaasPlugin } from "embody-plugin-b2b-saas";
+import { ecomFulfillmentPlugin } from "embody-plugin-ecom-fulfillment";
 // Acme's own plugin. Owns the custom_acme schema, adds a HIPAA gate on deal closes,
 // and ships its own MCP tools + CLI command — without editing framework/ or catalog/.
 import { acmeCrmPlugin } from "acme-crm";

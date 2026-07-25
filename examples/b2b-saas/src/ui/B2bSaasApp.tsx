@@ -255,7 +255,7 @@ export function B2bSaasApp() {
 
         <div className="plugin-badge-pill">
           <span className="badge-dot"></span>
-          <span>@embody/b2b-saas plugin</span>
+          <span>embody-plugin-b2b-saas plugin</span>
         </div>
       </div>
 
@@ -719,7 +719,7 @@ export function B2bSaasApp() {
               <ShieldAlert size={28} className="text-rose" />
               <div>
                 <h3>🛑 Vetoed by Domain Hook (`crm.deal.beforeUpdate`)</h3>
-                <span className="veto-sub">Execution blocked by `@embody/b2b-saas` security policy</span>
+                <span className="veto-sub">Execution blocked by `embody-plugin-b2b-saas` security policy</span>
               </div>
             </div>
 

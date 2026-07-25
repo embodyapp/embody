@@ -275,7 +275,7 @@ export function EcomFulfillmentApp() {
 
         <div className="plugin-badge-pill ecom">
           <span className="badge-dot ecom"></span>
-          <span>@embody/ecom-fulfillment plugin</span>
+          <span>embody-plugin-ecom-fulfillment plugin</span>
         </div>
       </div>
 
