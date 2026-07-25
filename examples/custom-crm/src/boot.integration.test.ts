@@ -1,5 +1,5 @@
 /**
- * Boots a REAL kernel with core + crm + b2b-saas + custom/acme-crm and drives the hook
+ * Boots a REAL kernel with core + crm + b2b-saas + custom-crm and drives the hook
  * chain through the booted registry. This proves the customization end-to-end through the
  * genuine registration path — topo-sort, capability-manifest enforcement, and cross-plugin
  * hook composition — rather than a hand-assembled registry. No database required.
@@ -21,7 +21,7 @@ const deal = (customFields: Record<string, unknown>) => ({
   custom_fields: customFields,
 });
 
-describe("custom/acme-crm in a booted kernel", () => {
+describe("custom-crm in a booted kernel", () => {
   let booted: BootedKernel;
 
   beforeAll(async () => {

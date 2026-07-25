@@ -1,4 +1,4 @@
--- custom/acme-crm — initial schema.
+-- custom-crm — initial schema.
 -- A CUSTOMER customization living in custom/, extending the CRM without editing core or
 -- the first-party apps. It owns its own Postgres schema (`custom_acme`) and adds an audit
 -- table for HIPAA reviews of healthcare-vertical deals. Every row carries org_id and is

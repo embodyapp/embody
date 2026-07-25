@@ -1,10 +1,11 @@
 {
-  "name": "acme-deployment",
+  "name": "custom-crm",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "start": "embody-host ./embody.config.ts",
     "dev": "PORT=${PORT:-3100} embody-host ./embody.config.ts",
     "migrate": "embody-host ./embody.config.ts --mode migrate-only",
@@ -12,12 +13,17 @@
     "seed": "embody seed"
   },
   "dependencies": {
-    "embody-plugin-b2b-saas": "workspace:*",
     "@embody/cli": "workspace:*",
     "@embody/core": "workspace:*",
     "@embody/crm": "workspace:*",
-    "embody-plugin-ecom-fulfillment": "workspace:*",
     "@embody/host": "workspace:*",
-    "acme-crm": "workspace:*"
+    "@embody/kernel": "workspace:*",
+    "@embody/plugin-sdk": "workspace:*",
+    "embody-plugin-b2b-saas": "workspace:*",
+    "embody-plugin-ecom-fulfillment": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@embody/db": "workspace:*"
   }
 }

@@ -1,13 +1,11 @@
 /**
- * acme-crm — a CUSTOMER customization, not a first-party app. Note the package name:
- * `@embody/*` is the vendor's scope, so customer code never uses it. This package is
- * private and unscoped, because it is only ever consumed inside this workspace.
+ * An application's own plugin — the code a developer writes to bend embody to their
+ * business, living in their own repository rather than in any dependency.
  *
- * This is the Decision D8 proof: Acme bends the CRM to their own compliance process
- * *without editing or forking* anything under `framework/` or `catalog/`. It lives entirely
- * in `custom/`, is enabled by one line in Acme's OWN deployment (`deploy/acme/embody.config.ts`
- * — a file upstream never writes to, so upgrades cannot conflict with it), and rides the same
- * plugin SPI a first-party app uses.
+ * This is the Decision D8 proof: the CRM is bent to a specific compliance process
+ * *without editing or forking* anything that ships from npm. It is enabled by one line
+ * in this app's own `embody.config.ts`, and it rides exactly the same plugin SPI a
+ * published plugin uses — the kernel cannot tell the difference.
  *
  * It exercises five extension surfaces:
  *   1. migrations      — owns its own `custom_acme` schema (HIPAA review audit trail + RLS).
@@ -79,7 +77,7 @@ export const acmeCrmPlugin: EmbodyPlugin = {
   migrations: { dir: acmeCrmMigrationsDir, schema: "custom_acme" },
 
   init(ctx: KernelContext) {
-    ctx.logger.info("custom/acme-crm loaded — HIPAA review gate active", {
+    ctx.logger.info("custom-crm loaded — HIPAA review gate active", {
       vertical: REGULATED_VERTICAL,
     });
   },

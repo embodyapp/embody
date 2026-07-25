@@ -9,5 +9,3 @@ packages:
   # ── never published ─────────────────────────────────────────────────────────
   - "demo/*" # showcase apps, to look at rather than copy
   - "examples/*" # reference code to copy: the canonical app, example plugins
-  - "custom/*" # (transitional) folds into examples/custom-crm
-  - "deploy/*" # (transitional) folds into examples/custom-crm

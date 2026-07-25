@@ -38,7 +38,7 @@ describe("hipaaVetoReason (the rule in isolation)", () => {
   });
 });
 
-describe("custom/acme-crm composes with first-party plugins", () => {
+describe("custom-crm composes with first-party plugins", () => {
   /** Register both plugins' hooks on one registry, exactly as the kernel does at boot. */
   const registry = () => {
     const reg = new HookRegistry();
