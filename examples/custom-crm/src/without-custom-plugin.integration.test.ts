@@ -1,27 +1,44 @@
 /**
- * The tool bridge against a real deployment and a real database.
+ * The tool bridge against a real config and a real database.
  *
- * `framework/host/src/api.test.ts` proves the request path with a fake runtime — fast,
- * but it can only assert what a fake was told to throw. The three properties a UI
- * actually depends on cannot be faked, because they are enforced by Postgres and by
- * plugins this service enables:
+ * `packages/host/src/api.test.ts` proves the request path with a fake runtime — fast,
+ * but it can only assert what a fake was told to throw. The properties a UI actually
+ * depends on cannot be faked, because they are enforced by Postgres and by the plugins
+ * a config enables:
  *
  *   - RBAC survives the hop: a viewer's write is refused over HTTP, not just over MCP;
  *   - RLS survives the hop: another org's row is indistinguishable from a missing one;
  *   - a domain veto survives the hop: b2b-saas's InfoSec rule arrives as 409 with its
  *     own message, and the row on disk is unchanged.
  *
- * Requests go through `booted.app.fetch(new Request(...))` — the real Hono app, no
- * socket and no port. Requires the docker-compose Postgres; skips cleanly if
- * unreachable.
+ * The config here is built inline and deliberately OMITS this app's own plugin, which
+ * is the point of the last two cases: what a deployment exposes follows from its
+ * plugins list and nothing else. The same tools that appear when `embody.config.ts`
+ * lists `acmeCrmPlugin` are absent here, in the same package, from the same source.
  *
- * Run: `pnpm --filter @embody/service-crm exec vitest run`
+ * Requests go through `booted.app.request(...)` — the real Hono app, no socket and no
+ * port. Requires the docker-compose Postgres; skips cleanly if unreachable.
+ *
+ * Run: `pnpm --filter custom-crm exec vitest run`
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createSilentLogger } from "@embody/kernel";
-import { bootRuntime, mountApi, createDevIdentity, type Runtime } from "@embody/host";
+import {
+  bootRuntime,
+  defineConfig,
+  mountApi,
+  createDevIdentity,
+  type Runtime,
+} from "@embody/host";
 import { createDb } from "@embody/db";
-import config from "../embody.config.ts";
+import { crmPlugin } from "@embody/crm";
+import { b2bSaasPlugin } from "embody-plugin-b2b-saas";
+import { ecomFulfillmentPlugin } from "embody-plugin-ecom-fulfillment";
+
+/** Published plugins only — this app's own `acmeCrmPlugin` is intentionally absent. */
+const config = defineConfig({
+  plugins: [crmPlugin, b2bSaasPlugin, ecomFulfillmentPlugin],
+});
 
 const OWNER_URL =
   process.env.DATABASE_URL ?? "postgres://embody:embody@localhost:5432/embody";
@@ -178,8 +195,9 @@ suite("the /api tool bridge (integration)", () => {
     expect(row!.custom_fields.industry_vertical).toBe("healthcare");
   });
 
-  it("404s a tool this deployment does not enable", async () => {
-    // acme_flag_hipaa exists in custom/, which this catalog-only service does not run.
+  it("404s a tool whose plugin this config does not list", async () => {
+    // acme_flag_hipaa is defined in this very package, but the config above omits
+    // acmeCrmPlugin — so the tool does not exist. Exposure follows the plugins list.
     const res = await call("acme_flag_hipaa", { dealId: alphaDealId }, alpha);
     expect(res.status).toBe(404);
     expect((await res.json()) as { error: { kind: string } }).toMatchObject({
@@ -196,7 +214,7 @@ suite("the /api tool bridge (integration)", () => {
     expect(res.status).toBe(401);
   });
 
-  it("publishes the enabled apps' tools, with real input schemas", async () => {
+  it("publishes the enabled plugins' tools, with real input schemas", async () => {
     const res = await runtime.booted.app.request("/api/tools", {
       headers: { "x-embody-org": alpha.orgId, "x-embody-user": alpha.userId },
     });
@@ -204,7 +222,7 @@ suite("the /api tool bridge (integration)", () => {
       tools: { name: string; inputSchema: { properties?: Record<string, unknown> } }[];
     };
     const names = tools.map((t) => t.name);
-    // Both first-party catalog apps contribute, with no bridge change of any kind.
+    // Two independent plugins contribute, with no bridge change of any kind.
     expect(names).toContain("crm_query_deals");
     expect(names).toContain("b2b_calculate_arr_discount");
     expect(names).not.toContain("acme_flag_hipaa");

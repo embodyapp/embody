@@ -140,37 +140,6 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
 
-  examples/service-crm:
-    dependencies:
-      '@embody/auth':
-        specifier: workspace:*
-        version: link:../../packages/auth
-      '@embody/cli':
-        specifier: workspace:*
-        version: link:../../packages/cli
-      '@embody/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@embody/crm':
-        specifier: workspace:*
-        version: link:../../plugins/crm
-      '@embody/host':
-        specifier: workspace:*
-        version: link:../../packages/host
-      embody-plugin-b2b-saas:
-        specifier: workspace:*
-        version: link:../b2b-saas
-      embody-plugin-ecom-fulfillment:
-        specifier: workspace:*
-        version: link:../ecom-fulfillment
-    devDependencies:
-      '@embody/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@embody/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-
   packages/auth:
     dependencies:
       '@embody/kernel':
