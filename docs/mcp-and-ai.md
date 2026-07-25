@@ -18,16 +18,25 @@ In Embody:
 
 > [!IMPORTANT]
 > **MCP is NOT a back-door around security!**
-> AI tool executions pass through the exact same tenant Row-Level Security (RLS) policies and permission authorization checks (`req.assert("write", "crm:deal")`) as traditional web users over REST APIs.
+> AI tool executions pass through the exact same tenant Row-Level Security (RLS) policies and permission authorization checks (`req.assert("write", "crm:deal")`) as a human clicking a button in a UI.
+
+That parity is literal, not aspirational: all three arrows below are the **same function call** (`makeExecutor(...).invoke(tool, input)`). A UI does not get its own REST API — it calls the very tools you write here, over the `/api` bridge described in [React Hooks & the HTTP Bridge](./react-hooks.md).
 
 ```text
  ┌────────────────┐          ┌───────────────────┐
- │ REST API User  │─────────►│  req.assert()     │
- └────────────────┘          │  + Tenant RLS     │─────► Postgres DB
- ┌────────────────┐          │  Authorization    │
- │ AI Assistant   │─────────►│  Checks           │
+ │ Browser (UI)   │─────────►│                   │
+ │ @embody/react  │          │  makeExecutor()   │
+ └────────────────┘          │                   │
+ ┌────────────────┐          │  req.assert()     │
+ │ AI Assistant   │─────────►│  + Tenant RLS     │─────► Postgres DB
+ │ (stdio MCP)    │          │  + vetoable hooks │
+ └────────────────┘          │                   │
+ ┌────────────────┐          │                   │
+ │ CLI / scripts  │─────────►│                   │
  └────────────────┘          └───────────────────┘
 ```
+
+One practical consequence: **writing a tool is writing your UI's API.** There is no second surface to build, and no way for a UI to skip a rule an agent must obey.
 
 ---
 

@@ -133,9 +133,17 @@ async init(ctx) {
 
 ---
 
-### Step 5: Mount REST API Routes (`registerRoutes`)
+### Step 5: Mount HTTP Routes (`registerRoutes`)
 
-Embody uses **Hono** for fast REST API routing. All routes automatically pass through tenancy and authorization middleware:
+Embody uses **Hono** for routing. Use this for liveness and info endpoints — **not for data access.**
+
+> [!IMPORTANT]
+> **Do not build a data API here.** A raw route is a hand-written path where it is on you to
+> remember `ctx.tx`, `req.assert`, and the hook chain — and the framework's own demo routes
+> were deleted precisely because they skipped them. Put data access in `registerMcpTools`
+> (Step 6) instead: those tools are automatically callable by an AI agent, by the CLI, **and
+> by a UI** over the `/api` bridge, all through the one executor. One registration, four
+> transports. See [React Hooks & the HTTP Bridge](./react-hooks.md).
 
 ```typescript
 registerRoutes(router, ctx) {
@@ -199,9 +207,9 @@ registerMiddleware()──► Add request middleware
   │
 registerHooks()     ──► Wire vetoable domain hooks
   │
-registerRoutes()    ──► Mount REST API endpoints
+registerRoutes()    ──► Mount info/liveness HTTP endpoints
   │
-registerMcpTools()  ──► Expose AI tools
+registerMcpTools()  ──► Expose actions: AI tools = CLI actions = the UI's API
   │
 subscribe()         ──► Listen to post-commit events
 ```

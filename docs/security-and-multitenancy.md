@@ -43,7 +43,50 @@ If the caller lacks permission, an HTTP `403 Forbidden` response is returned imm
 
 ---
 
-## 📦 3. Kernel Capability Sandboxing
+## 🪪 3. Who the caller is (HTTP identity)
+
+RLS and `ctx.can` both start from a **`Principal`** (`orgId`, `userId`, `roles`). Over MCP
+and the CLI that comes from flags or env. Over HTTP it comes from the identity provider the
+host is configured with — a seam, not a fixed policy.
+
+The shipped default (`createDevIdentity`) resolves in this order:
+
+1. **Session cookie** — `embody_session`, an opaque token minted by `POST /api/session`.
+   Always honoured, because a session was explicitly created.
+2. **`x-embody-org` / `x-embody-user` / `x-embody-roles` headers** — only when
+   `EMBODY_DEV_IDENTITY=1`.
+3. **`EMBODY_ORG` / `EMBODY_USER` / `EMBODY_ROLES` env** — same gate.
+
+> [!WARNING]
+> **`EMBODY_DEV_IDENTITY=1` is full impersonation.** Steps 2 and 3 trust their input
+> completely: anyone who can reach the port becomes anyone, in any org, with any role. The
+> gate is off by default and logs a warning at boot when enabled. **Never set it in
+> production.**
+
+Other properties worth knowing:
+
+- **There is no password concept.** `POST /api/session` verifies that the membership row
+  exists and mints a cookie; authentication belongs to an identity provider. Supply your
+  own via `startHost({ identity })` — `resolve()` can validate a JWT or bearer token, and
+  omitting `login()` makes the dev login route answer `501`. The bridge itself is unchanged.
+- **Sessions are in-memory by default.** `InMemorySessionStore` drops everything on
+  restart. Swap the `SessionStore` implementation when that matters.
+- **Cookie attributes:** `HttpOnly` (so JS cannot read the token — a client reads
+  `GET /api/me` instead), `SameSite=Lax`, `Path=/`, and `Secure` on https.
+- **CSRF** rests on `SameSite=Lax` plus a required `content-type: application/json` on
+  tool calls — a cross-site HTML form cannot set that header.
+- **Another org's row answers `404`, never `403`.** RLS hides it, and the error taxonomy
+  keeps it hidden: a `403` would confirm the id exists. "Hidden" and "missing" are
+  indistinguishable on purpose.
+- **Internal errors are redacted.** Only `veto`, `denied`, `not_found` and `unknown_tool`
+  messages cross the wire verbatim (they are written for humans by the plugin author);
+  anything else becomes `"Internal error"`, with the original in the server log.
+
+Full detail in [React Hooks & the HTTP Bridge](./react-hooks.md).
+
+---
+
+## 📦 4. Kernel Capability Sandboxing
 
 Untrusted or third-party plugins cannot access unauthorized system areas because `@embody/kernel` enforces **Capability Sandboxing** at boot time (Decision D7).
 

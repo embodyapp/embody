@@ -4,6 +4,7 @@
  * never a superuser back door.
  */
 import type { Principal } from "@embody/kernel";
+import { principalFrom } from "@embody/auth";
 
 export interface IdentityOptions {
   org?: string;
@@ -12,16 +13,17 @@ export interface IdentityOptions {
 }
 
 export function buildPrincipal(opts: IdentityOptions): Principal {
-  const orgId = opts.org ?? process.env.EMBODY_ORG;
-  const userId = opts.user ?? process.env.EMBODY_USER ?? "";
-  const roles = (opts.roles ?? process.env.EMBODY_ROLES ?? "owner")
-    .split(",")
-    .map((r) => r.trim())
-    .filter(Boolean);
-  if (!orgId) {
+  // Parsing lives in @embody/auth so the CLI's `--roles a,b` and the HTTP bridge's
+  // `x-embody-roles: a,b` can never drift. Only the missing-org message is ours.
+  const principal = principalFrom({
+    org: opts.org ?? process.env.EMBODY_ORG,
+    user: opts.user ?? process.env.EMBODY_USER,
+    roles: opts.roles ?? process.env.EMBODY_ROLES,
+  });
+  if (!principal) {
     throw new Error(
       "No org set. Pass --org <id> or set EMBODY_ORG. Run `embody seed` to create a dev org.",
     );
   }
-  return { orgId, userId, roles };
+  return principal;
 }

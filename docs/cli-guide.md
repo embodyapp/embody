@@ -75,6 +75,8 @@ Creates a dev organization and user in PostgreSQL, then outputs copy-pasteable e
 pnpm embody seed --name "Acme Corp" --email "admin@acme.com"
 ```
 
+The ids it prints are also what you sign into a UI with: paste them into the demo's live page, or export them and let the host's dev identity pick them up. See [React Hooks & the HTTP Bridge](./react-hooks.md#5-identity).
+
 ---
 
 ### 2. Apply Database Migrations (`embody migrate`)

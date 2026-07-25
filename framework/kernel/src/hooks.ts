@@ -27,14 +27,22 @@ interface Registration {
   handler: HookHandler<unknown>;
 }
 
-/** Thrown by a hook handler (or surfaced by the kernel) when an operation is vetoed. */
+/**
+ * Thrown by a hook handler (or surfaced by the kernel) when an operation is vetoed.
+ *
+ * `HookRegistry.run` wraps *every* throw from a handler in this, carrying the original
+ * on `cause`. That is what lets a transport tell a domain veto (a rule doing its job —
+ * safe to show a user, HTTP 409) from a bug (redacted, HTTP 500) without asking plugin
+ * authors — least of all customers under `custom/` — to throw a particular class.
+ */
 export class HookVetoError extends Error {
   constructor(
     public readonly hook: string,
     public readonly pluginId: string,
     reason: string,
+    options?: ErrorOptions,
   ) {
-    super(`Hook "${hook}" vetoed by plugin "${pluginId}": ${reason}`);
+    super(`Hook "${hook}" vetoed by plugin "${pluginId}": ${reason}`, options);
     this.name = "HookVetoError";
   }
 }
@@ -58,13 +66,30 @@ export class HookRegistry {
    * Run every handler for `hook` in order, threading the (possibly mutated) payload
    * through each. If a handler throws, the error propagates — callers run hooks
    * inside their DB transaction so a throw rolls everything back (the veto).
+   *
+   * The throw is wrapped in a `HookVetoError` naming the hook and the plugin that
+   * registered the handler. This is the only place that knows both, and doing it here
+   * means every existing veto — first-party or a customer's under `custom/` — is typed
+   * without editing a single plugin. A handler that already threw a HookVetoError
+   * (richer detail, or a re-thrown veto from a nested run) passes through untouched.
    */
   async run<T>(hook: string, payload: T, ctx: KernelContext): Promise<T> {
     const list = this.#handlers.get(hook);
     if (!list) return payload;
     let current = payload;
-    for (const { handler } of list) {
-      const result = await handler(current, ctx);
+    for (const { pluginId, handler } of list) {
+      let result: unknown;
+      try {
+        result = await handler(current, ctx);
+      } catch (err) {
+        if (err instanceof HookVetoError) throw err;
+        throw new HookVetoError(
+          hook,
+          pluginId,
+          err instanceof Error ? err.message : String(err),
+          { cause: err },
+        );
+      }
       if (result !== undefined) current = result as T;
     }
     return current;

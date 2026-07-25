@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "start": "embody-host ./embody.config.ts",
-    "dev": "embody-host ./embody.config.ts",
+    "dev": "PORT=${PORT:-3000} embody-host ./embody.config.ts",
     "migrate": "embody-host ./embody.config.ts --mode migrate-only",
     "agent": "embody mcp",
     "seed": "embody seed"
@@ -19,5 +20,9 @@
     "@embody/crm": "workspace:*",
     "@embody/ecom-fulfillment": "workspace:*",
     "@embody/host": "workspace:*"
+  },
+  "devDependencies": {
+    "@embody/db": "workspace:*",
+    "@embody/kernel": "workspace:*"
   }
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, KanbanSquare, Building2, Users, BarChart3, Settings, Search, Briefcase } from 'lucide-react';
+import { LayoutDashboard, KanbanSquare, Building2, Users, BarChart3, Settings, Search, Briefcase, Radio } from 'lucide-react';
 import { useB2b } from '../data/b2bStore';
 import { Dashboard } from './pages/Dashboard';
 import { Pipeline } from './pages/Pipeline';
@@ -10,6 +10,7 @@ import { AccountDetail } from './pages/AccountDetail';
 import { Contacts } from './pages/Contacts';
 import { Reports } from './pages/Reports';
 import { SettingsPage } from './pages/SettingsPage';
+import { LivePipeline } from '../live/LivePipeline';
 
 const NAV = [
   { to: '/b2b/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -19,6 +20,10 @@ const NAV = [
   { to: '/b2b/reports', label: 'Reports', icon: BarChart3 },
   { to: '/b2b/settings', label: 'Settings', icon: Settings },
 ];
+
+// Kept out of NAV: every page above reads the in-browser demo store, this one reads the
+// real deployment over HTTP. Separating them in the sidebar keeps that honest.
+const LIVE_NAV = [{ to: '/b2b/live', label: 'Live data', icon: Radio }];
 
 function CommandPalette({ onClose }: { onClose: () => void }) {
   const { accounts, deals, contacts } = useB2b();
@@ -99,6 +104,12 @@ export function B2bSection() {
             {n.label === 'Accounts' && <span className="nav-count">{accounts.length}</span>}
           </NavLink>
         ))}
+        <div className="sidebar-section">Connected</div>
+        {LIVE_NAV.map((n) => (
+          <NavLink key={n.to} to={n.to} className={({ isActive }) => `nav-item b2b ${isActive ? 'active' : ''}`}>
+            <n.icon size={16} /> {n.label}
+          </NavLink>
+        ))}
         <div className="sidebar-spacer" />
         <div className="sidebar-persona">
           <strong>Alex Rivera</strong>
@@ -117,6 +128,7 @@ export function B2bSection() {
           <Route path="contacts" element={<Contacts />} />
           <Route path="reports" element={<Reports />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="live" element={<LivePipeline />} />
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Routes>
       </main>

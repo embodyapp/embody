@@ -81,8 +81,15 @@ plugins that each re-silo the same customer."
 ### D4 — Identity and central authorization
 `core` owns `users`, `orgs`, `memberships` (who belongs to which company, with what
 role). Authorization is resolved centrally in the kernel and exposed to plugins as
-`ctx.can(action, resource)`. **Every REST route and every MCP (AI) tool passes
-through the same check** — the AI tools are not a back door around permissions.
+`ctx.can(action, resource)`. **Every transport passes through the same check** — an AI
+agent over MCP, a script over the CLI, and a browser over the HTTP tool bridge
+(`framework/host/src/api.ts`) all reach a handler through the one executor, so the AI
+tools are not a back door around permissions and neither is the UI.
+
+Identity itself is a swappable seam: the host ships a dev-grade provider (session cookie,
+plus header impersonation gated behind `EMBODY_DEV_IDENTITY=1`), and a deployment passes
+its own `IdentityProvider` to `startHost` without the bridge changing. See
+docs/react-hooks.md §5.
 
 ### D5 — Durable events and jobs
 Domain events (`deal.created`, `account.updated`) are written into a database
@@ -137,7 +144,8 @@ architecture makes customization easy and upgrade-safe:
    runs the `before*` hook chain **inside the tenant transaction**. Your handler sees
    the whole row — including fields the caller never sent — and throwing rolls the write
    back. So you change how a catalog app behaves without editing it, and the rule binds
-   AI agents, REST and the CLI identically.
+   every caller identically — an AI agent, the CLI, and a browser (where it surfaces as a
+   409 carrying your own message).
 2. **Enabling a customization touches only your files.** A deployment lives in
    `deploy/`, so the line that turns your plugin on is never in an upstream file. (If it
    were, every upgrade would conflict on it, and the promise above would be false.)
@@ -168,13 +176,16 @@ is fully set up before `crm`).
 6.  init(ctx)             Plugin setup; may consume other services via ctx.services
 7.  registerMiddleware    Add request-pipeline middleware (kernel controls ordering)
 8.  registerHooks         Register sync, in-transaction, vetoable domain hooks
-9.  registerRoutes        Mount REST routes (all wrapped with tenancy + authz)
-10. registerMcpTools      Register MCP/AI tools (Zod-validated, same authz as REST)
+9.  registerRoutes        Mount plugin HTTP routes (info/liveness; data access belongs
+                         in tools, which every transport shares)
+10. registerMcpTools      Register MCP/AI tools (Zod-validated). These become the
+                         agent's tools, the CLI's actions AND the UI's API at once.
     registerMcpResources  Register MCP resources (crm://deals/pipeline, …)
 11. registerCliCommands   Add CLI subcommands
 12. subscribe(bus)        Subscribe to async post-commit events
 ── after all plugins ──
-13. serve                 a transport starts (HTTP host, or the stdio MCP server)
+13. serve                 a transport starts (HTTP host — which also mounts /health and
+                         the /api tool bridge — or the stdio MCP server)
 ```
 
 **Why this order matters:** migrations must run before anything queries the DB;
@@ -186,10 +197,13 @@ fully constructed first.
 tools + CLI commands during boot; `@embody/host`'s `makeExecutor` turns a booted runtime +
 a principal into the single action path — it builds a `RequestContext` whose `tx` is a
 tenant-scoped `withTenant` transaction on the app role, so every tool runs under RLS + the
-same `can()` authz as REST (D4). Three skins share it: `embody mcp` (a stdio MCP server —
-the surface an AI agent registers), `embody call/tools` (one-shot + discovery, for scripting/
-CI), and `embody serve` (HTTP). The CLI hardcodes no actions — it reflects whatever the
-enabled apps registered, so installing an app makes its tools agent-callable with no CLI change.
+same `can()` authz (D4). **Four skins share it:** `embody mcp` (a stdio MCP server — the
+surface an AI agent registers), `embody call/tools` (one-shot + discovery, for scripting/
+CI), the **HTTP tool bridge** (`POST /api/tools/:name`, mounted by the host; `@embody/react`
+is its browser client), and `embody serve` (the server that hosts the bridge). None of them
+hardcodes an action — they reflect whatever the enabled apps registered, so installing an
+app makes its tools agent-callable, script-callable and UI-callable with no change to any
+transport. Critically, there is no REST back door: REST is not a separate door.
 
 ---
 
@@ -385,6 +399,10 @@ framework/      Framework / runtime — not user-selectable.
                 always registered by the host; every app dependsOn it. Not selectable.
   host/         @embody/host: reusable server engine. Boots the kernel, reads a
                 deployment's embody.config.ts, registers core + enabled plugins, serves.
+                Also mounts the /api tool bridge: every plugin tool over HTTP, on the
+                same executor as MCP and the CLI.
+  react/        @embody/react: React hooks over that bridge (useToolQuery/useToolMutation,
+                useCan, useTools). Zero runtime deps; react is a peer dependency.
 
 catalog/        THE CATALOG — selectable business apps.
   crm/          @embody/crm plugin: deals + contact/account facets on core.parties
@@ -393,7 +411,8 @@ catalog/        THE CATALOG — selectable business apps.
 
 examples/       REFERENCE — copy these, don't edit them.
   service-crm/  A deployment enabling catalog apps only
-  demo-ui/      The demo SPA: two complete CRMs + AI copilot (Vite, port 5173)
+  demo-ui/      The demo SPA: two complete CRMs + AI copilot (Vite, port 5173).
+                Its /b2b/live page is the worked @embody/react example.
 
 ── YOURS ─ upstream never writes here ────────────────────────────────────────────
 

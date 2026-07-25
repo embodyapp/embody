@@ -20,7 +20,14 @@ import type {
   RequestContext,
 } from "@embody/kernel";
 import { createRequestContext } from "@embody/kernel";
-import { createDb, bootstrap, runMigrations, withTenant, type DbHandle } from "@embody/db";
+import {
+  createDb,
+  bootstrap,
+  runMigrations,
+  withMigrationLock,
+  withTenant,
+  type DbHandle,
+} from "@embody/db";
 import { RbacAuthorizer } from "@embody/auth";
 import { corePlugin } from "@embody/core";
 import { resolvePlugins, type EmbodyConfig } from "./config.ts";
@@ -77,7 +84,6 @@ export async function bootRuntime(opts: BootRuntimeOptions): Promise<Runtime> {
   const { owner: ownerUrl, app: appUrl } = resolveDbUrls(opts.databaseUrl);
 
   const ownerDb = createDb(ownerUrl);
-  await bootstrap(ownerDb.sql);
 
   const kernel = new EmbodyKernel({
     logger,
@@ -91,7 +97,13 @@ export async function bootRuntime(opts: BootRuntimeOptions): Promise<Runtime> {
   const plugins: EmbodyPlugin[] = [corePlugin, ...resolvePlugins(opts.config, logger)];
   for (const plugin of plugins) kernel.register(plugin);
 
-  const booted = await kernel.boot();
+  // Bootstrap and every plugin's migrations touch shared objects (the app role, the
+  // migration ledger, per-schema grants), so the phase runs under one advisory lock —
+  // otherwise two deployables booting against the same database race each other.
+  const booted = await withMigrationLock(ownerDb.sql, async () => {
+    await bootstrap(ownerDb.sql);
+    return kernel.boot();
+  });
   // App-role handle created after bootstrap (which creates the app role).
   const appDb = createDb(appUrl);
 

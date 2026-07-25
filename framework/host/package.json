@@ -18,8 +18,11 @@
     "@embody/core": "workspace:*",
     "@embody/db": "workspace:*",
     "@embody/kernel": "workspace:*",
+    "@embody/plugin-sdk": "workspace:*",
     "@hono/node-server": "^1.13.7",
-    "hono": "^4.6.14"
+    "hono": "^4.6.14",
+    "zod": "^3.24.1",
+    "zod-to-json-schema": "^3.24.1"
   },
   "devDependencies": {
     "tsx": "^4.19.2"

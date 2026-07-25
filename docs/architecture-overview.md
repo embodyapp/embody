@@ -63,7 +63,7 @@ Embody was built around **eight fundamental design decisions (D1–D8)**:
 ### D4. Centralized Authorization
 - `core` owns `users`, `orgs`, and `memberships`.
 - Authorization is checked centrally via `ctx.can(action, resource)`.
-- **Every REST route and AI tool (MCP) passes through the same security check.**
+- **Every transport passes through the same security check** — an AI agent over MCP, a script over the CLI, and a browser over the `/api` tool bridge all reach a handler through the one executor. See [React Hooks & the HTTP Bridge](./react-hooks.md).
 
 ### D5. Durable Events & Outbox Pattern
 - Domain events (e.g. `deal.created`) are written to a database outbox in the **same transaction** as the data change.
@@ -105,12 +105,13 @@ When Embody boots up, the kernel executes plugins in a strict sequence:
  6. Init             ───► Run setup logic (can consume other services)
  7. Register Middle. ───► Add HTTP middleware to pipeline
  8. Register Hooks   ───► Wire synchronous, vetoable domain hooks
- 9. Register Routes  ───► Mount REST endpoints (wrapped in authz & RLS)
-10. Register MCP     ───► Mount AI tools and resources
+ 9. Register Routes  ───► Mount plugin HTTP routes (wrapped in authz & RLS)
+10. Register MCP     ───► Mount AI tools and resources. These same tools are what the
+                          CLI runs and what the /api bridge exposes to a UI.
 11. Register CLI     ───► Mount CLI subcommands
 12. Subscribe Events ───► Listen to post-commit domain events
  ─── Boot complete ───
-13. Serve            ───► HTTP server starts accepting requests
+13. Serve            ───► HTTP server starts: /health, then the /api tool bridge
 ```
 
 ---

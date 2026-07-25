@@ -10,24 +10,22 @@
  * A hook that throws rolls the transaction back; nothing is persisted.
  */
 import { fileURLToPath } from "node:url";
-import { z } from "zod";
 import type { EmbodyPlugin, KernelContext } from "@embody/kernel";
 import { defineEntity, type EntityRepository } from "@embody/plugin-sdk";
+// Schemas live in a browser-safe leaf module (zod only), so a UI can import the very
+// shapes the server validates against instead of hand-copying them.
+import {
+  crmCreateDealInput,
+  crmGetDealInput,
+  crmQueryDealsInput,
+  crmUpdateDealInput,
+  type DealRow,
+} from "./schemas.ts";
 
 /** Absolute path to this plugin's SQL migration directory. */
 export const crmMigrationsDir = fileURLToPath(new URL("../migrations", import.meta.url));
 
-/** Row shape of `crm.deals`, as returned by Postgres (snake_case columns). */
-export interface DealRow {
-  id: string;
-  org_id: string;
-  party_id: string | null;
-  title: string;
-  stage: string;
-  amount: string | null;
-  custom_fields: Record<string, unknown>;
-  [key: string]: unknown;
-}
+export type { DealRow };
 
 /**
  * The deal repository, memoised per KernelContext (i.e. per boot) so several kernels
@@ -105,13 +103,7 @@ export const crmPlugin: EmbodyPlugin = {
       description:
         "Create a deal in the current org. Registers it for global search and, if a " +
         "partyId is given, links the deal to that account/contact.",
-      input: z.object({
-        title: z.string().min(1),
-        stage: z.string().optional(),
-        amount: z.number().nonnegative().optional(),
-        partyId: z.string().uuid().optional(),
-        customFields: z.record(z.unknown()).optional(),
-      }),
+      input: crmCreateDealInput,
       handler: (input, req) => {
         req.assert("write", "crm:deal");
         return deals.create(req, {
@@ -130,14 +122,7 @@ export const crmPlugin: EmbodyPlugin = {
         "Update a deal in the current org. Only the fields you supply change; custom " +
         "fields are merged, not replaced. Domain rules registered by other enabled " +
         "plugins run first and may reject the update.",
-      input: z.object({
-        id: z.string().uuid(),
-        title: z.string().min(1).optional(),
-        stage: z.string().optional(),
-        amount: z.number().nonnegative().optional(),
-        partyId: z.string().uuid().optional(),
-        customFields: z.record(z.unknown()).optional(),
-      }),
+      input: crmUpdateDealInput,
       handler: (input, req) => {
         req.assert("write", "crm:deal");
         const patch: Partial<DealRow> = {};
@@ -153,7 +138,7 @@ export const crmPlugin: EmbodyPlugin = {
     mcp.tool({
       name: "crm_get_deal",
       description: "Fetch a single deal by id from the current org.",
-      input: z.object({ id: z.string().uuid() }),
+      input: crmGetDealInput,
       handler: (input, req) => {
         req.assert("read", "crm:deal");
         return deals.get(req, input.id);
@@ -163,10 +148,7 @@ export const crmPlugin: EmbodyPlugin = {
     mcp.tool({
       name: "crm_query_deals",
       description: "List deals in the current org, optionally filtered by stage.",
-      input: z.object({
-        stage: z.string().optional(),
-        limit: z.number().int().positive().max(100).optional(),
-      }),
+      input: crmQueryDealsInput,
       handler: (input, req) => {
         req.assert("read", "crm:deal");
         const limit = input.limit ?? 50;

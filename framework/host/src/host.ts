@@ -14,6 +14,8 @@ import { createConsoleLogger } from "@embody/kernel";
 import type { EmbodyPlugin, Logger } from "@embody/kernel";
 import { bootRuntime } from "./runtime.ts";
 import type { EmbodyConfig } from "./config.ts";
+import { mountApi } from "./api.ts";
+import { createDevIdentity, type IdentityProvider } from "./identity.ts";
 
 export type HostMode = "serve" | "migrate-only";
 
@@ -28,6 +30,14 @@ export interface StartHostOptions {
   port?: number;
   /** Override the logger (tests pass a silent one). */
   logger?: Logger;
+  /** Mount the `/api` tool bridge in serve mode. Default true. */
+  api?: boolean;
+  /**
+   * How an HTTP request's principal is established. Defaults to the dev provider
+   * (session cookie + `EMBODY_DEV_IDENTITY`-gated headers). Supply your own to put a
+   * real identity provider in front without touching the bridge.
+   */
+  identity?: IdentityProvider;
 }
 
 export interface RunningHost {
@@ -67,6 +77,17 @@ export async function startHost(opts: StartHostOptions): Promise<RunningHost> {
       mcpTools: booted.mcp.tools.length,
     }),
   );
+
+  // The tool bridge: every enabled plugin's MCP tools, callable over HTTP through the
+  // same executor. On by default because it is how a UI talks to a deployment, and safe
+  // by default because every route refuses an unresolvable principal.
+  if (opts.api !== false) {
+    mountApi(app, {
+      runtime,
+      logger,
+      identity: opts.identity ?? createDevIdentity({ sql: runtime.ownerDb.sql, logger }),
+    });
+  }
 
   // No static UI is served here on purpose. The framework must not reach across
   // buckets into a sibling directory by relative path — the demo SPA is an example,

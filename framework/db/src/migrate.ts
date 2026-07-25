@@ -18,6 +18,35 @@ import type { Sql } from "./client.ts";
 /** The non-owner role the api-server uses for request-path (RLS-subject) queries. */
 export const APP_ROLE = "embody_app";
 
+/** Advisory-lock key for the migration phase. Arbitrary, but must stay stable. */
+const MIGRATION_LOCK_KEY = 4_051_982_071;
+
+/**
+ * Run `fn` holding a database-wide advisory lock, so only one process migrates at a
+ * time. More than one deployable can share a database — `pnpm dev` boots both the
+ * reference deployment and `deploy/acme` — and they bootstrap the same roles and
+ * re-grant the same catalog schemas on every boot. Postgres fails a concurrent
+ * GRANT / ALTER DEFAULT PRIVILEGES on one object with "tuple concurrently updated",
+ * so the whole phase is serialised rather than made per-statement idempotent.
+ *
+ * The lock is session-scoped, which means it must be taken on a single reserved
+ * connection: `fn` still uses the pool, and callers that don't take the lock are not
+ * excluded — every path that migrates goes through here.
+ */
+export async function withMigrationLock<T>(sql: Sql, fn: () => Promise<T>): Promise<T> {
+  const conn = await sql.reserve();
+  try {
+    await conn`select pg_advisory_lock(${MIGRATION_LOCK_KEY})`;
+    try {
+      return await fn();
+    } finally {
+      await conn`select pg_advisory_unlock(${MIGRATION_LOCK_KEY})`;
+    }
+  } finally {
+    conn.release();
+  }
+}
+
 /**
  * One-time bootstrap: the meta schema, the migration ledger, and the app role.
  * Idempotent. Runs with the owner role before any plugin migrations.

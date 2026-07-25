@@ -4,15 +4,27 @@ Embody provides three distinct extension mechanisms for intercepting requests, m
 
 | Surface | Timing | Execution Context | Can Veto / Block? |
 | :--- | :--- | :--- | :--- |
-| **HTTP Middleware** | Before REST Handler | Web Server Request Pipeline | Yes (return HTTP response early) |
+| **HTTP Middleware** | Before any HTTP handler | Web Server Request Pipeline | Yes (return HTTP response early) |
 | **Domain Hooks** | In-Transaction (Before DB write) | Inside Postgres DB Transaction | Yes (throw error to abort transaction) |
 | **Domain Events** | Post-Commit (After DB write) | Asynchronous Background Worker | No (side-effects only) |
+
+> [!IMPORTANT]
+> **A veto message is user-facing copy.** The kernel wraps every throw from a hook handler
+> in a `HookVetoError` (carrying your original error as `cause`), and the HTTP bridge turns
+> that into a **`409` with `kind: "veto"` and your message verbatim** — which a UI shows in
+> a toast, and an AI agent reads to decide what to do next. Write the sentence for the
+> person who will read it: say what is required and what to do about it, not `"invalid
+> state"`. The structured `{hook, plugin}` travels separately in `details`, so you do not
+> need to name yourself in the text. See [React Hooks & the HTTP Bridge](./react-hooks.md#3-errors-the-taxonomy).
+>
+> You never need to `throw new HookVetoError(...)` yourself — a plain `throw new Error("…")`
+> is typed for you, including from a plugin under `custom/`.
 
 ---
 
 ## 1. HTTP Request Middleware (`registerMiddleware`)
 
-Request middleware runs on incoming REST HTTP requests before reaching your plugin's route handlers. Use middleware for logging, rate-limiting, custom header checks, or request transformation.
+Request middleware runs on every incoming HTTP request — plugin routes and `/api` tool calls alike — before the handler. Use it for logging, rate-limiting, custom header checks, or request transformation.
 
 ### Registering Middleware
 

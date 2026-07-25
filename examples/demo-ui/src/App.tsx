@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { Zap, Briefcase, ShoppingBag, Layers, WifiOff } from 'lucide-react';
+import { EmbodyProvider } from '@embody/react';
 import { ToastProvider } from './ui/Toast';
 import { B2bProvider } from './data/b2bStore';
 import { EcomProvider } from './data/ecomStore';
@@ -56,26 +57,30 @@ function TopBar() {
 export function App() {
   return (
     <ToastProvider>
-      <B2bProvider>
-        <EcomProvider>
-          <CustomizationProvider>
-            <BrowserRouter>
-              <CopilotProvider>
-                <div className="shell">
-                  <TopBar />
-                  <Routes>
-                    <Route path="/" element={<Navigate to="/b2b" replace />} />
-                    <Route path="/b2b/*" element={<B2bSection />} />
-                    <Route path="/ecom/*" element={<EcomSection />} />
-                    <Route path="*" element={<Navigate to="/b2b" replace />} />
-                  </Routes>
-                </div>
-                <CopilotLauncher />
-              </CopilotProvider>
-            </BrowserRouter>
-          </CustomizationProvider>
-        </EcomProvider>
-      </B2bProvider>
+      {/* Inside ToastProvider so the live page can toast a rule's veto. Talks to the
+          host's /api bridge through Vite's proxy, so the session cookie is same-origin. */}
+      <EmbodyProvider>
+        <B2bProvider>
+          <EcomProvider>
+            <CustomizationProvider>
+              <BrowserRouter>
+                <CopilotProvider>
+                  <div className="shell">
+                    <TopBar />
+                    <Routes>
+                      <Route path="/" element={<Navigate to="/b2b" replace />} />
+                      <Route path="/b2b/*" element={<B2bSection />} />
+                      <Route path="/ecom/*" element={<EcomSection />} />
+                      <Route path="*" element={<Navigate to="/b2b" replace />} />
+                    </Routes>
+                  </div>
+                  <CopilotLauncher />
+                </CopilotProvider>
+              </BrowserRouter>
+            </CustomizationProvider>
+          </EcomProvider>
+        </B2bProvider>
+      </EmbodyProvider>
     </ToastProvider>
   );
 }

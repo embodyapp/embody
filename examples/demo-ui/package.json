@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.114.0",
+    "@embody/crm": "workspace:*",
+    "@embody/react": "workspace:*",
     "lucide-react": "^1.26.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

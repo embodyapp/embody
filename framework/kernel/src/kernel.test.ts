@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { EmbodyKernel } from "./kernel.ts";
 import { topoSort, PluginError } from "./plugin-manager.ts";
+import { HookVetoError } from "./hooks.ts";
 import { createSilentLogger } from "./logger.ts";
 import type { EmbodyPlugin, KernelContext } from "./types.ts";
 import type { DomainEvent } from "./events.ts";
@@ -108,21 +109,50 @@ describe("hooks", () => {
     expect(result).toEqual({ amount: 30 }); // (5 + 10) * 2
   });
 
-  it("propagates a veto (thrown error) from a hook", async () => {
+  it("propagates a veto (thrown error) from a hook, typed as HookVetoError", async () => {
+    const cause = new Error("deletion not allowed");
     const p = plugin({
       id: "compliance",
       schema: "compliance",
       capabilities: { hooks: ["crm.deal.beforeDelete"] },
       registerHooks: (hooks) => {
         hooks.register("crm.deal.beforeDelete", () => {
-          throw new Error("deletion not allowed");
+          throw cause;
+        });
+      },
+    });
+    const booted = await new EmbodyKernel(silent()).register(p).boot();
+    const err = await booted.hooks
+      .run("crm.deal.beforeDelete", {}, {} as KernelContext)
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    // A plain throw is wrapped, so transports can tell a domain rule from a bug —
+    // without the plugin (which may be customer-owned) knowing the class exists.
+    expect(err).toBeInstanceOf(HookVetoError);
+    expect((err as HookVetoError).hook).toBe("crm.deal.beforeDelete");
+    expect((err as HookVetoError).pluginId).toBe("compliance");
+    expect((err as HookVetoError).cause).toBe(cause);
+    expect(String(err)).toMatch(/not allowed/);
+  });
+
+  it("passes a HookVetoError thrown by a handler through untouched", async () => {
+    const veto = new HookVetoError("crm.deal.beforeDelete", "compliance", "locked");
+    const p = plugin({
+      id: "compliance",
+      schema: "compliance",
+      capabilities: { hooks: ["crm.deal.beforeDelete"] },
+      registerHooks: (hooks) => {
+        hooks.register("crm.deal.beforeDelete", () => {
+          throw veto;
         });
       },
     });
     const booted = await new EmbodyKernel(silent()).register(p).boot();
     await expect(
       booted.hooks.run("crm.deal.beforeDelete", {}, {} as KernelContext),
-    ).rejects.toThrow(/not allowed/);
+    ).rejects.toBe(veto);
   });
 
   it("blocks registering an undeclared hook (capability enforcement)", async () => {

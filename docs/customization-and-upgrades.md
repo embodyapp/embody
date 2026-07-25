@@ -312,7 +312,7 @@ tenant transaction**, having first merged your patch onto the stored row:
 
 - your rule sees the **whole row**, including fields the caller never sent;
 - throwing **rolls the transaction back** — that is the veto;
-- it applies to every caller: AI agents, REST, and the CLI;
+- it applies to every caller: AI agents, the CLI, and a UI over the `/api` bridge;
 - your hook receives the transaction (`ctx.tx`) and may query before deciding.
 
 `custom/acme-crm` is a worked example, with `write-path.integration.test.ts` proving

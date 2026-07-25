@@ -6,7 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "start": "embody-host ./embody.config.ts",
-    "dev": "embody-host ./embody.config.ts",
+    "dev": "PORT=${PORT:-3100} embody-host ./embody.config.ts",
     "migrate": "embody-host ./embody.config.ts --mode migrate-only",
     "agent": "embody mcp",
     "seed": "embody seed"

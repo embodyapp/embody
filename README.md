@@ -21,7 +21,7 @@ Imagine you are building software for a growing company. Usually, companies buy 
 | Concept | Plain Language Explanation |
 | :--- | :--- |
 | **Microkernel** | A tiny core engine. Features (CRM, Accounting) plug into it as separate packages. |
-| **Plugin** | A self-contained package with its own database tables, REST API routes, and AI tools. |
+| **Plugin** | A self-contained package with its own database tables, AI tools, and CLI commands. Registering a tool once makes it callable by an agent, a script, and a UI. |
 | **Multi-Tenant (RLS)** | One instance can serve many companies ("tenants") safely. Row-Level Security in Postgres automatically isolates company data. |
 | **Shared Core & Facets** | A person is stored once in `core.parties`. The CRM plugin adds a "contact profile" facet to that same person instead of copying them. |
 | **Entity Registry** | A lightweight pointer index (`core.entities`) enabling global search across all plugins and linking records (e.g. linking a Deal to a Person). |
@@ -81,7 +81,8 @@ embody/
 │   ├── core/              @embody/core        Shared entities, parties, registry
 │   ├── db/                @embody/db          Drizzle ORM, RLS helpers, migration runner
 │   ├── auth/              @embody/auth        Principals, RBAC, req.assert() checks
-│   ├── host/              @embody/host        HTTP engine that boots a deployment
+│   ├── host/              @embody/host        HTTP engine + the /api tool bridge
+│   ├── react/             @embody/react       React hooks over that bridge
 │   ├── cli/               @embody/cli         The `embody` binary
 │   ├── mcp-server/        @embody/mcp-server  Stdio MCP runner for AI agents
 │   └── plugin-sdk/        @embody/plugin-sdk  defineEntity: runs hooks around real writes
@@ -93,7 +94,7 @@ embody/
 │
 ├── examples/           📖  UPSTREAM — copy these, don't edit them.
 │   ├── service-crm/       A reference deployment (catalog apps only)
-│   └── demo-ui/           The demo SPA: two full CRMs + AI copilot
+│   └── demo-ui/           The demo SPA: two full CRMs + AI copilot + a live page
 │
 ├── custom/             🛠️  YOURS — your plugins.
 │   └── acme-crm/          Worked example: a HIPAA gate on deal closes
@@ -125,6 +126,7 @@ We have created comprehensive, step-by-step guides for developers of all experie
 | 💻 [**CLI Guide**](file:///Users/nimrodfeldman/playground/embody/docs/cli-guide.md) | Complete guide for running the `embody` CLI binary, invoking tools, seeding data, and scaffolding apps. |
 | 🔄 [**Customization & Upgrades**](file:///Users/nimrodfeldman/playground/embody/docs/customization-and-upgrades.md) | Real-world example comparing how a **B2B SaaS** vs **E-Commerce** company customizes the CRM without forking. |
 | 🤖 [**AI & MCP Integration**](file:///Users/nimrodfeldman/playground/embody/docs/mcp-and-ai.md) | How Model Context Protocol works and how to write AI tools for Embody. |
+| ⚛️ [**React Hooks & the HTTP Bridge**](file:///Users/nimrodfeldman/playground/embody/docs/react-hooks.md) | Building a UI on `@embody/react`: the `/api` tool bridge, the error taxonomy, caching, and identity. |
 | 🔒 [**Security & Multi-Tenancy**](file:///Users/nimrodfeldman/playground/embody/docs/security-and-multitenancy.md) | PostgreSQL Row-Level Security (RLS) and Kernel Capability Sandboxing. |
 | 🧪 [**Testing & Troubleshooting**](file:///Users/nimrodfeldman/playground/embody/docs/testing-and-troubleshooting.md) | Writing Vitest integration tests and debugging common development issues. |
 

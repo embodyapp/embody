@@ -82,9 +82,33 @@ To start all packages and services in development watch mode:
 pnpm dev
 ```
 
-This uses **Turbo Repo** (`turbo run dev`) to start the services in parallel. The host server boots up, topology-sorts installed plugins, runs migrations automatically, and mounts REST endpoints and MCP tools.
+This uses **Turbo Repo** (`turbo run dev`) to start the services in parallel. The host server boots up, topology-sorts installed plugins, runs migrations automatically, and mounts `/health` plus the `/api` tool bridge — every enabled plugin's tools, callable over HTTP through the same executor as MCP and the CLI.
 
 You will see logs indicating that `@embody/core` and `@embody/crm` plugins have initialized successfully.
+
+### Running the UI against a live host
+
+The demo SPA has a page that reads and writes real rows instead of the in-browser demo store. It needs an org to sign in as, and a host willing to accept a password-less dev login:
+
+```bash
+pnpm --filter acme-deployment migrate
+pnpm --filter acme-deployment seed          # prints orgId / userId
+```
+
+Then, in two terminals:
+
+```bash
+EMBODY_DEV_IDENTITY=1 PORT=3100 pnpm --filter acme-deployment dev
+```
+
+```bash
+pnpm --filter @embody/demo-ui dev           # http://localhost:5173
+```
+
+Open **http://localhost:5173/b2b/live** and sign in with the ids `seed` printed. Vite proxies `/api` to the host, so the client is same-origin and the session cookie just works.
+
+> [!WARNING]
+> `EMBODY_DEV_IDENTITY=1` makes the host trust `x-embody-*` headers with no authentication. It is a local-development switch only — see [Security & Multi-Tenancy](./security-and-multitenancy.md).
 
 ---
 

@@ -49,7 +49,49 @@ describe("MyCustomPlugin Integration Test", () => {
 
 ---
 
-## 🔧 3. Troubleshooting Common Errors
+## 🌐 3. Testing the HTTP Tool Bridge
+
+Hono needs no listening socket: `app.request(...)` (or `app.fetch(new Request(...))`) drives the real app in-process, which makes bridge tests as fast as unit tests.
+
+```typescript
+const res = await runtime.booted.app.request("/api/tools/crm_query_deals", {
+  method: "POST",
+  headers: {
+    "content-type": "application/json",   // required — the bridge's CSRF check
+    "x-embody-org": orgId,                // needs EMBODY_DEV_IDENTITY, or pass
+    "x-embody-user": userId,              // allowUnauthenticatedIdentity to createDevIdentity
+  },
+  body: JSON.stringify({ input: { limit: 50 } }),
+});
+expect(res.status).toBe(200);
+const { result } = await res.json();
+```
+
+Two levels are worth keeping separate:
+
+- **No database.** Hand-build a fake `Runtime` whose `booted.mcp.tools` are real Zod schemas with handlers that throw the failures you care about, and never touch `req.tx`. See `framework/host/src/api.test.ts` — it covers the whole request path in milliseconds.
+- **Real Postgres.** Only for what a fake cannot show: RLS, RBAC and genuine vetoes over HTTP. See `examples/service-crm/src/api.integration.test.ts`.
+
+### Testing React hooks
+
+This repo has no vitest config files, so the DOM environment is selected per file with a docblock pragma on **line 1**:
+
+```typescript
+// @vitest-environment happy-dom
+```
+
+`@testing-library/react`'s automatic cleanup needs `globals: true`, which we do not set — call it yourself or renders leak between tests:
+
+```typescript
+import { cleanup } from "@testing-library/react";
+afterEach(cleanup);
+```
+
+Most hook behaviour is really cache behaviour, and is covered without React at all in `framework/react/src/cache.test.ts`. Keep the rendered tests for what only React can show — StrictMode's double mount, and optimistic rollback.
+
+---
+
+## 🔧 4. Troubleshooting Common Errors
 
 ### Error 1: `Capability Violation Error`
 ```text

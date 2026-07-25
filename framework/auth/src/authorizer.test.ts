@@ -37,4 +37,30 @@ describe("RbacAuthorizer", () => {
   it("combines grants across multiple roles", () => {
     expect(authz.can(principal(["ghost", "viewer"]), "read", "x:y")).toBe(true);
   });
+
+  describe("grantsFor", () => {
+    it("returns the permissions a role actually holds", () => {
+      expect(authz.grantsFor(principal(["viewer"]))).toEqual([
+        { action: "read", resource: "*" },
+      ]);
+    });
+
+    it("unions roles and drops duplicates", () => {
+      // owner and admin hold the identical grant in the default policy.
+      expect(authz.grantsFor(principal(["owner", "admin"]))).toEqual([
+        { action: "*", resource: "*" },
+      ]);
+    });
+
+    it("returns nothing for unknown roles", () => {
+      expect(authz.grantsFor(principal(["ghost"]))).toEqual([]);
+    });
+
+    it("agrees with can() for every grant it reports", () => {
+      const p = principal(["member"]);
+      for (const g of authz.grantsFor(p)) {
+        expect(authz.can(p, g.action, "crm:deal")).toBe(true);
+      }
+    });
+  });
 });

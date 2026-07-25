@@ -74,7 +74,8 @@ The `framework/` directory contains the foundational, non-selectable framework m
 | **`mcp-server`**| [`framework/mcp-server`](file:///Users/nimrodfeldman/playground/embody/framework/mcp-server) | Stdio Model Context Protocol (MCP) server runner that exposes plugin tools/resources to AI assistants. |
 | **`cli`** | [`framework/cli`](file:///Users/nimrodfeldman/playground/embody/framework/cli) | The `embody` command-line binary powering CLI subcommands registered by plugins. |
 | **`plugin-sdk`**| [`framework/plugin-sdk`](file:///Users/nimrodfeldman/playground/embody/framework/plugin-sdk) | `defineEntity`, the write path plugins build on. It runs the `before*`/`after*` hook chains **inside the tenant transaction** around every entity write, so a rule registered by another plugin genuinely vetoes the write (a throw rolls it back). |
-| **`host`** | [`framework/host`](file:///Users/nimrodfeldman/playground/embody/framework/host) | Reusable Hono web server runner. Boots kernel, runs plugin lifecycle, mounts routes, and serves HTTP requests. |
+| **`host`** | [`framework/host`](file:///Users/nimrodfeldman/playground/embody/framework/host) | Reusable Hono web server runner. Boots kernel, runs plugin lifecycle, and serves HTTP. Also mounts the **`/api` tool bridge** (`api.ts`, `errors.ts`, `identity.ts`): every plugin tool callable over HTTP through the same executor as MCP and the CLI. |
+| **`react`** | [`framework/react`](file:///Users/nimrodfeldman/playground/embody/framework/react) | `@embody/react` — hooks over that bridge (`useToolQuery`, `useToolMutation`, `useTools`, `useCan`), with a small `useSyncExternalStore` cache. Zero runtime dependencies; `react` is a peer dependency. See [React Hooks](./react-hooks.md). |
 
 ---
 
@@ -83,7 +84,8 @@ The `framework/` directory contains the foundational, non-selectable framework m
 The `catalog/` directory holds selectable business feature plugins that a deployment can enable in its `embody.config.ts`.
 
 - [`catalog/crm/`](file:///Users/nimrodfeldman/playground/embody/catalog/crm): The `@embody/crm` plugin package.
-  - `src/plugin.ts`: Defines `crmPlugin` (`EmbodyPlugin`), declaring capabilities, Drizzle migrations, REST routes (`/crm`), and MCP tools (`crm_create_deal`, `crm_query_deals`).
+  - `src/plugin.ts`: Defines `crmPlugin` (`EmbodyPlugin`), declaring capabilities, Drizzle migrations, an info route (`/crm`), and MCP tools (`crm_create_deal`, `crm_query_deals`, …). Those tools are simultaneously the agent's actions, the CLI's actions, and the UI's API.
+  - `src/schemas.ts`: The tool input schemas and `DealRow`, in a leaf module importing **only zod** — exported as `@embody/crm/schemas` so a browser can share the exact shapes the server validates against. Every catalog app should follow this pattern.
   - `migrations/`: Versioned SQL migrations creating the `crm` Postgres schema and `crm.deals` table.
 
 ---
@@ -94,7 +96,7 @@ Upstream-owned samples. They exist to be read and copied; editing them costs you
 merge conflict on the next upgrade.
 
 - [`examples/service-crm/`](file:///Users/nimrodfeldman/playground/embody/examples/service-crm): A reference deployment enabling **catalog apps only**. Copy it, or run `embody new deployment <yours>`.
-- [`examples/demo-ui/`](file:///Users/nimrodfeldman/playground/embody/examples/demo-ui): The demo SPA — two complete CRMs plus the AI copilot. Served by its own Vite dev server on port 5173.
+- [`examples/demo-ui/`](file:///Users/nimrodfeldman/playground/embody/examples/demo-ui): The demo SPA — two complete CRMs plus the AI copilot. Served by its own Vite dev server on port 5173. Most pages read an in-browser demo store; `src/live/` is the exception — the **Live data** page reads and writes real `crm.deals` rows through `@embody/react`, and is where you watch a catalog rule and a `custom/` rule both refuse a close.
 
 ---
 
@@ -133,6 +135,7 @@ npm scope, not yours. `embody doctor` warns if one drifts.
 > [!TIP]
 > **Why `custom/` works**: a rule you register here is not advisory. Entity writes run
 > through `defineEntity` in `@embody/plugin-sdk`, which executes the `before*` hook chain
-> **inside the tenant transaction** — so throwing rolls the write back, for AI agents,
-> REST and the CLI alike. That is why you can change how a catalog app behaves without
-> editing it. See [OWNERSHIP.md](../OWNERSHIP.md).
+> **inside the tenant transaction** — so throwing rolls the write back, for AI agents, the
+> CLI, and a browser alike. Over HTTP your rule arrives as a `409 veto` carrying your own
+> message. That is why you can change how a catalog app behaves without editing it. See
+> [OWNERSHIP.md](../OWNERSHIP.md).
