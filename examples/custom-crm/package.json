@@ -7,12 +7,14 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "start": "embody-host ./embody.config.ts",
-    "dev": "PORT=${PORT:-3100} embody-host ./embody.config.ts",
+    "dev": "PORT=${PORT:-3100} embody-host ./embody.config.ts --worker",
+    "worker": "embody-host ./embody.config.ts --mode worker",
     "migrate": "embody-host ./embody.config.ts --mode migrate-only",
     "agent": "embody mcp",
     "seed": "embody seed"
   },
   "dependencies": {
+    "@embody/automation": "workspace:*",
     "@embody/cli": "workspace:*",
     "@embody/crm": "workspace:*",
     "@embody/host": "workspace:*",

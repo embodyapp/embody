@@ -20,6 +20,7 @@
  */
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { defineAutomation } from "@embody/plugin-sdk";
 import type {
   EmbodyPlugin,
   KernelContext,
@@ -181,6 +182,48 @@ export const acmeCrmPlugin: EmbodyPlugin = {
           reviewer: result.review.reviewer,
           message: `HIPAA review recorded for "${result.deal.title}" — deal is clear to close.`,
         };
+      },
+    });
+
+    // -------------------------------------------------------------------------
+    // 4b. An AUTOMATION ACTION. Same plugin, same authz — but this one is written to
+    // be driven by a trigger rather than by a person.
+    //
+    // `defineAutomation` registers it as an ordinary tool, so it is discoverable
+    // (`embody tools`), directly runnable (`embody call acme_autoreview_large_deal
+    // --input '{"name":"test","payload":{"id":"...","amount":90000}}'`), and usable as
+    // the `--do` of a workflow. The trigger itself lives nowhere in this file:
+    //
+    //   embody run automation:create --when crm.deal.created \
+    //     --if 'payload.amount > 50000' --do acme_autoreview_large_deal
+    //
+    // Change the threshold, the event, or turn it off entirely without a deploy.
+    // -------------------------------------------------------------------------
+    defineAutomation(mcp, ctx, {
+      name: "acme_autoreview_large_deal",
+      description:
+        "Pre-clear a large healthcare deal for HIPAA review, so the compliance gate " +
+        "does not block a close nobody was warned about.",
+      permission: { action: "write", resource: "crm:deal" },
+      async run(event, req) {
+        const deal = event.payload as { id: string; title?: string };
+        ctx.logger.info("auto-reviewing large deal", { dealId: deal.id, from: event.name });
+        return req.tx(async (tx) => {
+          const [review] = await tx<{ id: string }[]>`
+            insert into custom_acme.hipaa_reviews (org_id, deal_id, reviewer, note)
+            values (${req.orgId}, ${deal.id}, 'automation',
+                    ${`Auto-reviewed on ${event.name}`})
+            on conflict (org_id, deal_id) do update set reviewed_at = now()
+            returning id
+          `;
+          await tx`
+            update crm.deals
+               set custom_fields = custom_fields || '{"hipaa_review_passed": true}'::jsonb,
+                   updated_at = now()
+             where id = ${deal.id}
+          `;
+          return { dealId: deal.id, reviewId: review!.id };
+        });
       },
     });
 

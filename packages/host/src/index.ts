@@ -24,6 +24,27 @@ export type {
   ExecutorOptions,
 } from "./runtime.ts";
 
+// `embody.runtime`: the DI service a plugin consumes to act without a caller.
+export { createRuntimePlugin, RUNTIME_SERVICE } from "./runtime-service.ts";
+export type { RuntimeService, RuntimePluginHandle } from "./runtime-service.ts";
+
+// The outbox drain: delivers durable domain events to subscribers, with retries.
+export { startWorker } from "./worker.ts";
+export type { WorkerOptions, RunningWorker } from "./worker.ts";
+
+// Inbound webhooks: POST /hooks/:token, where the token resolves the tenant.
+export {
+  mountHooks,
+  generateWebhookToken,
+  hashWebhookToken,
+  safeEqual,
+} from "./hooks-route.ts";
+export type { MountHooksOptions, WebhookEndpointRow } from "./hooks-route.ts";
+
+// Cron schedules, which fire by publishing an event like anything else.
+export { runDueSchedules, nextRun } from "./scheduler.ts";
+export type { SchedulerOptions, ScheduleRow } from "./scheduler.ts";
+
 // The HTTP tool bridge: plugin tools over HTTP, on the same executor as MCP and the CLI.
 export { mountApi, describeTools } from "./api.ts";
 export type { MountApiOptions, ToolDescriptor } from "./api.ts";

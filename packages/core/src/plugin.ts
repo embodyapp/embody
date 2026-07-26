@@ -34,7 +34,7 @@ export const corePlugin: EmbodyPlugin = {
 
   // Agent-callable actions. Same authz as REST (Decision D4); every read/write runs
   // inside ctx.tx — a tenant-scoped transaction on the app role, so RLS applies.
-  registerMcpTools(mcp) {
+  registerMcpTools(mcp, kernelCtx) {
     mcp.tool({
       name: "core_create_party",
       description:
@@ -47,14 +47,22 @@ export const corePlugin: EmbodyPlugin = {
       }),
       handler: (input, ctx) => {
         ctx.assert("write", "core:party");
-        return ctx.tx((tx) =>
-          partyService.create(tx, {
+        return ctx.tx(async (tx) => {
+          const party = await partyService.create(tx, {
             orgId: ctx.orgId,
             kind: input.kind,
             displayName: input.displayName,
             customFields: input.customFields,
-          }),
-        );
+          });
+          // In the same transaction as the insert, like defineEntity does. The
+          // manifest has always declared this event; until now nothing published it,
+          // so a subscriber on core.party.created silently never fired.
+          await kernelCtx.events.publish(
+            { name: "core.party.created", orgId: ctx.orgId, payload: party },
+            tx,
+          );
+          return party;
+        });
       },
     });
 

@@ -33,8 +33,15 @@ export {
   ScopedServiceRegistry,
   ServiceResolutionError,
 } from "./services.ts";
-export { InMemoryEventBus } from "./events.ts";
-export type { EventBus, DomainEvent, EventHandler } from "./events.ts";
+export {
+  InMemoryEventBus,
+  ScopedEventBus,
+  SubscriptionRegistry,
+  matches as eventNameMatches,
+} from "./events.ts";
+export type { EventBus, DomainEvent, EventHandler, Subscription } from "./events.ts";
+export { OutboxEventBus } from "./outbox-bus.ts";
+export type { OutboxEventBusOptions } from "./outbox-bus.ts";
 export { OrderedMiddlewarePipeline } from "./middleware.ts";
 
 // MCP
@@ -57,17 +64,29 @@ export type {
   CliOptionDefinition,
 } from "./cli.ts";
 
+// Webhook ingress extension surface
+export { CollectingWebhookRegistrar } from "./webhooks.ts";
+export type {
+  WebhookRegistrar,
+  WebhookDefinition,
+  WebhookHandler,
+  WebhookRequest,
+  WebhookResult,
+} from "./webhooks.ts";
+
 // Request context + authz
 export {
   createRequestContext,
   AllowAllAuthorizer,
   AuthorizationError,
+  DelegationError,
 } from "./request-context.ts";
 export type {
   RequestContext,
   Principal,
   Authorizer,
   TenantRunner,
+  Grant,
 } from "./request-context.ts";
 
 // Plugin manager utilities

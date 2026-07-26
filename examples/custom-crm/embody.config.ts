@@ -19,6 +19,9 @@
  */
 import { defineConfig } from "@embody/host";
 import { crmPlugin } from "@embody/crm";
+// Configurable triggers. Needs a worker running to deliver events — `pnpm dev` passes
+// `--worker`; a deployment runs `--mode worker` as its own process.
+import { automationPlugin } from "@embody/automation";
 import { b2bSaasPlugin } from "embody-plugin-b2b-saas";
 import { ecomFulfillmentPlugin } from "embody-plugin-ecom-fulfillment";
 // This app's own plugin. Owns the custom_acme schema, adds a HIPAA gate on deal
@@ -26,5 +29,11 @@ import { ecomFulfillmentPlugin } from "embody-plugin-ecom-fulfillment";
 import { acmeCrmPlugin } from "./src/plugin.ts";
 
 export default defineConfig({
-  plugins: [crmPlugin, b2bSaasPlugin, ecomFulfillmentPlugin, acmeCrmPlugin],
+  plugins: [
+    crmPlugin,
+    automationPlugin,
+    b2bSaasPlugin,
+    ecomFulfillmentPlugin,
+    acmeCrmPlugin,
+  ],
 });

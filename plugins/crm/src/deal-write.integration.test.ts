@@ -152,4 +152,41 @@ suite("crm deal writes run the hook chain (integration)", () => {
       viewer.invoke("crm_update_deal", { id: dealId, stage: "lead" }),
     ).rejects.toThrow(/Not authorized to write crm:deal/);
   });
+
+  // The event half of the same guarantee. A rolled-back write must not leave an event
+  // behind: `crm.deal.updated` firing for an update that never happened would have a
+  // subscriber act on a stage the row is not in. defineEntity publishes inside the
+  // tenant transaction precisely so the veto takes the event with it.
+  it("leaves NO outbox event behind when a hook vetoes the write", async () => {
+    const events = () => runtime.ownerDb.sql<{ name: string }[]>`
+      select name from embody.outbox
+      where org_id = ${principal.orgId} and name = 'crm.deal.updated'
+    `;
+    const before = (await events()).length;
+
+    await expect(
+      invoke("crm_update_deal", {
+        id: dealId,
+        stage: "closed_won",
+        customFields: { review_passed: false },
+      }),
+    ).rejects.toThrow(/healthcare deals require a completed review/);
+
+    expect(await events()).toHaveLength(before);
+  });
+
+  it("records exactly one event for a write that succeeds", async () => {
+    const created = (await invoke("crm_create_deal", {
+      title: "Northwind — 40 seats",
+      amount: 12000,
+    })) as DealRow;
+
+    const rows = await runtime.ownerDb.sql<{ name: string; payload: DealRow }[]>`
+      select name, payload from embody.outbox
+      where org_id = ${principal.orgId} and name = 'crm.deal.created'
+        and payload->>'id' = ${created.id}
+    `;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.payload.title).toBe("Northwind — 40 seats");
+  });
 });

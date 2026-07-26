@@ -196,6 +196,100 @@ describe("events", () => {
     });
     expect(received).toEqual(["crm.deal.created:d1"]);
   });
+
+  it("blocks subscribing to an undeclared pattern (capability enforcement)", async () => {
+    const p = plugin({
+      id: "nosy",
+      schema: "nosy",
+      capabilities: {}, // no events declared
+      subscribe: (bus) => {
+        bus.subscribe("crm.*", () => {});
+      },
+    });
+    await expect(new EmbodyKernel(silent()).register(p).boot()).rejects.toThrow(
+      /undeclared pattern/,
+    );
+  });
+
+  it("blocks publishing an undeclared event (capability enforcement)", async () => {
+    let publish!: () => Promise<void>;
+    const p = plugin({
+      id: "loud",
+      schema: "loud",
+      capabilities: {}, // no events, no entities
+      init: (ctx) => {
+        publish = () =>
+          ctx.events.publish({ name: "crm.deal.created", orgId: "o", payload: {} });
+      },
+    });
+    await new EmbodyKernel(silent()).register(p).boot();
+    await expect(publish()).rejects.toThrow(/undeclared event/);
+  });
+
+  it("lets a plugin publish under an entity namespace it owns", async () => {
+    // defineEntity derives <type>.created/.updated/.deleted, so owning the entity has
+    // to be enough — otherwise every author restates three derived strings.
+    let publish!: () => Promise<void>;
+    const p = plugin({
+      id: "crm",
+      schema: "crm",
+      capabilities: { entities: ["crm.deal"] },
+      init: (ctx) => {
+        publish = () =>
+          ctx.events.publish({ name: "crm.deal.created", orgId: "o", payload: {} });
+      },
+    });
+    await new EmbodyKernel(silent()).register(p).boot();
+    await expect(publish()).resolves.toBeUndefined();
+  });
+
+  it("isolates a throwing subscriber from its siblings and from the publisher", async () => {
+    // The write this event describes has already committed. A subscriber bug must not
+    // be reported to the caller as a failure, nor stop the other subscribers.
+    const reached: string[] = [];
+    const bad = plugin({
+      id: "bad",
+      schema: "bad",
+      capabilities: { events: { subscribe: ["crm.*"] } },
+      subscribe: (bus) => {
+        bus.subscribe("crm.*", () => {
+          reached.push("bad");
+          throw new Error("boom");
+        });
+      },
+    });
+    const good = plugin({
+      id: "good",
+      schema: "good",
+      capabilities: { events: { subscribe: ["crm.*"] } },
+      subscribe: (bus) => {
+        bus.subscribe("crm.*", () => {
+          reached.push("good");
+        });
+      },
+    });
+    const booted = await new EmbodyKernel(silent()).register(bad).register(good).boot();
+    await expect(
+      booted.events.publish({ name: "crm.deal.created", orgId: "o", payload: {} }),
+    ).resolves.toBeUndefined();
+    expect(reached).toEqual(["bad", "good"]);
+  });
+
+  it("names subscriptions stably so the worker can address them across restarts", async () => {
+    const p = plugin({
+      id: "audit",
+      schema: "audit",
+      capabilities: { events: { subscribe: ["crm.*"] } },
+      subscribe: (bus) => {
+        bus.subscribe("crm.*", () => {});
+      },
+    });
+    const booted = await new EmbodyKernel(silent()).register(p).boot();
+    expect(booted.events.subscriptions.matching("crm.deal.created").map((s) => s.id)).toEqual([
+      "audit:crm.*",
+    ]);
+    expect(booted.events.subscriptions.matching("other.thing")).toEqual([]);
+  });
 });
 
 describe("full lifecycle", () => {

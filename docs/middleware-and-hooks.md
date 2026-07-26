@@ -88,7 +88,28 @@ registerHooks(hooks, ctx) {
 Domain events (like `crm.deal.created` or `invoice.paid`) are fired **after** a database transaction has successfully committed.
 
 ### Outbox Pattern Durability
-Embody uses a transactional outbox pattern. Domain events are saved directly into an `outbox` database table during the main transaction, then dispatched asynchronously by background workers. This guarantees that events survive server restarts and are never lost!
+Embody uses a transactional outbox pattern. Publishing an event appends a row to
+`embody.outbox` **inside the transaction that made the change**, so the event and the
+data commit together: a hook that vetoes the write takes the event with it, and a crash
+after the commit cannot lose the event. Delivery happens later, in a worker process.
+
+Two consequences worth knowing before you rely on this:
+
+> [!IMPORTANT]
+> **Nothing is delivered unless a worker is running.** Publishing writes to the outbox;
+> the drain is a separate process. Run `embody-host ./embody.config.ts --mode worker`
+> alongside your web tier, or pass `--worker` in development to co-locate it in the
+> serve process.
+
+> [!IMPORTANT]
+> **Delivery is at-least-once, so subscribers must be idempotent.** A handler that
+> succeeds and then loses the process before being marked done will run again. Key your
+> side effects on something stable from the payload rather than assuming one call.
+
+Each event is expanded into one delivery row per matching subscriber, so subscribers
+retry independently with exponential backoff: a broken one cannot block its siblings,
+and after `maxAttempts` it is parked as `dead` with the last error rather than
+retrying forever.
 
 ### Publishing Domain Events
 Inside your plugin tool or handler:

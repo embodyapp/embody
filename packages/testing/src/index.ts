@@ -48,6 +48,13 @@ export async function databaseReachable(url?: string): Promise<boolean> {
 export { defineConfig, bootRuntime, makeExecutor, mountApi, createDevIdentity } from "@embody/host";
 export type { Runtime, Executor, EmbodyConfig } from "@embody/host";
 
+/**
+ * The outbox drain. Pass `autoStart: false` and call `tick()` to advance delivery
+ * deterministically — a test that sleeps on the poll loop is a test that flakes.
+ */
+export { startWorker } from "@embody/host";
+export type { WorkerOptions, RunningWorker } from "@embody/host";
+
 // ── Driving a kernel directly, without a host ────────────────────────────────
 // For unit-level tests of boot order, capability enforcement, and hook composition.
 export { EmbodyKernel, HookRegistry, createRequestContext, AllowAllAuthorizer } from "@embody/kernel";

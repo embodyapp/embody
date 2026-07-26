@@ -7,7 +7,12 @@
  * entity.integration.test.ts against Postgres.
  */
 import { describe, it, expect } from "vitest";
-import { createSilentLogger, HookRegistry, InMemoryEventBus } from "@embody/kernel";
+import {
+  createSilentLogger,
+  HookRegistry,
+  InMemoryEventBus,
+  ScopedEventBus,
+} from "@embody/kernel";
 import type { KernelContext, CapabilityManifest } from "@embody/kernel";
 import { defineEntity, mergePatch } from "./entity.ts";
 
@@ -17,7 +22,13 @@ function fakeCtx(capabilities: CapabilityManifest): KernelContext {
     logger: createSilentLogger(),
     services: { get: () => undefined } as unknown as KernelContext["services"],
     hooks: new HookRegistry().scopedFor("test", capabilities.hooks ?? []),
-    events: new InMemoryEventBus(),
+    events: new ScopedEventBus(
+      new InMemoryEventBus(),
+      "test",
+      capabilities.events?.publish ?? [],
+      capabilities.events?.subscribe ?? [],
+      capabilities.entities ?? [],
+    ),
     capabilities,
   };
 }

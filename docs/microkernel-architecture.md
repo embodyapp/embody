@@ -65,7 +65,7 @@ The `@embody/kernel` package exposes several core abstractions that coordinate r
 * **`HookRegistry`**: Maintains synchronous, in-transaction, vetoable domain hooks (`beforeCreate`, `beforeDelete`, custom hooks).
 * **`OrderedMiddlewarePipeline`**: Manages global and plugin-level HTTP request middleware execution order.
 * **`CollectingMcpRegistrar` & `CollectingCliRegistrar`**: Collects Model Context Protocol (MCP) tools/resources and CLI subcommands registered by loaded plugins.
-* **`EventBus` & Outbox**: Dispatches post-commit asynchronous domain events (`deal.created`, `invoice.paid`) backed by a durable PostgreSQL outbox table.
+* **`EventBus` & Outbox**: Dispatches post-commit asynchronous domain events (`deal.created`, `invoice.paid`) backed by a durable PostgreSQL outbox table. Publishing enlists the event in the caller's transaction; a separate worker process (`--mode worker`) drains it and retries each subscriber independently.
 
 ---
 

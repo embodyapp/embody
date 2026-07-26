@@ -86,6 +86,21 @@ This uses **Turbo Repo** (`turbo run dev`) to start the services in parallel. Th
 
 You will see logs indicating that `@embody/core` and `@embody/crm` plugins have initialized successfully.
 
+### Step 5: The event worker
+
+Domain events are durable: publishing writes a row to `embody.outbox` inside the same
+transaction as the data change, and a **worker process delivers it**. If no worker is
+running, events pile up in the outbox and no subscriber ever fires — this is the usual
+reason a `subscribe` handler "does nothing".
+
+`pnpm dev` passes `--worker`, which co-locates the drain in the serve process so a
+single command is enough locally. A deployment should run it separately, so the web
+tier stays stateless and dispatch scales on its own:
+
+```bash
+embody-host ./embody.config.ts --mode worker
+```
+
 ### Running the UI against a live host
 
 The demo SPA has a page that reads and writes real rows instead of the in-browser demo store. It needs an org to sign in as, and a host willing to accept a password-less dev login:

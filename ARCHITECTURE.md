@@ -93,12 +93,21 @@ docs/react-hooks.md §5.
 
 ### D5 — Durable events and jobs
 Domain events (`deal.created`, `account.updated`) are written into a database
-**outbox in the same transaction** as the data change, then dispatched. They survive
-restarts and can safely drive real workflows. Exposed to plugins behind an
-`EventBus` interface (implementation: transactional outbox / `pg-boss`).
+**outbox in the same transaction** as the data change, then dispatched by a worker
+process. They survive restarts and can safely drive real workflows. Exposed to plugins
+behind an `EventBus` interface, so the in-memory implementation used by tests and the
+durable one used by deployments are interchangeable.
+
+The outbox is hand-rolled (`SELECT ... FOR UPDATE SKIP LOCKED`, ~200 lines) rather than
+`pg-boss`. The defining requirement is that the **app role enqueues inside a tenant
+transaction under RLS** — a job library models a queue you push to from outside your
+transaction, not an outbox you enlist in it, and adopting one would add a second schema
+and migration lifecycle to own. Delivery is at-least-once and per-subscriber: one row
+per (event, subscriber), so a failing handler retries with backoff and dead-letters on
+its own without affecting the others.
 
 ### D6 — Real migrations and namespacing
-Schema changes go through **Drizzle migrations only** (versioned SQL — no `db push`
+Schema changes go through **versioned `.sql` files only** (no `db push`
 in real environments); migrations also define RLS policies and GIN indexes, and CI
 runs them against a fresh database. Each plugin owns **its own Postgres schema**
 (`core.*`, `crm.*`), and everything else is namespaced too: entity types (`crm.deal`),
@@ -304,7 +313,13 @@ erDiagram
 ```
 
 **Shared (schema `core`):** `orgs`, `users`, `memberships`, `parties`, `products`,
-`documents`, `entities`, `entity_relationships`, `audit_log`, `outbox`.
+`documents`, `entities`, `entity_relationships`, `audit_log`.
+**Framework (schema `embody`):** `_migrations`, `outbox`, `outbox_deliveries`,
+`outbox_cursors`, `schedules`, `webhook_endpoints`. Owned by no plugin and created by
+`bootstrap()` before any migration runs, because every plugin can publish events, be
+scheduled, or receive a webhook, so the tables must predate all of them.
+**App-owned (schema `automation`):** `workflows`, `runs` — the configurable trigger
+wiring, which is an ordinary plugin on top of the framework tables above.
 **App-owned (schema `crm`):** `crm.deals`, `crm.contact_profiles`,
 `crm.account_profiles`.
 

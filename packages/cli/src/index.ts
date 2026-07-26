@@ -19,6 +19,7 @@ import { startMcpStdio } from "@embody/mcp-server";
 import { buildPrincipal, type IdentityOptions } from "./identity.ts";
 import { newPlugin, findProjectRoot } from "./scaffold.ts";
 import { runDoctor, formatReport } from "./doctor.ts";
+import { parsePluginTail, tailAfterCommand } from "./plugin-options.ts";
 
 /** Boot the runtime with a STDERR logger (so STDOUT stays clean for JSON), run, close. */
 async function withRuntime<T>(
@@ -109,6 +110,8 @@ export function buildProgram(): Command {
             name: c.name,
             description: c.description,
             args: c.args ?? [],
+            // Usable flags, not decoration: `embody run <name>` accepts these directly.
+            options: (c.options ?? []).map((o) => `${o.flags}  ${o.description}`),
           })),
         );
       });
@@ -118,6 +121,11 @@ export function buildProgram(): Command {
     .command("run <command> [args...]")
     .description("Run a plugin-contributed command")
     .option("--options <json>", "command options as JSON", "{}")
+    // A plugin's own flags cannot be registered with Commander up front: the list is
+    // only known after the runtime boots, and booting to print `--help` would mean
+    // requiring a database for it. So accept anything here and parse the tail against
+    // the plugin's declarations once we have them.
+    .allowUnknownOption(true)
     .action(
       async (command: string, args: string[], opts: { options: string }, cmd: Command) => {
         const g = globals(cmd);
@@ -125,10 +133,13 @@ export function buildProgram(): Command {
         await withRuntime(g.config, async (rt) => {
           const def = rt.booted.cli.commands.find((c) => c.name === command);
           if (!def) throw new Error(`Unknown command "${command}" (see \`embody commands\`)`);
+          const tail = parsePluginTail(def, tailAfterCommand(process.argv, command));
           const executor = makeExecutor({ runtime: rt, principal });
           const result = await def.handler({
-            args,
-            options: JSON.parse(opts.options),
+            // Commander drops unknown flags from `args`, so the parsed positionals are
+            // the complete set; fall back to its list when there is no tail to read.
+            args: tail.args.length > 0 ? tail.args : args,
+            options: { ...(JSON.parse(opts.options) as Record<string, unknown>), ...tail.options },
             request: executor.request,
           });
           if (result !== undefined) out(result);

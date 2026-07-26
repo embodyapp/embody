@@ -69,11 +69,12 @@ Embody was built around **eight fundamental design decisions (D1–D8)**:
 - **Every transport passes through the same security check** — an AI agent over MCP, a script over the CLI, and a browser over the `/api` tool bridge all reach a handler through the one executor. See [React Hooks & the HTTP Bridge](./react-hooks.md).
 
 ### D5. Durable Events & Outbox Pattern
-- Domain events (e.g. `deal.created`) are written to a database outbox in the **same transaction** as the data change.
+- Domain events (e.g. `deal.created`) are written to the `embody.outbox` table in the **same transaction** as the data change.
 - Events survive server crashes and drive reliable background workflows.
+- A separate worker process (`--mode worker`) delivers them, retrying each subscriber independently. Nothing is delivered unless a worker is running, and delivery is at-least-once — subscribers must be idempotent.
 
 ### D6. Real Migrations & Schema Namespacing
-- Database updates go through versioned Drizzle SQL migrations.
+- Database updates go through hand-written, versioned `NNNN_name.sql` files applied by embody's own runner. Drizzle is used for typed queries, not for generating DDL: RLS policies, `force row level security`, GIN indexes, and role grants cannot be expressed through its schema DSL.
 - Each plugin owns its own Postgres schema (`core.*`, `crm.*`, `custom_app.*`).
 - Plugins declare dependencies (`dependsOn: ["core"]`), and the kernel **topologically sorts** them so core migrations run first.
 

@@ -7,9 +7,10 @@ import type { Hono, MiddlewareHandler } from "hono";
 import type { Sql } from "@embody/db";
 import type { ScopedHookRegistry } from "./hooks.ts";
 import type { ScopedServiceRegistry } from "./services.ts";
-import type { EventBus } from "./events.ts";
+import type { ScopedEventBus } from "./events.ts";
 import type { McpRegistrar } from "./mcp.ts";
 import type { CliRegistrar } from "./cli.ts";
+import type { WebhookRegistrar } from "./webhooks.ts";
 import type { Logger } from "./logger.ts";
 
 /** A plain JSON value. */
@@ -69,8 +70,8 @@ export interface KernelContext {
   readonly services: ScopedServiceRegistry;
   /** Hook registry, scoped so registrations are checked against the manifest. */
   readonly hooks: ScopedHookRegistry;
-  /** Durable event bus. */
-  readonly events: EventBus;
+  /** Event bus, scoped so publish/subscribe are checked against the manifest. */
+  readonly events: ScopedEventBus;
   /** This plugin's declared capability manifest (what the kernel scoped it to). */
   readonly capabilities: CapabilityManifest;
   /**
@@ -130,8 +131,14 @@ export interface EmbodyPlugin {
   registerMcpResources?(mcp: McpRegistrar, ctx: KernelContext): void;
   /** Contribute `embody` CLI subcommands (same authz as MCP/REST). */
   registerCliCommands?(cli: CliRegistrar, ctx: KernelContext): void;
+  /**
+   * Receive inbound HTTP from an outside system and turn it into a domain event.
+   * Handlers get no principal — the caller is a third party, not a user — and are
+   * reached through `POST /hooks/:token`, whose token resolves the tenant.
+   */
+  registerWebhooks?(hooks: WebhookRegistrar, ctx: KernelContext): void;
   /** Subscribe to async, post-commit domain events. */
-  subscribe?(bus: EventBus, ctx: KernelContext): void;
+  subscribe?(bus: ScopedEventBus, ctx: KernelContext): void;
 }
 
 /** Ordered collection of HTTP middleware contributed by plugins. */

@@ -15,7 +15,7 @@
 import { Hono } from "hono";
 import type { EmbodyPlugin, KernelContext, MigrationSet } from "./types.ts";
 import type { EventBus } from "./events.ts";
-import { InMemoryEventBus } from "./events.ts";
+import { InMemoryEventBus, ScopedEventBus } from "./events.ts";
 import type { Logger } from "./logger.ts";
 import { createConsoleLogger } from "./logger.ts";
 import { HookRegistry } from "./hooks.ts";
@@ -23,6 +23,7 @@ import { ServiceRegistry } from "./services.ts";
 import { OrderedMiddlewarePipeline } from "./middleware.ts";
 import { CollectingMcpRegistrar } from "./mcp.ts";
 import { CollectingCliRegistrar } from "./cli.ts";
+import { CollectingWebhookRegistrar } from "./webhooks.ts";
 import { topoSort, validatePlugin } from "./plugin-manager.ts";
 
 export interface KernelOptions {
@@ -40,6 +41,7 @@ export interface BootedKernel {
   readonly hooks: HookRegistry;
   readonly mcp: CollectingMcpRegistrar;
   readonly cli: CollectingCliRegistrar;
+  readonly webhooks: CollectingWebhookRegistrar;
   readonly middleware: OrderedMiddlewarePipeline;
   readonly plugins: readonly EmbodyPlugin[];
 }
@@ -53,11 +55,12 @@ export class EmbodyKernel {
   readonly #middleware = new OrderedMiddlewarePipeline();
   readonly #mcp = new CollectingMcpRegistrar();
   readonly #cli = new CollectingCliRegistrar();
+  readonly #webhooks = new CollectingWebhookRegistrar();
   readonly #runMigrations?: KernelOptions["runMigrations"];
 
   constructor(opts: KernelOptions = {}) {
     this.#logger = opts.logger ?? createConsoleLogger({ component: "kernel" });
-    this.#events = opts.eventBus ?? new InMemoryEventBus();
+    this.#events = opts.eventBus ?? new InMemoryEventBus(this.#logger);
     this.#runMigrations = opts.runMigrations;
   }
 
@@ -81,7 +84,13 @@ export class EmbodyKernel {
       logger: this.#logger.child({ plugin: plugin.id }),
       services: scopedServices,
       hooks: this.#hooks.scopedFor(plugin.id, caps.hooks ?? []),
-      events: this.#events,
+      events: new ScopedEventBus(
+        this.#events,
+        plugin.id,
+        caps.events?.publish ?? [],
+        caps.events?.subscribe ?? [],
+        caps.entities ?? [],
+      ),
       capabilities: caps,
     };
   }
@@ -143,11 +152,15 @@ export class EmbodyKernel {
       plugin.registerMcpTools?.(this.#mcp, ctx);
       plugin.registerMcpResources?.(this.#mcp, ctx);
       plugin.registerCliCommands?.(this.#cli, ctx);
+      plugin.registerWebhooks?.(this.#webhooks.forPlugin(plugin.id), ctx);
     }
 
-    // Pass 4: subscribe to async events.
+    // Pass 4: subscribe to async events. Hand over ctx.events, not the raw bus: that
+    // is what binds the plugin id onto each subscription (the worker needs it to name
+    // deliveries) and what enforces capabilities.events.subscribe.
     for (const plugin of ordered) {
-      plugin.subscribe?.(this.#events, contexts.get(plugin.id)!);
+      const ctx = contexts.get(plugin.id)!;
+      plugin.subscribe?.(ctx.events, ctx);
     }
 
     this.#logger.info("kernel ready", {
@@ -155,6 +168,7 @@ export class EmbodyKernel {
       mcpTools: this.#mcp.tools.length,
       mcpResources: this.#mcp.resources.length,
       cliCommands: this.#cli.commands.length,
+      webhooks: this.#webhooks.webhooks.length,
     });
 
     return {
@@ -164,6 +178,7 @@ export class EmbodyKernel {
       hooks: this.#hooks,
       mcp: this.#mcp,
       cli: this.#cli,
+      webhooks: this.#webhooks,
       middleware: this.#middleware,
       plugins: ordered,
     };

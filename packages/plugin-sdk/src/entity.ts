@@ -166,9 +166,16 @@ export function defineEntity<Row extends EntityRow = EntityRow>(
     });
   };
 
-  const emit = async (verb: string, orgId: string, row: Row): Promise<void> => {
+  /**
+   * Publish INSIDE the caller's transaction (Decision D5). The durable bus appends to
+   * `embody.outbox` in `tx`, so the event and the row it describes commit together:
+   * a veto that rolls the write back takes the event with it, and a crash after commit
+   * cannot lose the event. Delivery still happens post-commit — the worker only ever
+   * sees rows from transactions that succeeded.
+   */
+  const emit = async (verb: string, orgId: string, row: Row, tx: Sql): Promise<void> => {
     if (!shouldEmit) return;
-    await ctx.events.publish({ name: `${spec.type}.${verb}`, orgId, payload: row });
+    await ctx.events.publish({ name: `${spec.type}.${verb}`, orgId, payload: row }, tx);
   };
 
   return {
@@ -184,9 +191,9 @@ export function defineEntity<Row extends EntityRow = EntityRow>(
         `;
         await registerRow(tx, req.orgId, created!);
         await runHooks("afterCreate", created!, tx);
+        await emit("created", req.orgId, created!, tx);
         return created!;
       });
-      await emit("created", req.orgId, row);
       return row;
     },
 
@@ -216,9 +223,9 @@ export function defineEntity<Row extends EntityRow = EntityRow>(
         if (!saved) throw new EntityNotFoundError(spec.type, id);
         await registerRow(tx, req.orgId, saved);
         await runHooks("afterUpdate", saved, tx);
+        await emit("updated", req.orgId, saved, tx);
         return saved;
       });
-      await emit("updated", req.orgId, row);
       return row;
     },
 
@@ -229,9 +236,9 @@ export function defineEntity<Row extends EntityRow = EntityRow>(
         await runHooks("beforeDelete", current, tx);
         await tx`delete from ${tx(spec.schema)}.${tx(spec.table)} where id = ${id}`;
         await runHooks("afterDelete", current, tx);
+        await emit("deleted", req.orgId, current, tx);
         return current;
       });
-      await emit("deleted", req.orgId, row);
       return row;
     },
 

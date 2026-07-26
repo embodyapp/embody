@@ -25,7 +25,17 @@
 
 // ── This package's own machinery ─────────────────────────────────────────────
 export { defineEntity, mergePatch, EntityNotFoundError } from "./entity.ts";
+export { defineAutomation, automationEventInput } from "./automation.ts";
+export type { AutomationSpec } from "./automation.ts";
 export type { EntitySpec, EntityRepository, EntityRow } from "./entity.ts";
+
+/**
+ * The Postgres handle a plugin is handed — on `ctx.tx` inside a hook, as the first
+ * argument to `EntityRepository.link`, and inside `req.tx(...)`. Both already appear
+ * in this package's public surface, so the type has to be nameable from here; without
+ * it an author cannot write a helper that takes a transaction.
+ */
+export type { Sql } from "@embody/db";
 
 // ── The plugin contract ──────────────────────────────────────────────────────
 export type {

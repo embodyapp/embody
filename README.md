@@ -158,6 +158,7 @@ We have created comprehensive, step-by-step guides for developers of all experie
 | 📦 [**Writing a Plugin Others Can Use**](file:///Users/nimrodfeldman/playground/embody/docs/writing-a-plugin-others-can-use.md) | Packaging, peer dependencies, schema naming, and the pre-publish checks that catch a broken plugin. |
 | 🧩 [**Writing Plugins**](file:///Users/nimrodfeldman/playground/embody/docs/writing-plugins.md) | Complete step-by-step tutorial on building a custom plugin from scratch. |
 | 🪝 [**Middleware & Hooks**](file:///Users/nimrodfeldman/playground/embody/docs/middleware-and-hooks.md) | How to write HTTP middlewares, vetoable synchronous hooks, and post-commit events. |
+| ⚡ [**Automation**](file:///Users/nimrodfeldman/playground/embody/docs/automation.md) | Set a trigger, write a function: configurable workflows over the durable event bus, with no low-code builder. |
 | 💻 [**CLI Guide**](file:///Users/nimrodfeldman/playground/embody/docs/cli-guide.md) | Complete guide for running the `embody` CLI binary, invoking tools, seeding data, and scaffolding apps. |
 | 🔄 [**Customization & Upgrades**](file:///Users/nimrodfeldman/playground/embody/docs/customization-and-upgrades.md) | Real-world example comparing how a **B2B SaaS** vs **E-Commerce** company customizes the CRM without forking. |
 | 🤖 [**AI & MCP Integration**](file:///Users/nimrodfeldman/playground/embody/docs/mcp-and-ai.md) | How Model Context Protocol works and how to write AI tools for Embody. |

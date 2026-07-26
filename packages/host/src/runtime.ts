@@ -10,7 +10,12 @@
  */
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import { EmbodyKernel, createConsoleLogger } from "@embody/kernel";
+import {
+  EmbodyKernel,
+  createConsoleLogger,
+  InMemoryEventBus,
+  OutboxEventBus,
+} from "@embody/kernel";
 import type {
   BootedKernel,
   EmbodyPlugin,
@@ -31,6 +36,8 @@ import {
 import { RbacAuthorizer } from "@embody/auth";
 import { corePlugin } from "@embody/core";
 import { resolvePlugins, type EmbodyConfig } from "./config.ts";
+import { createRuntimePlugin } from "./runtime-service.ts";
+import { generateWebhookToken, hashWebhookToken } from "./hooks-route.ts";
 
 const DEFAULT_DATABASE_URL = "postgres://embody:embody@localhost:5432/embody";
 
@@ -103,6 +110,18 @@ export interface BootRuntimeOptions {
   config: EmbodyConfig;
   databaseUrl?: string;
   logger?: Logger;
+  /**
+   * How domain events are carried.
+   *
+   * `"durable"` (default) appends to `embody.outbox` inside the publishing
+   * transaction; a worker process delivers them. This is the only correct setting for
+   * a deployment — and it means nothing is delivered unless a worker is running.
+   *
+   * `"inline"` delivers in-process, losing events on a crash and decoupling them from
+   * the transaction. For tests that assert on a subscriber without standing up a
+   * worker.
+   */
+  events?: "durable" | "inline";
 }
 
 export interface Runtime {
@@ -126,16 +145,31 @@ export async function bootRuntime(opts: BootRuntimeOptions): Promise<Runtime> {
 
   const ownerDb = createDb(ownerUrl);
 
+  // Constructed before bootstrap() creates the outbox tables, which is fine: the bus
+  // touches the database only on publish, long after boot.
+  const eventBus =
+    (opts.events ?? "durable") === "durable"
+      ? new OutboxEventBus({ sql: ownerDb.sql, publishedBy: "host" })
+      : new InMemoryEventBus(logger);
+
   const kernel = new EmbodyKernel({
     logger,
+    eventBus,
     runMigrations: async (set, pluginId) => {
       const ran = await runMigrations(ownerDb.sql, pluginId, set.dir, set.schema);
       if (ran.length) logger.info("applied migrations", { plugin: pluginId, ran });
     },
   });
 
-  // `core` is foundation and always registered; the config selects the rest.
-  const plugins: EmbodyPlugin[] = [corePlugin, ...resolvePlugins(opts.config, logger)];
+  // `embody-runtime` provides the `embody.runtime` service (self-directed tool calls
+  // and tenant transactions, for plugins that act without a caller); `core` is
+  // foundation. Both are always registered; the config selects the rest.
+  const runtimePlugin = createRuntimePlugin();
+  const plugins: EmbodyPlugin[] = [
+    runtimePlugin.plugin,
+    corePlugin,
+    ...resolvePlugins(opts.config, logger),
+  ];
   for (const plugin of plugins) kernel.register(plugin);
 
   // Bootstrap and every plugin's migrations touch shared objects (the app role, the
@@ -148,7 +182,7 @@ export async function bootRuntime(opts: BootRuntimeOptions): Promise<Runtime> {
   // App-role handle created after bootstrap (which creates the app role).
   const appDb = createDb(appUrl);
 
-  return {
+  const runtime: Runtime = {
     booted,
     ownerDb,
     appDb,
@@ -158,6 +192,21 @@ export async function bootRuntime(opts: BootRuntimeOptions): Promise<Runtime> {
       await ownerDb.close();
     },
   };
+
+  // Now that the tool registry and the app-role pool exist, the service handed out
+  // during boot can do its job.
+  runtimePlugin.bind({
+    invoke: (principal, toolName, input) =>
+      makeExecutor({ runtime, principal }).invoke(toolName, input),
+    tx: (orgId, userId, fn) => withTenant(appDb.sql, orgId, userId, fn),
+    toolNames: () => booted.mcp.tools.map((t) => t.name),
+    webhookToken: () => {
+      const token = generateWebhookToken();
+      return { token, hash: hashWebhookToken(token) };
+    },
+  });
+
+  return runtime;
 }
 
 export interface ExecutorOptions {
