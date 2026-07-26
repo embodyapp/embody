@@ -26,6 +26,9 @@ Most traditional enterprise web apps are built as a monolithic "all-in-one" app 
 1. **The Kernel contains ZERO business logic**: `@embody/kernel` only manages plugin lifecycle, capability checking, service registration (DI), middleware pipelines, and event dispatches.
 2. **First-party features are plugins**: Even core apps like CRM (`@embody/crm`) are written as plugins on the exact same framework you use to write your own custom plugins.
 
+> [!NOTE]
+> For an in-depth breakdown of why the microkernel pattern was selected, how it works under the hood, and what capabilities it unlocks, see the [**Microkernel Architecture Deep Dive**](file:///Users/nimrodfeldman/playground/embody/docs/microkernel-architecture.md).
+
 ---
 
 ## 🏛️ The Eight Core Design Decisions
@@ -118,5 +121,6 @@ When Embody boots up, the kernel executes plugins in a strict sequence:
 
 ## ➡️ Next Steps
 
+- Read the detailed breakdown of the [**Microkernel Architecture**](file:///Users/nimrodfeldman/playground/embody/docs/microkernel-architecture.md).
 - Explore the [**Directory Structure**](file:///Users/nimrodfeldman/playground/embody/docs/directory-structure.md) to locate where each package lives.
 - Learn how to build your first plugin in [**Writing Plugins**](file:///Users/nimrodfeldman/playground/embody/docs/writing-plugins.md).

@@ -456,6 +456,8 @@ This document (D1–D8) is the "why"; the code is the "how".
 
 - [PLUGINS.md](PLUGINS.md) — the plugin contract: what publishes, the one-package SPI
   rule, peer dependencies, and publishing a plugin others can install.
+- [docs/microkernel-architecture.md](docs/microkernel-architecture.md) — in-depth guide on
+  why the microkernel pattern was selected, how it works, and what capabilities it unlocks.
 - [docs/writing-a-plugin-others-can-use.md](docs/writing-a-plugin-others-can-use.md) —
   the walkthrough.
 - [docs/directory-structure.md](docs/directory-structure.md) — this repository's layout,
