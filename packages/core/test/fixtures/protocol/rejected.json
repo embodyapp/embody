@@ -1,0 +1,23 @@
+{
+  "missingVersionExecution": { "target": "kanban.card.create", "input": {} },
+  "futureVersionExecution": {
+    "protocolVersion": 2,
+    "target": "kanban.card.create",
+    "input": {}
+  },
+  "malformedUrlRegistration": {
+    "protocolVersion": 1,
+    "appId": "x",
+    "version": "1.0.0",
+    "endpoint": "not a url",
+    "healthCheckUrl": "https://x.test/health",
+    "manifest": {
+      "protocolVersion": 1,
+      "plugins": [],
+      "entities": {},
+      "actions": {},
+      "eventSubscriptions": []
+    }
+  },
+  "invalidProgress": { "percent": 101, "message": "bad" }
+}

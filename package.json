@@ -1,0 +1,32 @@
+{
+  "name": "embody",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": "^22.0.0 || ^24.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "clean": "pnpm -r --if-present clean && rm -rf coverage",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . && node scripts/check-package-boundaries.mjs",
+    "api-report": "pnpm --filter @embody/core api-report",
+    "test": "pnpm -r --if-present test",
+    "test:postgres": "pnpm -r --if-present test:postgres",
+    "test:e2e": "pnpm -r --if-present test:e2e",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm api-report && pnpm format:check"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.8",
+    "@eslint/js": "^9.39.2",
+    "@microsoft/api-extractor": "^7.59.0",
+    "eslint": "^9.39.2",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.53.1",
+    "vitest": "^4.0.18"
+  }
+}

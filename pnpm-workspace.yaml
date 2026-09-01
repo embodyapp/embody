@@ -1,0 +1,13 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+  - "examples/*"
+  - "test/fixtures/*"
+
+allowBuilds:
+  better-sqlite3: true
+  cpu-features: false
+  protobufjs: false
+  ssh2: false
+
+onlyBuiltDependencies: []

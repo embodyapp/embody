@@ -1,0 +1,39 @@
+{
+  "name": "@embody/storage",
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:postgres": "vitest run test/postgres.test.ts"
+  },
+  "engines": {
+    "node": "^22.0.0 || ^24.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@embody/core": "workspace:*",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.20.1",
+    "@types/pg": "^8.23.1",
+    "testcontainers": "^12.1.0"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "registration": {
+    "protocolVersion": 1,
+    "appId": "kanban",
+    "version": "1.2.0",
+    "endpoint": "https://kanban.internal:8081",
+    "healthCheckUrl": "https://kanban.internal:8081/health",
+    "manifest": {
+      "protocolVersion": 1,
+      "plugins": [{ "id": "kanban", "version": "1.0.0" }],
+      "entities": {},
+      "actions": {},
+      "eventSubscriptions": []
+    }
+  },
+  "heartbeat": { "protocolVersion": 1, "appId": "kanban", "generation": "g1" },
+  "execution": {
+    "protocolVersion": 1,
+    "target": "kanban.card.create",
+    "input": { "data": {} }
+  },
+  "principalClaims": {
+    "orgId": "acme",
+    "actorId": "agent-1",
+    "actorType": "agent",
+    "roles": ["operator"],
+    "scopes": ["kanban:*"],
+    "iss": "gateway",
+    "aud": "kanban",
+    "sub": "agent-1",
+    "iat": 1,
+    "exp": 2,
+    "jti": "j1"
+  },
+  "event": {
+    "protocolVersion": 1,
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "kanban.card.created",
+    "orgId": "acme",
+    "producerAppId": "kanban",
+    "payload": {},
+    "occurredAt": "2025-01-01T00:00:00.000Z"
+  },
+  "progress": { "percent": 50, "message": "halfway" },
+  "error": {
+    "error": {
+      "code": "VALIDATION_ERROR",
+      "message": "invalid",
+      "requestId": "r1",
+      "details": []
+    }
+  }
+}

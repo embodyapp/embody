@@ -1,0 +1,26 @@
+{
+  "name": "@embody/gateway",
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": "^22.0.0 || ^24.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
