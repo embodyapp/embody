@@ -27,6 +27,7 @@
   "dependencies": {
     "@embody/auth": "workspace:*",
     "@embody/core": "workspace:*",
+    "@embody/storage": "workspace:*",
     "fastify": "^5.12.1"
   },
   "devDependencies": {

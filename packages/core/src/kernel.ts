@@ -7,6 +7,8 @@ import type {
   KernelContext,
   Principal,
   ProgressUpdate,
+  DomainEvent,
+  EventHandler,
 } from "./contracts.js";
 import {
   DependencyError,
@@ -26,6 +28,7 @@ import {
 } from "./entities.js";
 import { compileManifest, type AppManifest } from "./manifest.js";
 import { formatTarget } from "./target.js";
+import { progressUpdateSchema } from "./protocol.js";
 
 export type KernelState = "created" | "booting" | "ready" | "stopping" | "stopped" | "failed";
 export type BootPhase =
@@ -144,6 +147,7 @@ export class Kernel {
     { readonly id: string; readonly handler: HookHandler }[]
   >();
   private readonly actions = new Map<string, ActionDefinition>();
+  private readonly eventHandlers = new Map<string, { readonly id: string; readonly handler: EventHandler }[]>();
   private readonly entities = new Map<string, CompiledEntity>();
   private _manifest: AppManifest | undefined;
 
@@ -239,6 +243,29 @@ export class Kernel {
       });
     }
   }
+  /** Delivers an already-persisted event to this app's matching handlers in registration order. */
+  public async handleEvent(event: DomainEvent, tx: EntityTransaction): Promise<void> {
+    if (this.state !== "ready") throw new DependencyError("Kernel is not ready");
+    const principal: Principal = {
+      orgId: event.orgId,
+      actorId: "event-worker",
+      actorType: "system",
+      roles: [],
+      scopes: ["*"],
+    };
+    const context = this.executionContext(principal, tx, { principal });
+    for (const entry of this.eventHandlers.get(event.name) ?? []) {
+      const reservation = await tx.inbox?.reserve(event.id, entry.id);
+      if (reservation?.state === "duplicate" || reservation?.state === "completed") continue;
+      try {
+        await entry.handler(event, context);
+        await tx.inbox?.complete(event.id, entry.id);
+      } catch (error) {
+        await tx.inbox?.fail(event.id, entry.id, "Event handler failed");
+        throw error;
+      }
+    }
+  }
   public async runHooks(
     key: string,
     payload: unknown,
@@ -327,6 +354,11 @@ export class Kernel {
       }
       for (const [name, action] of Object.entries(plugin.actions ?? {}))
         this.registerAction(formatTarget([plugin.id, name]), action);
+      for (const [name, handler] of Object.entries(plugin.events ?? {})) {
+        const handlers = this.eventHandlers.get(name) ?? [];
+        handlers.push({ id: `${plugin.id}.${name}`, handler });
+        this.eventHandlers.set(name, handlers);
+      }
     }
   }
   private registerAction(target: string, action: ActionDefinition): void {
@@ -381,13 +413,33 @@ export class Kernel {
         publish: async (eventName: string, payload: unknown) => {
           if (tx.outbox === undefined)
             throw new DependencyError("Storage transaction does not support outbox");
+          this.validateEvent(eventName, payload);
           await tx.outbox.enqueue(principal.orgId, { eventName, payload });
         },
       },
-      progress: (update: ProgressUpdate) => execution.progress?.(update),
+      progress: (update: ProgressUpdate) => {
+        const parsed = progressUpdateSchema.safeParse(update);
+        if (!parsed.success) throw new ValidationError("Progress update is invalid");
+        execution.progress?.({
+          message: parsed.data.message,
+          ...(parsed.data.percent === undefined ? {} : { percent: parsed.data.percent }),
+        });
+      },
       can: (action: string) => this.scopeAllows(principal.scopes, action),
     } as unknown as KernelContext;
     return context;
+  }
+  private validateEvent(eventName: string, payload: unknown): void {
+    if (!/^[a-z][A-Za-z0-9_-]*(?:\.[a-z][A-Za-z0-9_-]*)+$/.test(eventName))
+      throw new ValidationError("Event name is invalid");
+    let encoded: string;
+    try {
+      encoded = JSON.stringify(payload);
+    } catch {
+      throw new ValidationError("Event payload must be JSON serializable");
+    }
+    if (encoded === undefined || encoded.length > 256 * 1024)
+      throw new ValidationError("Event payload must be JSON serializable and at most 256 KiB");
   }
   private normalizeExecutionOptions(
     options: ExecutionOptions | Principal,

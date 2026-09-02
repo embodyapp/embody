@@ -87,6 +87,8 @@ export interface ClaimOutboxOptions {
   readonly limit: number;
   readonly workerId: string;
   readonly now?: string;
+  /** A processing claim older than this is recoverable after a worker crash. Defaults to 30 seconds. */
+  readonly leaseMs?: number;
 }
 
 export interface OutboxRepository {

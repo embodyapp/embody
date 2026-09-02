@@ -29,10 +29,10 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P5-01 | Execution engine and authorization | DONE | pi | P4-02 | Transport-neutral execution options, scope authorization, request context, cancellation/progress/audit; `pnpm lint && pnpm api-report`, `pnpm test`, `pnpm typecheck`, and `pnpm build` passed. |
 | P5-02 | Remote HTTP host and verifier plugins | DONE | pi | P5-01 | Fastify execute/health host, capacity/body/timeout controls, gateway-JWT verifier and production local-dev rejection; host/auth injection and JWT-negative tests pass. |
 | P5-03 | Registration/heartbeat client | DONE | pi | P5-02 | Deterministic SHA-256 manifest generation, authenticated registration, 30-second heartbeat, 404 re-registration, bounded jittered retry, injectable timers, and stop cleanup covered by host tests. |
-| P6-01 | Transactional outbox publishing | NOT_STARTED | — | P2-03,P5-01 | |
-| P6-02 | Worker retries, concurrency, and shutdown | NOT_STARTED | — | P6-01 | |
-| P6-03 | Local and direct cross-app event delivery | NOT_STARTED | — | D-03,P6-02 | Direct transport, destination delivery state, receiver inbox, and conformance seam |
-| P6-04 | SSE/progress transport | NOT_STARTED | — | P5-02 | |
+| P6-01 | Transactional outbox publishing | IN_PROGRESS | pi | P2-03,P5-01 | Event payload/name validation added; atomic storage behavior pre-existing. |
+| P6-02 | Worker retries, concurrency, and shutdown | IN_PROGRESS | pi | P6-01 | Deterministic worker, exponential retry, dead letters, and expired lease recovery implemented; dedicated conformance tests remain. |
+| P6-03 | Local and direct cross-app event delivery | IN_PROGRESS | pi | D-03,P6-02 | Local inbox idempotency and direct/static transport seam implemented; authenticated destination snapshots/delivery persistence remain. |
+| P6-04 | SSE/progress transport | IN_PROGRESS | pi | P5-02 | `/execute/stream` SSE implementation and ordered progress validation added; wire tests remain. |
 | P7-01 | Gateway registry and health watcher | NOT_STARTED | — | P5-03 | |
 | P7-02 | Gateway auth, token exchange, RBAC, audit, limits | NOT_STARTED | — | P5-02,P7-01 | |
 | P7-03 | Dispatch proxy | NOT_STARTED | — | P7-02 | |

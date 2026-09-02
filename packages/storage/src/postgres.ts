@@ -233,9 +233,10 @@ class PostgresTransaction implements StorageTransaction {
     if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)
       throw new RangeError("Invalid claim limit");
     const now = timestamp(options.now);
+    const expired = new Date(new Date(now).getTime() - (options.leaseMs ?? 30_000)).toISOString();
     const result = await this.client.query(
-      `WITH candidates AS (SELECT id FROM embody_outbox WHERE status IN ('pending', 'failed') AND scheduled_at <= $1 ORDER BY scheduled_at, id FOR UPDATE SKIP LOCKED LIMIT $2) UPDATE embody_outbox AS o SET status = 'processing', claimed_at = $1, claimed_by = $3, attempts = o.attempts + 1 FROM candidates WHERE o.id = candidates.id RETURNING o.*`,
-      [now, options.limit, options.workerId],
+      `WITH candidates AS (SELECT id FROM embody_outbox WHERE (status IN ('pending', 'failed') AND scheduled_at <= $1) OR (status = 'processing' AND claimed_at <= $2) ORDER BY scheduled_at, id FOR UPDATE SKIP LOCKED LIMIT $3) UPDATE embody_outbox AS o SET status = 'processing', claimed_at = $1, claimed_by = $4, attempts = o.attempts + 1 FROM candidates WHERE o.id = candidates.id RETURNING o.*`,
+      [now, expired, options.limit, options.workerId],
     );
     return result.rows.map(outbox);
   }

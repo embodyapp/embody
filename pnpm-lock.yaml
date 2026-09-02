@@ -70,6 +70,9 @@ importers:
       '@embody/core':
         specifier: workspace:*
         version: link:../core
+      '@embody/storage':
+        specifier: workspace:*
+        version: link:../storage
       fastify:
         specifier: ^5.12.1
         version: 5.12.1

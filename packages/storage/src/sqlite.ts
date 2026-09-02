@@ -277,18 +277,19 @@ class SqliteTransaction implements StorageTransaction {
     if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)
       throw new RangeError("Invalid claim limit");
     const now = timestamp(options.now);
+    const expired = new Date(new Date(now).getTime() - (options.leaseMs ?? 30_000)).toISOString();
     const rows = this.database
       .prepare(
-        "SELECT * FROM embody_outbox WHERE status IN ('pending', 'failed') AND scheduled_at <= ? ORDER BY scheduled_at, id LIMIT ?",
+        "SELECT * FROM embody_outbox WHERE (status IN ('pending', 'failed') AND scheduled_at <= ?) OR (status = 'processing' AND claimed_at <= ?) ORDER BY scheduled_at, id LIMIT ?",
       )
-      .all(now, options.limit) as Row[];
+      .all(now, expired, options.limit) as Row[];
     const claimed: OutboxEvent[] = [];
     for (const row of rows) {
       const updated = this.database
         .prepare(
-          "UPDATE embody_outbox SET status = 'processing', claimed_at = ?, claimed_by = ?, attempts = attempts + 1 WHERE id = ? AND status IN ('pending', 'failed')",
+          "UPDATE embody_outbox SET status = 'processing', claimed_at = ?, claimed_by = ?, attempts = attempts + 1 WHERE id = ? AND (status IN ('pending', 'failed') OR (status = 'processing' AND claimed_at <= ?))",
         )
-        .run(now, options.workerId, row["id"]);
+        .run(now, options.workerId, row["id"], expired);
       if (updated.changes === 1)
         claimed.push(
           outboxFromRow({

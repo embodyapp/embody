@@ -58,6 +58,11 @@ export interface EntityTransaction {
       input: { readonly eventName: string; readonly payload: unknown },
     ): Promise<unknown>;
   };
+  readonly inbox?: {
+    reserve(eventId: string, handlerId: string): Promise<{ readonly state: string }>;
+    complete(eventId: string, handlerId: string): Promise<void>;
+    fail(eventId: string, handlerId: string, error: string): Promise<void>;
+  };
   /** Runtime lifecycle supplied by the kernel; omitted for standalone stores. */
   readonly lifecycle?: EntityLifecycle;
 }

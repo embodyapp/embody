@@ -12,6 +12,19 @@ import {
 import type { Kernel } from "@embody/core";
 import type { AppAuthVerifier } from "@embody/auth";
 
+export {
+  DirectEventTransport,
+  OutboxWorker,
+  StaticEventDirectory,
+  parseDeliveredEvent,
+  type Clock,
+  type DirectEventTransportOptions,
+  type EventDestination,
+  type EventDirectory,
+  type EventTransport,
+  type OutboxWorkerOptions,
+} from "./events.js";
+
 export interface HostOptions {
   readonly kernel: Kernel;
   readonly verifier: AppAuthVerifier;
@@ -152,6 +165,10 @@ export function createHost(options: HostOptions): EmbodyHost {
     live: true,
     ready: accepting && options.kernel.state === "ready",
   }));
+  const authenticateExecution = async (request: { headers: Record<string, string | string[] | undefined> }) => {
+    const gatewayAuth = request.headers["x-gateway-auth"];
+    return options.verifier.verify(bearer(typeof gatewayAuth === "string" ? gatewayAuth : undefined));
+  };
   app.post("/execute", async (request, reply) => {
     if (!accepting || options.kernel.state !== "ready") throw new UnavailableError();
     if (active >= maximum) {
@@ -160,10 +177,7 @@ export function createHost(options: HostOptions): EmbodyHost {
     }
     const parsed = executionRequestSchema.safeParse(request.body);
     if (!parsed.success) throw new BadRequestError();
-    const gatewayAuth = request.headers["x-gateway-auth"];
-    const principal = await options.verifier.verify(
-      bearer(typeof gatewayAuth === "string" ? gatewayAuth : undefined),
-    );
+    const principal = await authenticateExecution(request);
     const controller = new AbortController();
     request.raw.once("aborted", () => controller.abort());
     active++;
@@ -178,6 +192,43 @@ export function createHost(options: HostOptions): EmbodyHost {
       });
     } finally {
       active--;
+    }
+  });
+  app.post("/execute/stream", async (request, reply) => {
+    if (!accepting || options.kernel.state !== "ready") throw new UnavailableError();
+    const parsed = executionRequestSchema.safeParse(request.body);
+    if (!parsed.success) throw new BadRequestError();
+    const principal = await authenticateExecution(request);
+    const controller = new AbortController();
+    request.raw.once("aborted", () => controller.abort());
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform",
+      connection: "keep-alive", "x-request-id": String(reply.getHeader("x-request-id")),
+    });
+    let percent = -Infinity;
+    let terminal = false;
+    const write = (event: string, data: unknown): void => {
+      if (!terminal && !reply.raw.destroyed) reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    const keepalive = setInterval(() => { if (!terminal && !reply.raw.destroyed) reply.raw.write(": keepalive\n\n"); }, 15_000);
+    try {
+      const result = await options.kernel.execute(parsed.data.target, parsed.data.input, {
+        principal, requestId: String(reply.getHeader("x-request-id")), signal: controller.signal,
+        progress: (update) => {
+          if (update.percent !== undefined && update.percent < percent) throw new BadRequestError("Progress percent must not decrease");
+          if (update.percent !== undefined) percent = update.percent;
+          write("progress", update);
+        },
+      });
+      write("result", result);
+    } catch (error) {
+      const response = toErrorEnvelope(error, String(reply.getHeader("x-request-id")), environment);
+      write("error", response.body);
+    } finally {
+      terminal = true;
+      clearInterval(keepalive);
+      reply.raw.end();
     }
   });
   return {
