@@ -22,5 +22,12 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "@embody/core": "workspace:*",
+    "jose": "^6.2.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1"
   }
 }

@@ -26,7 +26,7 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P3-02 | Kernel boot state machine and hook/action registries | DONE | pi | P2-01,P3-01 | Seven-phase single-flight kernel, lifecycle cleanup, registries, hook traces/vetoes, immutable manifest, and real SQLite/PostgreSQL adapter boot tests; `pnpm verify` passed |
 | P4-01 | Entity compiler and stores | DONE | pi | P2-02,P2-03,P3-02 | Compiled Zod object declarations at boot; tenant/transaction-bound typed stores validate data, nested containment filters, sort paths, pagination, and merged updates. SQLite/PostgreSQL integrations passed. |
 | P4-02 | Auto-CRUD lifecycle and manifests | DONE | pi | P4-01 | Generated create/get/list/update/delete actions execute in org-bound transactions, run lifecycle hooks, and atomically enqueue standard events. SQLite and PostgreSQL CRUD integrations passed; `pnpm verify` passed. |
-| P5-01 | Execution engine and authorization | NOT_STARTED | — | P4-02 | |
+| P5-01 | Execution engine and authorization | DONE | pi | P4-02 | Transport-neutral execution options, scope authorization, request context, cancellation/progress/audit; `pnpm lint && pnpm api-report`, `pnpm test`, `pnpm typecheck`, and `pnpm build` passed. |
 | P5-02 | Remote HTTP host and verifier plugins | NOT_STARTED | — | P5-01 | |
 | P5-03 | Registration/heartbeat client | NOT_STARTED | — | P5-02 | |
 | P6-01 | Transactional outbox publishing | NOT_STARTED | — | P2-03,P5-01 | |
@@ -78,3 +78,4 @@ Append concise entries; do not rewrite history.
 - 2026-09-02 `pi`: approved D-03 in ADR 0004. Direct app-to-app event delivery is the MVP baseline behind a transport seam; durable gateway relay is optional P7-04.
 - 2026-09-02 `pi`: completed P4-01 entity compiler and contextual stores. `pnpm verify` plus real PostgreSQL contextual-store integration passed; full lifecycle verification is pending P4-02.
 - 2026-09-02 `pi`: completed P4-02 generated CRUD lifecycle. Five generated actions run via org-bound kernel transactions with hooks and atomic outbox events; SQLite/PostgreSQL integrations and `pnpm verify` passed.
+- 2026-09-02 `pi`: completed P5-01 execution pipeline: explicit verified-principal options, segment-aware scopes, request/cancellation/progress context, and redacted audit metadata. `pnpm lint && pnpm api-report`, `pnpm test`, `pnpm typecheck`, and `pnpm build` passed.

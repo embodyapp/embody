@@ -40,6 +40,27 @@ export interface ProgressUpdate {
   readonly message: string;
 }
 
+/** Per-request controls for the transport-neutral action execution pipeline. */
+export interface ExecutionOptions {
+  readonly principal: Principal;
+  readonly requestId?: string;
+  readonly traceparent?: string;
+  readonly signal?: AbortSignal;
+  readonly progress?: (update: ProgressUpdate) => void;
+  readonly audit?: (event: ExecutionAuditEvent) => void | Promise<void>;
+}
+
+export interface ExecutionAuditEvent {
+  readonly target: string;
+  readonly orgId: string;
+  readonly actorId: string;
+  readonly requestId?: string;
+  readonly traceparent?: string;
+  readonly durationMs: number;
+  readonly outcome: "success" | "failure" | "cancelled";
+  readonly errorCode?: string;
+}
+
 export interface KernelServices {
   get<T = unknown>(serviceKey: string): T;
 }
@@ -51,6 +72,9 @@ export interface KernelContext {
   readonly [kernelContextBrand]: true;
   readonly principal: Principal;
   readonly orgId: string;
+  readonly requestId?: string;
+  readonly traceparent?: string;
+  readonly signal?: AbortSignal;
   readonly entities: Readonly<Record<string, EntityStoreAccessor<never>>>;
   readonly services: KernelServices;
   readonly events: {

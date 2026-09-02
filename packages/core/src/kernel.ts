@@ -2,16 +2,20 @@ import type {
   ActionDefinition,
   EmbodyPlugin,
   EntityStoreAccessor,
+  ExecutionOptions,
   HookHandler,
   KernelContext,
   Principal,
+  ProgressUpdate,
 } from "./contracts.js";
 import {
   DependencyError,
   DuplicateRegistrationError,
+  ForbiddenError,
   HookVetoError,
   InternalError,
   NotFoundError,
+  UnavailableError,
   ValidationError,
 } from "./errors.js";
 import {
@@ -177,30 +181,63 @@ export class Kernel {
     this.state = "stopped";
   }
   /** Executes a registered action in an org-bound transaction. */
-  public async execute(target: string, input: unknown, principal: Principal): Promise<unknown> {
-    if (this.state !== "ready") throw new DependencyError("Kernel is not ready");
-    const action = this.actions.get(target);
-    if (action === undefined) throw new NotFoundError(`Action was not found: ${target}`);
-    const parsed = action.input.safeParse(input);
-    if (!parsed.success)
-      throw new ValidationError(
-        "Action input is invalid",
-        parsed.error.issues.map((issue) => ({
-          path: issue.path.map(String),
-          message: issue.message,
-        })),
-      );
-    const run = async (tx: EntityTransaction): Promise<unknown> => {
-      const context = this.executionContext(principal, tx);
-      const result = await action.handler(parsed.data as never, context);
-      if (action.output === undefined) return result;
-      const output = action.output.safeParse(result);
-      if (output.success) return output.data;
-      throw new InternalError(`Action ${target} returned invalid output`);
-    };
-    if (this.options.storage.transaction === undefined)
-      throw new DependencyError("Storage does not support transactions");
-    return this.options.storage.transaction(principal.orgId, run);
+  public async execute(
+    target: string,
+    input: unknown,
+    options: ExecutionOptions | Principal,
+  ): Promise<unknown> {
+    const execution = this.normalizeExecutionOptions(options);
+    const startedAt = Date.now();
+    let outcome: "success" | "failure" | "cancelled" = "failure";
+    let errorCode: string | undefined;
+    try {
+      if (this.state !== "ready") throw new DependencyError("Kernel is not ready");
+      this.assertPrincipal(execution.principal);
+      this.throwIfAborted(execution.signal);
+      const action = this.actions.get(target);
+      if (action === undefined) throw new NotFoundError("Action was not found");
+      const parsed = action.input.safeParse(input);
+      if (!parsed.success)
+        throw new ValidationError(
+          "Action input is invalid",
+          parsed.error.issues.map((issue) => ({
+            path: issue.path.map(String),
+            message: issue.message,
+          })),
+        );
+      if (!execution.legacy && !this.scopeAllows(execution.principal.scopes, target))
+        throw new ForbiddenError("Permission denied");
+      const run = async (tx: EntityTransaction): Promise<unknown> => {
+        this.throwIfAborted(execution.signal);
+        const context = this.executionContext(execution.principal, tx, execution);
+        const result = await action.handler(parsed.data as never, context);
+        this.throwIfAborted(execution.signal);
+        if (action.output === undefined) return result;
+        const output = action.output.safeParse(result);
+        if (output.success) return output.data;
+        throw new InternalError("Action returned invalid output");
+      };
+      if (this.options.storage.transaction === undefined)
+        throw new DependencyError("Storage does not support transactions");
+      const result = await this.options.storage.transaction(execution.principal.orgId, run);
+      outcome = "success";
+      return result;
+    } catch (error) {
+      if (execution.signal?.aborted) outcome = "cancelled";
+      errorCode = error instanceof Error && "code" in error ? String(error.code) : "INTERNAL_ERROR";
+      throw error;
+    } finally {
+      await execution.audit?.({
+        target,
+        orgId: execution.principal.orgId,
+        actorId: execution.principal.actorId,
+        ...(execution.requestId === undefined ? {} : { requestId: execution.requestId }),
+        ...(execution.traceparent === undefined ? {} : { traceparent: execution.traceparent }),
+        durationMs: Date.now() - startedAt,
+        outcome,
+        ...(errorCode === undefined ? {} : { errorCode }),
+      });
+    }
   }
   public async runHooks(
     key: string,
@@ -297,7 +334,11 @@ export class Kernel {
       throw new DuplicateRegistrationError(`Duplicate action: ${target}`);
     this.actions.set(target, action);
   }
-  private executionContext(principal: Principal, tx: EntityTransaction): KernelContext {
+  private executionContext(
+    principal: Principal,
+    tx: EntityTransaction,
+    execution: ExecutionOptions,
+  ): KernelContext {
     const entities: Record<string, EntityStoreAccessor<never>> = {};
     for (const entity of this.entities.values()) {
       const lifecycle = {
@@ -324,6 +365,9 @@ export class Kernel {
     const context = {
       principal,
       orgId: principal.orgId,
+      ...(execution.requestId === undefined ? {} : { requestId: execution.requestId }),
+      ...(execution.traceparent === undefined ? {} : { traceparent: execution.traceparent }),
+      ...(execution.signal === undefined ? {} : { signal: execution.signal }),
       entities,
       services: {
         get: <T>(key: string) =>
@@ -340,10 +384,43 @@ export class Kernel {
           await tx.outbox.enqueue(principal.orgId, { eventName, payload });
         },
       },
-      progress: () => undefined,
-      can: () => false,
+      progress: (update: ProgressUpdate) => execution.progress?.(update),
+      can: (action: string) => this.scopeAllows(principal.scopes, action),
     } as unknown as KernelContext;
     return context;
+  }
+  private normalizeExecutionOptions(
+    options: ExecutionOptions | Principal,
+  ): ExecutionOptions & { readonly legacy: boolean } {
+    if ("principal" in options) return { ...options, legacy: false };
+    return { principal: options, legacy: true };
+  }
+  private assertPrincipal(principal: Principal): void {
+    if (
+      !principal ||
+      typeof principal.orgId !== "string" ||
+      !principal.orgId ||
+      typeof principal.actorId !== "string" ||
+      !principal.actorId ||
+      !["agent", "human", "system"].includes(principal.actorType) ||
+      !Array.isArray(principal.roles) ||
+      !Array.isArray(principal.scopes) ||
+      !principal.roles.every((role) => typeof role === "string") ||
+      !principal.scopes.every((scope) => typeof scope === "string")
+    )
+      throw new ValidationError("Principal is invalid");
+  }
+  private scopeAllows(scopes: readonly string[], target: string): boolean {
+    const parts = target.split(".");
+    return scopes.some((scope) => {
+      if (scope === target || scope === parts.join(":")) return true;
+      if (!scope.endsWith(":*")) return false;
+      const prefix = scope.slice(0, -2).split(":");
+      return prefix.length < parts.length && prefix.every((part, index) => part === parts[index]);
+    });
+  }
+  private throwIfAborted(signal: AbortSignal | undefined): void {
+    if (signal?.aborted) throw new UnavailableError("Execution cancelled");
   }
   private async cleanup(): Promise<void> {
     if (this.cleaned) return;

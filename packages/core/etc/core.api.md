@@ -387,6 +387,42 @@ export const eventEnvelopeSchema: z.ZodObject<{
 export type EventHandler<TPayload = unknown> = (event: DomainEvent<TPayload>, ctx: KernelContext) => Promise<void> | void;
 
 // @public (undocumented)
+export interface ExecutionAuditEvent {
+    // (undocumented)
+    readonly actorId: string;
+    // (undocumented)
+    readonly durationMs: number;
+    // (undocumented)
+    readonly errorCode?: string;
+    // (undocumented)
+    readonly orgId: string;
+    // (undocumented)
+    readonly outcome: "success" | "failure" | "cancelled";
+    // (undocumented)
+    readonly requestId?: string;
+    // (undocumented)
+    readonly target: string;
+    // (undocumented)
+    readonly traceparent?: string;
+}
+
+// @public
+export interface ExecutionOptions {
+    // (undocumented)
+    readonly audit?: (event: ExecutionAuditEvent) => void | Promise<void>;
+    // (undocumented)
+    readonly principal: Principal;
+    // (undocumented)
+    readonly progress?: (update: ProgressUpdate) => void;
+    // (undocumented)
+    readonly requestId?: string;
+    // (undocumented)
+    readonly signal?: AbortSignal;
+    // (undocumented)
+    readonly traceparent?: string;
+}
+
+// @public (undocumented)
 export type ExecutionRequest = z.infer<typeof executionRequestSchema>;
 
 // @public (undocumented)
@@ -452,7 +488,7 @@ export class Kernel {
     get actionTargets(): readonly string[];
     // (undocumented)
     boot(): Promise<void>;
-    execute(target: string, input: unknown, principal: Principal): Promise<unknown>;
+    execute(target: string, input: unknown, options: ExecutionOptions | Principal): Promise<unknown>;
     // (undocumented)
     get manifest(): AppManifest;
     // (undocumented)
@@ -492,7 +528,13 @@ export interface KernelContext {
     // (undocumented)
     progress(update: ProgressUpdate): void;
     // (undocumented)
+    readonly requestId?: string;
+    // (undocumented)
     readonly services: KernelServices;
+    // (undocumented)
+    readonly signal?: AbortSignal;
+    // (undocumented)
+    readonly traceparent?: string;
 }
 
 // @public (undocumented)

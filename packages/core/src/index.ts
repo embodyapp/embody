@@ -9,6 +9,8 @@ export {
   type CheckedActionDefinition,
   type CheckedPluginDefinition,
   type DomainEvent,
+  type ExecutionAuditEvent,
+  type ExecutionOptions,
   type EmbodyPlugin,
   type EntityDefinition,
   type EntityListOptions,
