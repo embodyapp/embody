@@ -14,6 +14,8 @@ export interface GatewayJwtVerifierOptions {
 }
 export interface AppAuthVerifier {
   readonly id: string;
+  /** Lets hosts reject the intentionally insecure verifier in production. */
+  readonly localDevelopmentOnly?: boolean;
   verify(token: string): Promise<Principal>;
 }
 
@@ -77,5 +79,9 @@ export interface LocalDevVerifierOptions {
 export function localDevVerifier(options: LocalDevVerifierOptions): AppAuthVerifier {
   if (!options.enabled || options.environment !== "development")
     throw new Error("Local development authentication is disabled outside development");
-  return { id: "local-dev", verify: () => Promise.resolve(options.principal) };
+  return {
+    id: "local-dev",
+    localDevelopmentOnly: true,
+    verify: () => Promise.resolve(options.principal),
+  };
 }

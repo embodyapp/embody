@@ -91,6 +91,11 @@ export const appManifestSchema: z.ZodObject<{
 export function assertUniqueMappedTargets(targets: readonly string[]): void;
 
 // @public (undocumented)
+export class BadRequestError extends EmbodyError {
+    constructor(message?: string, details?: readonly ValidationIssue[]);
+}
+
+// @public (undocumented)
 export type BootPhase = "resolve" | "schema" | "services" | "init" | "registries" | "manifest" | "start";
 
 // @public (undocumented)
@@ -176,7 +181,7 @@ export class EmbodyError extends Error {
 }
 
 // @public (undocumented)
-export type EmbodyErrorCode = "VALIDATION_ERROR" | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "HOOK_VETO" | "DEPENDENCY_ERROR" | "DUPLICATE_REGISTRATION" | "UNAVAILABLE" | "INTERNAL_ERROR";
+export type EmbodyErrorCode = "VALIDATION_ERROR" | "RATE_LIMITED" | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "HOOK_VETO" | "DEPENDENCY_ERROR" | "DUPLICATE_REGISTRATION" | "UNAVAILABLE" | "INTERNAL_ERROR";
 
 // @public (undocumented)
 export interface EmbodyPlugin<TConfig = unknown, TEntities extends Readonly<Record<string, EntityDefinition>> = Readonly<Record<string, EntityDefinition>>, TActions extends Readonly<Record<string, ActionDefinition>> = Readonly<Record<string, ActionDefinition>>> {
@@ -346,6 +351,7 @@ export const errorEnvelopeSchema: z.ZodObject<{
     error: z.ZodObject<{
         code: z.ZodEnum<{
             VALIDATION_ERROR: "VALIDATION_ERROR";
+            RATE_LIMITED: "RATE_LIMITED";
             UNAUTHENTICATED: "UNAUTHENTICATED";
             FORBIDDEN: "FORBIDDEN";
             NOT_FOUND: "NOT_FOUND";
@@ -648,6 +654,11 @@ export const progressUpdateSchema: z.ZodObject<{
 
 // @public (undocumented)
 export const PROTOCOL_VERSION: 1;
+
+// @public (undocumented)
+export class RateLimitedError extends EmbodyError {
+    constructor(message?: string);
+}
 
 // @public (undocumented)
 export type RegistrationRequest = z.infer<typeof registrationRequestSchema>;

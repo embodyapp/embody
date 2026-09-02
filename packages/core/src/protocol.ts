@@ -138,6 +138,7 @@ export const errorEnvelopeSchema = z
       .object({
         code: z.enum([
           "VALIDATION_ERROR",
+          "RATE_LIMITED",
           "UNAUTHENTICATED",
           "FORBIDDEN",
           "NOT_FOUND",

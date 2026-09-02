@@ -25,6 +25,7 @@ export {
   type WorkflowDefinition,
 } from "./contracts.js";
 export {
+  BadRequestError,
   ConflictError,
   DependencyError,
   DuplicateRegistrationError,
@@ -33,6 +34,7 @@ export {
   HookVetoError,
   InternalError,
   NotFoundError,
+  RateLimitedError,
   UnauthenticatedError,
   UnavailableError,
   ValidationError,

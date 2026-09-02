@@ -1,5 +1,6 @@
 export type EmbodyErrorCode =
   | "VALIDATION_ERROR"
+  | "RATE_LIMITED"
   | "UNAUTHENTICATED"
   | "FORBIDDEN"
   | "NOT_FOUND"
@@ -31,6 +32,16 @@ export class EmbodyError extends Error {
 export class ValidationError extends EmbodyError {
   public constructor(message = "Input is invalid", details?: readonly ValidationIssue[]) {
     super("VALIDATION_ERROR", message, 422, details);
+  }
+}
+export class BadRequestError extends EmbodyError {
+  public constructor(message = "Request is invalid", details?: readonly ValidationIssue[]) {
+    super("VALIDATION_ERROR", message, 400, details);
+  }
+}
+export class RateLimitedError extends EmbodyError {
+  public constructor(message = "Too many requests") {
+    super("RATE_LIMITED", message, 429);
   }
 }
 export class UnauthenticatedError extends EmbodyError {
