@@ -4,7 +4,7 @@
 
 ## Objective
 
-After D-02 approves exact semantics, implement a small durable workflow state machine rather than a misleading in-memory sequence. If product owners explicitly remove workflows from v1, preserve this document as the acceptance plan for the first version that advertises them.
+Implement the durable workflow state machine approved by [ADR 0003](../adr/0003-durable-workflows.md) rather than a misleading in-memory sequence. Workflows are the final MVP feature phase before hardening and release.
 
 ## Required contract to approve first (P11-01)
 
@@ -65,7 +65,7 @@ Do not promise transparent replay of arbitrary TypeScript. Persist outputs/error
 
 ### Upgrade tests
 
-- An instance pinned to workflow v1 finishes correctly after v2 is deployed, or deployment is rejected until v1 drains—whichever D-02 selects.
+- An instance pinned to workflow v1 finishes correctly after v2 is deployed because the deployment retains v1 until matching instances drain.
 - Storage migrates from pre-workflow schema and previous workflow schema fixture without losing entity/outbox data.
 
-Phase 11 passes only when crash-point and concurrent PostgreSQL tests demonstrate durable, resumable behavior. If D-02 defers the feature, packages and docs must call it unsupported and the final release checklist must not advertise durable workflows.
+Phase 11 passes only when crash-point and concurrent PostgreSQL tests demonstrate durable, resumable behavior. Phase 12 and the MVP release remain blocked until this phase passes.

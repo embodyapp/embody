@@ -72,4 +72,4 @@ Set release budgets after baseline review. Include a representative scale fixtur
 - Performance results meet approved budgets with no material regression from stored baseline; exceptions require explicit review.
 - Documentation maps every advertised feature to implemented/tested status and calls out deferred workflows/provider limitations.
 
-Phase 12 passes only when release checklist evidence is linked in `STATUS.md`; “tests pass locally” alone is insufficient. If workflows were deferred by D-02, release documentation and capability manifests must not advertise them.
+Phase 12 passes only when release checklist evidence is linked in `STATUS.md`; “tests pass locally” alone is insufficient. ADR 0003 makes successful Phase 11 durable-workflow verification a release prerequisite.

@@ -32,19 +32,20 @@ Manifest names are canonical dotted targets (`plugin.entity.operation`, `plugin.
 
 ### D-02: durable workflows
 
-The SPI mentions durable multi-step workflows but defines no state model, persistence schema, retries, compensation, cancellation, or API. Recommendation: preserve a typed `workflows` field as reserved metadata, fail boot with a clear `UNSUPPORTED_WORKFLOW` if used in MVP, and specify/implement it as P12. Do not invent silent non-durable behavior.
+Approved by [ADR 0003](../adr/0003-durable-workflows.md). Durable workflows are included in MVP as Phase 11, the final feature phase before hardening and release. The initial contract uses versioned acyclic step graphs, version-pinned instances, at-least-once idempotent step execution, persisted retries and delays, cooperative cancellation followed by reverse-order compensation, and authorization re-evaluation before every step. Start, status, cancel, and retry use the normal execution surfaces.
+
+Until Phase 11 implements this contract, preserve the typed `workflows` field as reserved metadata and fail boot clearly with `UNSUPPORTED_WORKFLOW`. Do not invent silent non-durable behavior.
 
 ### D-03: cross-app events
 
-A database outbox in the publishing app cannot directly invoke subscribers in another app. Recommended MVP protocol:
+Approved by [ADR 0004](../adr/0004-cross-app-event-delivery.md). Cross-app events use a pluggable infrastructure transport, with direct app-to-app delivery as the MVP baseline and durable gateway relay as an optional later adapter:
 
 1. App manifests advertise `eventSubscriptions` from plugin `events` keys.
-2. Publishing app's outbox worker POSTs an event envelope to an authenticated gateway relay endpoint.
-3. Gateway persists one delivery per matching healthy app in its own outbox/delivery table before acknowledging.
-4. Gateway POSTs to each app's authenticated `/events/deliver`; app records `eventId + handlerId` in an inbox table transactionally before/with side effects where possible.
-5. Success is acknowledged only after all local matching handlers complete; retries are at-least-once. Handlers remain responsible for idempotent external effects.
-
-Define no-subscriber behavior (recommended: successful delivery with audit record), retention, payload limits, and event authorization before implementation.
+2. The publishing app persists one delivery per destination and POSTs an authenticated envelope directly to each receiver's `/events/deliver` endpoint. Static and gateway-backed directory adapters may supply destinations.
+3. The receiver authenticates the envelope and records `eventId + handlerId` in an inbox before/with handler completion where possible.
+4. Delivery is at least once, with independent retries per destination. Handlers remain responsible for idempotent external effects.
+5. No-subscriber delivery succeeds with an audit record. Envelopes are limited to 256 KiB; completed delivery/inbox records are retained at least 30 days and dead letters require explicit resolution.
+6. Optional P7-04 may add a gateway relay transport that durably assumes fan-out and retry ownership before acknowledging the publisher, without changing domain plugins.
 
 ### Other clarifications to approve
 
@@ -57,7 +58,7 @@ Define no-subscriber behavior (recommended: successful delivery with audit recor
 
 ## Deliverables
 
-- ADRs for stack, cross-app relay, hooks/transactions, auth/token algorithms, and workflow deferral.
+- ADRs for stack, cross-app relay, hooks/transactions, auth/token algorithms, and durable workflow semantics.
 - Versioned Zod schemas plus JSON fixtures for manifest, registration, heartbeat, execution, principal JWT claims, event envelope, progress SSE, and error envelope.
 - Threat model covering trust boundaries, SSRF, confused deputy, replay, token/key rotation, tenant escape, malicious schemas/payload sizes, and sensitive audit fields.
 - Compatibility policy for protocol and package semver.
@@ -68,6 +69,6 @@ Define no-subscriber behavior (recommended: successful delivery with audit recor
 2. **Round-trip tests**: encoded/decoded manifest, principal, event, and execute objects retain all contract fields.
 3. **Naming tests**: dotted targets map deterministically to global/scoped MCP and CLI names; collision fixtures are rejected.
 4. **Threat-model review tests/checklist**: every external endpoint has documented authentication, authorization, input limit, replay behavior, and redaction rule.
-5. **Decision completion**: D-01 through D-04 are marked `DONE`; workflow may instead be explicitly approved as post-MVP, which unblocks all except P12.
+5. **Decision completion**: D-01 through D-04 are marked `DONE`; Phase 11 implements the approved workflow decision before P12.
 
 Phase 0 passes when another agent can implement contracts without making a new security- or compatibility-sensitive decision.

@@ -76,4 +76,4 @@ For every phase:
 
 ## Scope rule
 
-The specifications are authoritative for product behavior. The architecture decision document supplies implementation detail where the specs are silent. Items explicitly deferred by an approved ADR (for example provider-specific Clerk integration, or durable workflows if D-02 defers them) must not be presented as implemented. A full-spec release runs phase 11 before phase 12; an MVP that defers phase 11 must state that limitation prominently.
+The specifications are authoritative for product behavior. The architecture decision document supplies implementation detail where the specs are silent. Items explicitly deferred by an approved ADR (for example provider-specific Clerk integration) must not be presented as implemented. ADR 0003 includes durable workflows in MVP, so phase 11 must pass before phase 12 and release.

@@ -35,7 +35,7 @@ Hook registry behavior:
 - A veto stops remaining handlers and mutation; classify explicit `HookVetoError` while safely wrapping ordinary hook errors.
 - Build an execution trace (handler ID, start/end, outcome) usable by inspector/audit, with no sensitive payload by default.
 
-Action registry rejects collisions between custom and generated names. Workflow definitions follow D-02 (likely fail boot if nonempty in MVP).
+Action registry rejects collisions between custom and generated names. Until Phase 11 implements ADR 0003, the kernel fails boot if workflow definitions are nonempty.
 
 ## Tests and success criteria
 

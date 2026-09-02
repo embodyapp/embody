@@ -1,10 +1,10 @@
 # Phase 7 — Central gateway
 
-**Specs:** 01, gateway side of 04, relay from 06. **Status:** P7-01 to P7-03.
+**Specs:** 01, gateway side of 04, optional relay from ADR 0004. **Status:** P7-01 to P7-04.
 
 ## Objective
 
-Build the central control plane: authenticated app registry, health-derived catalog, caller authentication/authorization, downstream token exchange, audit/rate limits, execution dispatch, and durable event relay.
+Build the central control plane: authenticated app registry, health-derived catalog, caller authentication/authorization, downstream token exchange, audit/rate limits, and execution dispatch. Add durable event relay as an optional transport adapter after the required gateway path works.
 
 ## P7-01: registry and health
 
@@ -27,13 +27,21 @@ Issue short-lived downstream JWT with issuer, app-specific audience, subject, Pr
 
 Authorize target before dispatch using exact/wildcard scopes plus optional provider policy. Apply per-principal/app/target rate limiting with bounded in-memory MVP implementation or documented persistent option. Write append-only audit records for every attempt with redacted parameter summary and duration/outcome.
 
-## P7-03: dispatch and relay
+## P7-03: dispatch
 
 - `POST /api/execute/:appId/:target` authenticates caller, checks healthy catalog and target membership, authorizes, signs downstream token, and sends canonical `/execute` body.
 - Forward deadlines, cancellation, request/trace IDs, safe response/error mappings, and progress stream in phase 8. Do not blindly forward hop-by-hop headers.
 - Defend against SSRF by dispatching only to registry-approved parsed origins resolved under network policy; handle DNS rebinding per deployment model.
-- Retry policy: do not automatically retry non-idempotent action execution after ambiguous timeout. Event relay uses durable retries and inbox IDs.
-- Implement gateway event ingress/fan-out/delivery tables from D-03 and expose operational dead-letter controls with authorization/audit.
+- Retry policy: do not automatically retry non-idempotent action execution after ambiguous timeout.
+- Expose a read-only subscription directory compatible with the Phase 6 direct transport, while preserving static directory support for deployments that do not use the gateway.
+
+## P7-04: optional durable event relay
+
+- Implement an `EventTransport` adapter conforming to ADR 0004; domain plugins and receiver handlers must not change when switching from direct delivery.
+- Authenticate event ingress, snapshot all matching registered subscriptions (including temporarily unhealthy destinations), and persist independent fan-out delivery rows before acknowledging the publisher.
+- Deliver through the same authenticated `/events/deliver` receiver interface and inbox IDs used by direct transport.
+- Expose authorized, audited delivery status, retry, and dead-letter controls. Gateway restart after acknowledgement must not lose delivery.
+- Keep this adapter outside the MVP release critical path and clearly report whether a deployment has enabled it.
 
 ## Tests and success criteria
 
@@ -57,6 +65,6 @@ Authorize target before dispatch using exact/wildcard scopes plus optional provi
 - Unknown/unhealthy app and unadvertised target never cause outbound request.
 - Timeout/disconnect cancels downstream and is not retried ambiguously.
 - Circuit-breaker behavior, if added, opens/half-opens deterministically with fake clock and cannot bypass health status.
-- Event ingress persists fan-out before acknowledging; duplicate event IDs are idempotent; one failing subscriber does not block successful subscribers permanently.
+- Optional P7-04 conformance: event ingress persists fan-out before acknowledging; duplicate event IDs are idempotent; one failing subscriber does not block successful subscribers permanently; gateway restart loses no acknowledged delivery.
 
 Phase 7 passes when an authenticated caller can execute a registered remote action end-to-end, unhealthy tools disappear within TTL, security negatives cause zero dispatch, and audit evidence exists for every outcome.
