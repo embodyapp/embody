@@ -1,3 +1,4 @@
+export { z } from "zod";
 export {
   definePlugin,
   type ActionDefinition,
@@ -38,6 +39,7 @@ export {
   type ErrorEnvelope,
   type ValidationIssue,
 } from "./errors.js";
+export { compileEntity, type CompiledEntity, type EntityTransaction } from "./entities.js";
 export {
   compileManifest,
   stableStringify,

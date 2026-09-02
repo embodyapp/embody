@@ -24,7 +24,7 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P2-03 | PostgreSQL adapter, RLS, and conformance | DONE | pi | P2-01 | PostgreSQL 16 Docker integration passed as non-owner runtime role: JSONB, RLS raw-read isolation, `SET LOCAL` cleanup, and concurrent `FOR UPDATE SKIP LOCKED` claims |
 | P3-01 | Plugin graph and service registry | DONE | pi | P1-02 | Deterministic topological sorting, dependency/service access validation, and graph tests; `pnpm verify` passed |
 | P3-02 | Kernel boot state machine and hook/action registries | DONE | pi | P2-01,P3-01 | Seven-phase single-flight kernel, lifecycle cleanup, registries, hook traces/vetoes, immutable manifest, and real SQLite/PostgreSQL adapter boot tests; `pnpm verify` passed |
-| P4-01 | Entity compiler and stores | NOT_STARTED | — | P2-02,P2-03,P3-02 | |
+| P4-01 | Entity compiler and stores | DONE | pi | P2-02,P2-03,P3-02 | Compiled Zod object declarations at boot; tenant/transaction-bound typed stores validate data, nested containment filters, sort paths, pagination, and merged updates. SQLite/PostgreSQL integrations passed. |
 | P4-02 | Auto-CRUD lifecycle and manifests | NOT_STARTED | — | P4-01 | |
 | P5-01 | Execution engine and authorization | NOT_STARTED | — | P4-02 | |
 | P5-02 | Remote HTTP host and verifier plugins | NOT_STARTED | — | P5-01 | |
@@ -76,3 +76,4 @@ Append concise entries; do not rewrite history.
 - 2026-09-01 `pi`: completed P2-03 and P3-02 review gates using local PostgreSQL 16 Docker with a non-owner runtime role. RLS raw reads, `SET LOCAL` cleanup, concurrent claims, and real-adapter kernel boot tests passed.
 - 2026-09-02 `pi`: approved D-02 in ADR 0003. Durable workflows are included in MVP as the final feature phase before hardening/release; P11 is no longer blocked by a product decision.
 - 2026-09-02 `pi`: approved D-03 in ADR 0004. Direct app-to-app event delivery is the MVP baseline behind a transport seam; durable gateway relay is optional P7-04.
+- 2026-09-02 `pi`: completed P4-01 entity compiler and contextual stores. `pnpm verify` plus real PostgreSQL contextual-store integration passed; full lifecycle verification is pending P4-02.

@@ -2,6 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { compileEntity, z } from "@embody/core";
 
 import { SqliteStorage } from "../src/index.js";
 
@@ -19,6 +20,27 @@ afterEach(async () => {
 });
 
 describe("SQLite storage conformance", () => {
+  it("provides a contextual store with nested JSON filters", async () => {
+    const db = await storage();
+    const entity = compileEntity("kanban", "card", {
+      schema: z.object({
+        title: z.string(),
+        metadata: z.object({ lane: z.string(), rank: z.number() }),
+      }),
+      defaultSort: { field: "title", direction: "asc" },
+    });
+    await db.transaction("org-a", async (tx) => {
+      const store = entity.createStore("org-a", tx);
+      await store.create({ title: "B", metadata: { lane: "now", rank: 1 } });
+      await store.create({ title: "A", metadata: { lane: "now", rank: 2 } });
+      await store.create({ title: "C", metadata: { lane: "later", rank: 1 } });
+      expect(await store.list({ filter: { metadata: { lane: "now" } } })).toMatchObject([
+        { data: { title: "A" } },
+        { data: { title: "B" } },
+      ]);
+    });
+  });
+
   it("commits an entity and outbox event atomically", async () => {
     const db = await storage();
     await db.transaction("org-a", async (tx) => {

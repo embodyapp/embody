@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { compileEntity, z } from "@embody/core";
 
 import { PostgresStorage } from "../src/index.js";
 
@@ -18,6 +19,27 @@ afterAll(async () => {
 });
 
 describePostgres("PostgreSQL storage conformance", () => {
+  it("provides a contextual store with nested JSON filters", async () => {
+    const db = storage!;
+    const entity = compileEntity("kanban", "card", {
+      schema: z.object({
+        title: z.string(),
+        metadata: z.object({ lane: z.string(), rank: z.number() }),
+      }),
+      defaultSort: { field: "title", direction: "asc" },
+    });
+    await db.transaction(`entity-${randomUUID()}`, async (tx) => {
+      const store = entity.createStore(tx.orgId, tx);
+      await store.create({ title: "B", metadata: { lane: "now", rank: 1 } });
+      await store.create({ title: "A", metadata: { lane: "now", rank: 2 } });
+      await store.create({ title: "C", metadata: { lane: "later", rank: 1 } });
+      expect(await store.list({ filter: { metadata: { lane: "now" } } })).toMatchObject([
+        { data: { title: "A" } },
+        { data: { title: "B" } },
+      ]);
+    });
+  });
+
   it("enforces RLS for raw reads and uses SET LOCAL tenant identity", async () => {
     const db = storage!;
     const id = randomUUID();

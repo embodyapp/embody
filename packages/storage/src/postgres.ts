@@ -105,7 +105,7 @@ class PostgresTransaction implements StorageTransaction {
       const order =
         options.sort === undefined
           ? "id ASC"
-          : `data ->> $${values.push(field(options.sort.field))} ${options.sort.direction === "desc" ? "DESC" : "ASC"}, id ASC`;
+          : `data ->> $${values.push(field(options.sort.field))} ${options.sort.direction === "desc" ? "DESC" : "ASC"} NULLS LAST, id ASC`;
       values.push(limit, offset);
       const result = await this.client.query(
         `SELECT * FROM embody_entities WHERE ${clauses.join(" AND ")} ORDER BY ${order} LIMIT $${values.length - 1} OFFSET $${values.length}`,

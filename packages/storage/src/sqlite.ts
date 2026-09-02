@@ -72,10 +72,23 @@ function outboxFromRow(row: Row): OutboxEvent {
 }
 
 function jsonPath(field: string): string {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) {
-    throw new RangeError("Sort and filter fields must be simple entity field names");
+  const segments = field.split(".");
+  if (segments.some((segment) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(segment))) {
+    throw new RangeError("Sort and filter fields must be declared entity field names");
   }
-  return `$.${field}`;
+  return `$.${segments.join(".")}`;
+}
+
+function filterLeaves(
+  filter: Readonly<Record<string, unknown>>,
+  prefix = "",
+): readonly [string, unknown][] {
+  return Object.entries(filter).flatMap(([key, value]) => {
+    const path = prefix === "" ? key : `${prefix}.${key}`;
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+      ? filterLeaves(value as Readonly<Record<string, unknown>>, path)
+      : [[path, value]];
+  });
 }
 
 class SqliteTransaction implements StorageTransaction {
@@ -101,14 +114,17 @@ class SqliteTransaction implements StorageTransaction {
     list: async <TData>(orgId: string, entityType: string, options: EntityListOptions = {}) => {
       const clauses = ["org_id = ?", "entity_type = ?"];
       const parameters: unknown[] = [orgId, entityType];
-      for (const [field, value] of Object.entries(options.filter ?? {})) {
+      for (const [field, value] of filterLeaves(options.filter ?? {})) {
         clauses.push("json_extract(data, ?) = json_extract(?, '$')");
         parameters.push(jsonPath(field), JSON.stringify(value));
       }
       const direction = options.sort?.direction === "desc" ? "DESC" : "ASC";
       const order =
-        options.sort === undefined ? "id ASC" : `json_extract(data, ?) ${direction}, id ASC`;
-      if (options.sort !== undefined) parameters.push(jsonPath(options.sort.field));
+        options.sort === undefined
+          ? "id ASC"
+          : "json_extract(data, ?) IS NULL ASC, json_extract(data, ?) " + direction + ", id ASC";
+      if (options.sort !== undefined)
+        parameters.push(jsonPath(options.sort.field), jsonPath(options.sort.field));
       const limit = options.limit ?? 20;
       const offset = options.offset ?? 0;
       if (

@@ -115,6 +115,21 @@ export type CheckedPluginDefinition<TPlugin> = TPlugin extends {
 } : unknown;
 
 // @public (undocumented)
+export interface CompiledEntity<TData extends Record<string, unknown> = Record<string, unknown>> {
+    // (undocumented)
+    createStore(orgId: string, transaction: EntityTransaction): EntityStoreAccessor<TData>;
+    // (undocumented)
+    readonly definition: EntityDefinition<z.ZodObject>;
+    // (undocumented)
+    readonly entityType: string;
+    // (undocumented)
+    readonly target: string;
+}
+
+// @public (undocumented)
+export function compileEntity<TData extends Record<string, unknown>>(pluginId: string, entityType: string, definition: EntityDefinition<z.ZodObject>): CompiledEntity<TData>;
+
+// @public (undocumented)
 export function compileManifest(plugins: readonly EmbodyPlugin[]): AppManifest;
 
 // @public (undocumented)
@@ -262,6 +277,31 @@ export interface EntityStoreAccessor<TData = Record<string, unknown>> {
     list(options?: EntityListOptions<TData>): Promise<readonly EntityRecord<TData>[]>;
     // (undocumented)
     update(id: string, data: Partial<TData>): Promise<EntityRecord<TData>>;
+}
+
+// @public
+export interface EntityTransaction {
+    // (undocumented)
+    readonly entities: {
+        create<TData>(orgId: string, entityType: string, input: {
+            readonly data: TData;
+        }): Promise<EntityRecord<TData>>;
+        get<TData>(orgId: string, entityType: string, id: string): Promise<EntityRecord<TData> | null>;
+        list<TData>(orgId: string, entityType: string, options?: {
+            readonly filter?: Readonly<Record<string, unknown>>;
+            readonly sort?: {
+                readonly field: string;
+                readonly direction: "asc" | "desc";
+            };
+            readonly limit?: number;
+            readonly offset?: number;
+        }): Promise<readonly EntityRecord<TData>[]>;
+        update<TData>(orgId: string, entityType: string, id: string, update: {
+            readonly data: TData;
+            readonly expectedUpdatedAt?: string;
+        }): Promise<EntityRecord<TData> | null>;
+        delete<TData>(orgId: string, entityType: string, id: string): Promise<EntityRecord<TData> | null>;
+    };
 }
 
 // @public (undocumented)
@@ -625,6 +665,8 @@ export interface WorkflowDefinition<TInput extends z.ZodType = z.ZodType, TOutpu
     // (undocumented)
     readonly steps: Readonly<Record<string, unknown>>;
 }
+
+export { z }
 
 // (No @packageDocumentation comment for this package)
 

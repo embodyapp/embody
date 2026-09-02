@@ -12,6 +12,7 @@ import {
   InternalError,
   ValidationError,
 } from "./errors.js";
+import { compileEntity } from "./entities.js";
 import { compileManifest, type AppManifest } from "./manifest.js";
 import { formatTarget } from "./target.js";
 
@@ -204,6 +205,9 @@ export class Kernel {
           "UNSUPPORTED_WORKFLOW: durable workflows are not available in MVP",
         );
       this.phase("schema");
+      for (const plugin of this.sorted)
+        for (const [name, definition] of Object.entries(plugin.entities ?? {}))
+          compileEntity(plugin.id, name, definition);
       await this.options.storage.ensureSchema();
       this.phase("services");
       for (const plugin of this.sorted)
