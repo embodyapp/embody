@@ -147,7 +147,10 @@ export class Kernel {
     { readonly id: string; readonly handler: HookHandler }[]
   >();
   private readonly actions = new Map<string, ActionDefinition>();
-  private readonly eventHandlers = new Map<string, { readonly id: string; readonly handler: EventHandler }[]>();
+  private readonly eventHandlers = new Map<
+    string,
+    { readonly id: string; readonly handler: EventHandler }[]
+  >();
   private readonly entities = new Map<string, CompiledEntity>();
   private _manifest: AppManifest | undefined;
 

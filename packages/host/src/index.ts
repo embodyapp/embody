@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
   BadRequestError,
@@ -11,12 +11,15 @@ import {
 } from "@embody/core";
 import type { Kernel } from "@embody/core";
 import type { AppAuthVerifier } from "@embody/auth";
+import type { StorageConnection } from "@embody/storage";
+import { parseDeliveredEvent, signEvent } from "./events.js";
 
 export {
   DirectEventTransport,
   OutboxWorker,
   StaticEventDirectory,
   parseDeliveredEvent,
+  signEvent,
   type Clock,
   type DirectEventTransportOptions,
   type EventDestination,
@@ -34,6 +37,8 @@ export interface HostOptions {
   readonly bodyLimit?: number;
   readonly requestTimeoutMs?: number;
   readonly concurrency?: number;
+  /** Enables authenticated direct event reception. The shared secret is per producer deployment. */
+  readonly eventDelivery?: { readonly storage: StorageConnection; readonly secret: string };
 }
 export interface EmbodyHost {
   readonly app: FastifyInstance;
@@ -165,9 +170,13 @@ export function createHost(options: HostOptions): EmbodyHost {
     live: true,
     ready: accepting && options.kernel.state === "ready",
   }));
-  const authenticateExecution = async (request: { headers: Record<string, string | string[] | undefined> }) => {
+  const authenticateExecution = async (request: {
+    headers: Record<string, string | string[] | undefined>;
+  }) => {
     const gatewayAuth = request.headers["x-gateway-auth"];
-    return options.verifier.verify(bearer(typeof gatewayAuth === "string" ? gatewayAuth : undefined));
+    return options.verifier.verify(
+      bearer(typeof gatewayAuth === "string" ? gatewayAuth : undefined),
+    );
   };
   app.post("/execute", async (request, reply) => {
     if (!accepting || options.kernel.state !== "ready") throw new UnavailableError();
@@ -194,6 +203,23 @@ export function createHost(options: HostOptions): EmbodyHost {
       active--;
     }
   });
+  const eventDelivery = options.eventDelivery;
+  if (eventDelivery !== undefined)
+    app.post("/events/deliver", async (request) => {
+      const event = parseDeliveredEvent(request.body);
+      const provided = request.headers["x-embody-event-signature"];
+      const expected = signEvent(event, eventDelivery.secret);
+      if (
+        typeof provided !== "string" ||
+        provided.length !== expected.length ||
+        !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
+      )
+        throw new UnauthenticatedError("Event signature is invalid");
+      await eventDelivery.storage.transaction(event.orgId, (tx) =>
+        options.kernel.handleEvent(event, tx),
+      );
+      return { accepted: true };
+    });
   app.post("/execute/stream", async (request, reply) => {
     if (!accepting || options.kernel.state !== "ready") throw new UnavailableError();
     const parsed = executionRequestSchema.safeParse(request.body);
@@ -203,20 +229,28 @@ export function createHost(options: HostOptions): EmbodyHost {
     request.raw.once("aborted", () => controller.abort());
     reply.hijack();
     reply.raw.writeHead(200, {
-      "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform",
-      connection: "keep-alive", "x-request-id": String(reply.getHeader("x-request-id")),
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-request-id": String(reply.getHeader("x-request-id")),
     });
     let percent = -Infinity;
     let terminal = false;
     const write = (event: string, data: unknown): void => {
-      if (!terminal && !reply.raw.destroyed) reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      if (!terminal && !reply.raw.destroyed)
+        reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const keepalive = setInterval(() => { if (!terminal && !reply.raw.destroyed) reply.raw.write(": keepalive\n\n"); }, 15_000);
+    const keepalive = setInterval(() => {
+      if (!terminal && !reply.raw.destroyed) reply.raw.write(": keepalive\n\n");
+    }, 15_000);
     try {
       const result = await options.kernel.execute(parsed.data.target, parsed.data.input, {
-        principal, requestId: String(reply.getHeader("x-request-id")), signal: controller.signal,
+        principal,
+        requestId: String(reply.getHeader("x-request-id")),
+        signal: controller.signal,
         progress: (update) => {
-          if (update.percent !== undefined && update.percent < percent) throw new BadRequestError("Progress percent must not decrease");
+          if (update.percent !== undefined && update.percent < percent)
+            throw new BadRequestError("Progress percent must not decrease");
           if (update.percent !== undefined) percent = update.percent;
           write("progress", update);
         },

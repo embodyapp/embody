@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Kernel } from "@embody/core";
-import { createHost, createRegistrationClient } from "../src/index.js";
+import { createHost, createRegistrationClient, signEvent } from "../src/index.js";
 
 const principal = {
   orgId: "org-1",
@@ -9,7 +9,7 @@ const principal = {
   roles: [],
   scopes: ["kanban:*"],
 };
-function makeHost(execute = vi.fn(() => Promise.resolve({ ok: true }))) {
+function makeHost(execute: Kernel["execute"] = vi.fn(() => Promise.resolve({ ok: true }))) {
   const kernel = { state: "ready", execute, manifest: {} } as unknown as Kernel;
   return {
     host: createHost({
@@ -44,6 +44,69 @@ describe("remote host", () => {
       { title: "x" },
       expect.objectContaining({ principal, requestId: "request-1" }),
     );
+    await host.stop();
+  });
+  it("streams ordered progress and one result over SSE", async () => {
+    const execute = vi.fn(
+      (
+        _target: string,
+        _input: unknown,
+        options: { progress?: (update: { percent: number; message: string }) => void },
+      ) => {
+        options.progress?.({ percent: 10, message: "first" });
+        options.progress?.({ percent: 100, message: "done" });
+        return Promise.resolve({ ok: true });
+      },
+    );
+    const { host } = makeHost(execute as unknown as Kernel["execute"]);
+    await host.start();
+    const response = await host.app.inject({
+      method: "POST",
+      url: "/execute/stream",
+      headers: { "x-gateway-auth": "Bearer gateway-token" },
+      payload: { protocolVersion: 1, target: "kanban.card.create", input: {} },
+    });
+    expect(response.headers["content-type"]).toContain("text/event-stream");
+    expect(response.body).toBe(
+      'event: progress\ndata: {"percent":10,"message":"first"}\n\nevent: progress\ndata: {"percent":100,"message":"done"}\n\nevent: result\ndata: {"ok":true}\n\n',
+    );
+    await host.stop();
+  });
+  it("accepts only signed event envelopes", async () => {
+    const handleEvent = vi.fn(() => Promise.resolve());
+    const storage = {
+      transaction: vi.fn((_org: string, callback: (tx: object) => Promise<void>) => callback({})),
+    };
+    const host = createHost({
+      kernel: { state: "ready", handleEvent } as unknown as Kernel,
+      verifier: { id: "test", verify: () => Promise.resolve(principal) },
+      appId: "kanban",
+      version: "1",
+      eventDelivery: { storage: storage as never, secret: "shared-secret" },
+    });
+    const event = {
+      protocolVersion: 1 as const,
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "kanban.card.created",
+      orgId: "org-1",
+      producerAppId: "email",
+      payload: {},
+      occurredAt: "2026-01-01T00:00:00.000Z",
+    };
+    const rejected = await host.app.inject({
+      method: "POST",
+      url: "/events/deliver",
+      payload: event,
+    });
+    expect(rejected.statusCode).toBe(401);
+    const accepted = await host.app.inject({
+      method: "POST",
+      url: "/events/deliver",
+      headers: { "x-embody-event-signature": signEvent(event, "shared-secret") },
+      payload: event,
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(handleEvent).toHaveBeenCalledOnce();
     await host.stop();
   });
   it("re-registers on a gateway not-found heartbeat and stops its scheduler", async () => {
