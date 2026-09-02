@@ -1,15 +1,27 @@
 import { z } from "zod";
 
 import type {
+  ActionDefinition,
   EntityDefinition,
   EntityListOptions,
   EntityRecord,
   EntityStoreAccessor,
+  KernelContext,
 } from "./contracts.js";
 import { NotFoundError, ValidationError } from "./errors.js";
 import { formatTarget } from "./target.js";
 
 /** The portion of a storage transaction used by contextual entity stores. */
+export interface EntityLifecycle {
+  beforeCreate?(payload: unknown): Promise<void>;
+  afterCreate?(payload: unknown): Promise<void>;
+  beforeUpdate?(payload: unknown): Promise<void>;
+  afterUpdate?(payload: unknown): Promise<void>;
+  beforeDelete?(payload: unknown): Promise<void>;
+  afterDelete?(payload: unknown): Promise<void>;
+  publish?(eventName: string, payload: unknown): Promise<void>;
+}
+
 export interface EntityTransaction {
   readonly entities: {
     create<TData>(
@@ -40,6 +52,14 @@ export interface EntityTransaction {
       id: string,
     ): Promise<EntityRecord<TData> | null>;
   };
+  readonly outbox?: {
+    enqueue(
+      orgId: string,
+      input: { readonly eventName: string; readonly payload: unknown },
+    ): Promise<unknown>;
+  };
+  /** Runtime lifecycle supplied by the kernel; omitted for standalone stores. */
+  readonly lifecycle?: EntityLifecycle;
 }
 
 export interface CompiledEntity<TData extends Record<string, unknown> = Record<string, unknown>> {
@@ -139,9 +159,14 @@ class Store<TData extends Record<string, unknown>> implements EntityStoreAccesso
   ) {}
 
   public async create(data: TData): Promise<EntityRecord<TData>> {
-    return this.transaction.entities.create(this.orgId, this.entity.entityType, {
-      data: parse(this.entity.definition.schema, data) as TData,
+    const normalized = parse(this.entity.definition.schema, data) as TData;
+    await this.transaction.lifecycle?.beforeCreate?.({ data: normalized });
+    const created = await this.transaction.entities.create(this.orgId, this.entity.entityType, {
+      data: normalized,
     });
+    await this.transaction.lifecycle?.afterCreate?.({ record: created });
+    await this.transaction.lifecycle?.publish?.(`${this.entity.target}.created`, created);
+    return created;
   }
   public async get(id: string): Promise<EntityRecord<TData>> {
     const record = await this.transaction.entities.get<TData>(
@@ -170,27 +195,68 @@ class Store<TData extends Record<string, unknown>> implements EntityStoreAccesso
       throw new ValidationError("Entity patch must not be empty");
     const current = await this.get(id);
     const data = parse(this.entity.definition.schema, { ...current.data, ...patch }) as TData;
+    await this.transaction.lifecycle?.beforeUpdate?.({ current, patch });
     const updated = await this.transaction.entities.update<TData>(
       this.orgId,
       this.entity.entityType,
       id,
-      {
-        data,
-        expectedUpdatedAt: current.updatedAt,
-      },
+      { data, expectedUpdatedAt: current.updatedAt },
     );
     if (updated === null) throw new NotFoundError("Entity was not found");
+    await this.transaction.lifecycle?.afterUpdate?.({ current, updated });
+    await this.transaction.lifecycle?.publish?.(`${this.entity.target}.updated`, updated);
     return updated;
   }
   public async delete(id: string): Promise<EntityRecord<TData>> {
+    const current = await this.get(id);
+    await this.transaction.lifecycle?.beforeDelete?.({ current });
     const deleted = await this.transaction.entities.delete<TData>(
       this.orgId,
       this.entity.entityType,
       id,
     );
     if (deleted === null) throw new NotFoundError("Entity was not found");
+    await this.transaction.lifecycle?.afterDelete?.({ deleted });
+    await this.transaction.lifecycle?.publish?.(`${this.entity.target}.deleted`, deleted);
     return deleted;
   }
+}
+
+export function generatedEntityActions(
+  entity: CompiledEntity,
+): Readonly<Record<string, ActionDefinition>> {
+  const id = z.uuid();
+  const list = z.object({
+    filter: z.record(z.string(), z.unknown()).optional(),
+    sort: z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) }).optional(),
+    limit: z.number().int().min(1).max(100).default(20),
+    offset: z.number().int().min(0).default(0),
+  });
+  const store = (context: KernelContext): EntityStoreAccessor => {
+    const value = context.entities[entity.entityType];
+    if (value === undefined)
+      throw new ValidationError(`Entity store is unavailable: ${entity.target}`);
+    return value;
+  };
+  return {
+    create: {
+      input: z.object({ data: entity.definition.schema }),
+      handler: ({ data }, context) => store(context).create(data),
+    },
+    get: {
+      input: z.object({ id }),
+      handler: ({ id: recordId }, context) => store(context).get(recordId),
+    },
+    list: { input: list, handler: (input, context) => store(context).list(input) },
+    update: {
+      input: z.object({ id, data: entity.definition.schema.partial() }),
+      handler: ({ id: recordId, data }, context) => store(context).update(recordId, data),
+    },
+    delete: {
+      input: z.object({ id }),
+      handler: ({ id: recordId }, context) => store(context).delete(recordId),
+    },
+  };
 }
 
 export function compileEntity<TData extends Record<string, unknown>>(

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { compileEntity, z } from "@embody/core";
+import { compileEntity, Kernel, z } from "@embody/core";
 
 import { PostgresStorage } from "../src/index.js";
 
@@ -38,6 +38,42 @@ describePostgres("PostgreSQL storage conformance", () => {
         { data: { title: "B" } },
       ]);
     });
+  });
+
+  it("executes generated CRUD actions transactionally", async () => {
+    const db = storage!;
+    const kernel = new Kernel({
+      storage: {
+        ensureSchema: () => Promise.resolve(),
+        transaction: db.transaction.bind(db),
+        close: () => Promise.resolve(),
+      },
+      plugins: [
+        {
+          id: "generated",
+          version: "1.0.0",
+          entities: { note: { schema: z.object({ body: z.string().min(1) }) } },
+        },
+      ],
+    });
+    await kernel.boot();
+    const principal = {
+      orgId: `generated-${randomUUID()}`,
+      actorId: "tester",
+      actorType: "system" as const,
+      roles: [],
+      scopes: [],
+    };
+    const created = (await kernel.execute(
+      "generated.note.create",
+      { data: { body: "hello" } },
+      principal,
+    )) as { id: string };
+    await kernel.execute("generated.note.delete", { id: created.id }, principal);
+    await expect(
+      kernel.execute("generated.note.get", { id: created.id }, principal),
+    ).rejects.toThrow("Entity was not found");
+    await kernel.stop();
   });
 
   it("enforces RLS for raw reads and uses SET LOCAL tenant identity", async () => {

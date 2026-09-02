@@ -1,6 +1,7 @@
 import type {
   ActionDefinition,
   EmbodyPlugin,
+  EntityStoreAccessor,
   HookHandler,
   KernelContext,
   Principal,
@@ -10,9 +11,15 @@ import {
   DuplicateRegistrationError,
   HookVetoError,
   InternalError,
+  NotFoundError,
   ValidationError,
 } from "./errors.js";
-import { compileEntity } from "./entities.js";
+import {
+  compileEntity,
+  generatedEntityActions,
+  type CompiledEntity,
+  type EntityTransaction,
+} from "./entities.js";
 import { compileManifest, type AppManifest } from "./manifest.js";
 import { formatTarget } from "./target.js";
 
@@ -22,6 +29,7 @@ export type BootPhase =
 
 export interface KernelStorage {
   ensureSchema(): Promise<void>;
+  transaction?<T>(orgId: string, callback: (tx: EntityTransaction) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
 export interface KernelComponent {
@@ -132,6 +140,7 @@ export class Kernel {
     { readonly id: string; readonly handler: HookHandler }[]
   >();
   private readonly actions = new Map<string, ActionDefinition>();
+  private readonly entities = new Map<string, CompiledEntity>();
   private _manifest: AppManifest | undefined;
 
   public constructor(private readonly options: KernelOptions) {}
@@ -166,6 +175,32 @@ export class Kernel {
     this.state = "stopping";
     await this.cleanup();
     this.state = "stopped";
+  }
+  /** Executes a registered action in an org-bound transaction. */
+  public async execute(target: string, input: unknown, principal: Principal): Promise<unknown> {
+    if (this.state !== "ready") throw new DependencyError("Kernel is not ready");
+    const action = this.actions.get(target);
+    if (action === undefined) throw new NotFoundError(`Action was not found: ${target}`);
+    const parsed = action.input.safeParse(input);
+    if (!parsed.success)
+      throw new ValidationError(
+        "Action input is invalid",
+        parsed.error.issues.map((issue) => ({
+          path: issue.path.map(String),
+          message: issue.message,
+        })),
+      );
+    const run = async (tx: EntityTransaction): Promise<unknown> => {
+      const context = this.executionContext(principal, tx);
+      const result = await action.handler(parsed.data as never, context);
+      if (action.output === undefined) return result;
+      const output = action.output.safeParse(result);
+      if (output.success) return output.data;
+      throw new InternalError(`Action ${target} returned invalid output`);
+    };
+    if (this.options.storage.transaction === undefined)
+      throw new DependencyError("Storage does not support transactions");
+    return this.options.storage.transaction(principal.orgId, run);
   }
   public async runHooks(
     key: string,
@@ -206,8 +241,10 @@ export class Kernel {
         );
       this.phase("schema");
       for (const plugin of this.sorted)
-        for (const [name, definition] of Object.entries(plugin.entities ?? {}))
-          compileEntity(plugin.id, name, definition);
+        for (const [name, definition] of Object.entries(plugin.entities ?? {})) {
+          const entity = compileEntity(plugin.id, name, definition);
+          this.entities.set(entity.target, entity);
+        }
       await this.options.storage.ensureSchema();
       this.phase("services");
       for (const plugin of this.sorted)
@@ -244,13 +281,69 @@ export class Kernel {
         handlers.push({ id: `${plugin.id}.${hook}`, handler });
         this.hooks.set(hook, handlers);
       }
-      for (const [name, action] of Object.entries(plugin.actions ?? {})) {
-        const target = formatTarget([plugin.id, name]);
-        if (this.actions.has(target))
-          throw new DuplicateRegistrationError(`Duplicate action: ${target}`);
-        this.actions.set(target, action);
+      for (const [name, entity] of Object.entries(plugin.entities ?? {})) {
+        const compiled = this.entities.get(formatTarget([plugin.id, name]))!;
+        for (const [operation, action] of Object.entries(generatedEntityActions(compiled)))
+          this.registerAction(formatTarget([plugin.id, name, operation]), action);
+        // Keep schema compilation and registration coupled even if manifests are inspected alone.
+        void entity;
       }
+      for (const [name, action] of Object.entries(plugin.actions ?? {}))
+        this.registerAction(formatTarget([plugin.id, name]), action);
     }
+  }
+  private registerAction(target: string, action: ActionDefinition): void {
+    if (this.actions.has(target))
+      throw new DuplicateRegistrationError(`Duplicate action: ${target}`);
+    this.actions.set(target, action);
+  }
+  private executionContext(principal: Principal, tx: EntityTransaction): KernelContext {
+    const entities: Record<string, EntityStoreAccessor<never>> = {};
+    for (const entity of this.entities.values()) {
+      const lifecycle = {
+        beforeCreate: (payload: unknown) =>
+          this.runHooks(`${entity.target}.beforeCreate`, payload, context).then(() => undefined),
+        afterCreate: (payload: unknown) =>
+          this.runHooks(`${entity.target}.afterCreate`, payload, context).then(() => undefined),
+        beforeUpdate: (payload: unknown) =>
+          this.runHooks(`${entity.target}.beforeUpdate`, payload, context).then(() => undefined),
+        afterUpdate: (payload: unknown) =>
+          this.runHooks(`${entity.target}.afterUpdate`, payload, context).then(() => undefined),
+        beforeDelete: (payload: unknown) =>
+          this.runHooks(`${entity.target}.beforeDelete`, payload, context).then(() => undefined),
+        afterDelete: (payload: unknown) =>
+          this.runHooks(`${entity.target}.afterDelete`, payload, context).then(() => undefined),
+        publish: (eventName: string, payload: unknown) =>
+          context.events.publish(eventName, payload),
+      };
+      entities[entity.entityType] = entity.createStore(principal.orgId, {
+        ...tx,
+        lifecycle,
+      }) as EntityStoreAccessor<never>;
+    }
+    const context = {
+      principal,
+      orgId: principal.orgId,
+      entities,
+      services: {
+        get: <T>(key: string) =>
+          this.registry.get<T>(
+            "runtime",
+            this.sorted.map(({ id }) => id),
+            key,
+          ),
+      },
+      events: {
+        publish: async (eventName: string, payload: unknown) => {
+          if (tx.outbox === undefined)
+            throw new DependencyError("Storage transaction does not support outbox");
+          await tx.outbox.enqueue(principal.orgId, { eventName, payload });
+        },
+      },
+      progress: () => undefined,
+      can: () => false,
+    } as unknown as KernelContext;
+    return context;
   }
   private async cleanup(): Promise<void> {
     if (this.cleaned) return;

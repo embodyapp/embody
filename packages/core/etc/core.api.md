@@ -219,6 +219,24 @@ export interface EntityDefinition<TSchema extends z.ZodObject = z.ZodObject> {
     readonly schema: TSchema;
 }
 
+// @public
+export interface EntityLifecycle {
+    // (undocumented)
+    afterCreate?(payload: unknown): Promise<void>;
+    // (undocumented)
+    afterDelete?(payload: unknown): Promise<void>;
+    // (undocumented)
+    afterUpdate?(payload: unknown): Promise<void>;
+    // (undocumented)
+    beforeCreate?(payload: unknown): Promise<void>;
+    // (undocumented)
+    beforeDelete?(payload: unknown): Promise<void>;
+    // (undocumented)
+    beforeUpdate?(payload: unknown): Promise<void>;
+    // (undocumented)
+    publish?(eventName: string, payload: unknown): Promise<void>;
+}
+
 // @public (undocumented)
 export interface EntityListOptions<TData> {
     // (undocumented)
@@ -279,7 +297,7 @@ export interface EntityStoreAccessor<TData = Record<string, unknown>> {
     update(id: string, data: Partial<TData>): Promise<EntityRecord<TData>>;
 }
 
-// @public
+// @public (undocumented)
 export interface EntityTransaction {
     // (undocumented)
     readonly entities: {
@@ -301,6 +319,14 @@ export interface EntityTransaction {
             readonly expectedUpdatedAt?: string;
         }): Promise<EntityRecord<TData> | null>;
         delete<TData>(orgId: string, entityType: string, id: string): Promise<EntityRecord<TData> | null>;
+    };
+    readonly lifecycle?: EntityLifecycle;
+    // (undocumented)
+    readonly outbox?: {
+        enqueue(orgId: string, input: {
+            readonly eventName: string;
+            readonly payload: unknown;
+        }): Promise<unknown>;
     };
 }
 
@@ -379,6 +405,9 @@ export class ForbiddenError extends EmbodyError {
 export function formatTarget(segments: readonly string[]): string;
 
 // @public (undocumented)
+export function generatedEntityActions(entity: CompiledEntity): Readonly<Record<string, ActionDefinition>>;
+
+// @public (undocumented)
 export type HeartbeatRequest = z.infer<typeof heartbeatRequestSchema>;
 
 // @public (undocumented)
@@ -423,6 +452,7 @@ export class Kernel {
     get actionTargets(): readonly string[];
     // (undocumented)
     boot(): Promise<void>;
+    execute(target: string, input: unknown, principal: Principal): Promise<unknown>;
     // (undocumented)
     get manifest(): AppManifest;
     // (undocumented)
@@ -494,6 +524,8 @@ export interface KernelStorage {
     close(): Promise<void>;
     // (undocumented)
     ensureSchema(): Promise<void>;
+    // (undocumented)
+    transaction?<T>(orgId: string, callback: (tx: EntityTransaction) => Promise<T>): Promise<T>;
 }
 
 // @public (undocumented)

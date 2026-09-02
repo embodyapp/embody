@@ -39,7 +39,13 @@ export {
   type ErrorEnvelope,
   type ValidationIssue,
 } from "./errors.js";
-export { compileEntity, type CompiledEntity, type EntityTransaction } from "./entities.js";
+export {
+  compileEntity,
+  generatedEntityActions,
+  type CompiledEntity,
+  type EntityLifecycle,
+  type EntityTransaction,
+} from "./entities.js";
 export {
   compileManifest,
   stableStringify,
