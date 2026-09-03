@@ -9,18 +9,22 @@ import {
   stableStringify,
   toErrorEnvelope,
 } from "@embody/core";
-import type { Kernel } from "@embody/core";
+import type { EventEnvelope, Kernel } from "@embody/core";
 import type { AppAuthVerifier } from "@embody/auth";
 import type { StorageConnection } from "@embody/storage";
-import { parseDeliveredEvent, signEvent } from "./events.js";
+import { parseDeliveryRequest, signDelivery } from "./events.js";
 
 export {
+  DeliveryWorker,
   DirectEventTransport,
   OutboxWorker,
   StaticEventDirectory,
   parseDeliveredEvent,
+  parseDeliveryRequest,
+  signDelivery,
   signEvent,
   type Clock,
+  type DeliveryWorkerOptions,
   type DirectEventTransportOptions,
   type EventDestination,
   type EventDirectory,
@@ -37,8 +41,14 @@ export interface HostOptions {
   readonly bodyLimit?: number;
   readonly requestTimeoutMs?: number;
   readonly concurrency?: number;
+  readonly sseBufferBytes?: number;
+  readonly sseKeepaliveMs?: number;
   /** Enables authenticated direct event reception. The shared secret is per producer deployment. */
-  readonly eventDelivery?: { readonly storage: StorageConnection; readonly secret: string };
+  readonly eventDelivery?: {
+    readonly storage: StorageConnection;
+    readonly secret: string;
+    readonly authorize?: (event: EventEnvelope) => boolean | Promise<boolean>;
+  };
 }
 export interface EmbodyHost {
   readonly app: FastifyInstance;
@@ -206,17 +216,21 @@ export function createHost(options: HostOptions): EmbodyHost {
   const eventDelivery = options.eventDelivery;
   if (eventDelivery !== undefined)
     app.post("/events/deliver", async (request) => {
-      const event = parseDeliveredEvent(request.body);
+      const delivery = parseDeliveryRequest(request.body);
+      if (delivery.destinationAppId !== options.appId)
+        throw new UnauthenticatedError("Event destination is invalid");
       const provided = request.headers["x-embody-event-signature"];
-      const expected = signEvent(event, eventDelivery.secret);
+      const expected = signDelivery(delivery, eventDelivery.secret);
       if (
         typeof provided !== "string" ||
         provided.length !== expected.length ||
         !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
       )
         throw new UnauthenticatedError("Event signature is invalid");
-      await eventDelivery.storage.transaction(event.orgId, (tx) =>
-        options.kernel.handleEvent(event, tx),
+      if ((await eventDelivery.authorize?.(delivery.event)) === false)
+        throw new UnauthenticatedError("Event producer or organization is not trusted");
+      await eventDelivery.storage.transaction(delivery.event.orgId, (tx) =>
+        options.kernel.handleEvent(delivery.event, tx),
       );
       return { accepted: true };
     });
@@ -236,13 +250,53 @@ export function createHost(options: HostOptions): EmbodyHost {
     });
     let percent = -Infinity;
     let terminal = false;
-    const write = (event: string, data: unknown): void => {
-      if (!terminal && !reply.raw.destroyed)
-        reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    let buffered = 0;
+    let pumping: Promise<void> | undefined;
+    const queue: string[] = [];
+    const pump = async (): Promise<void> => {
+      while (queue.length > 0 && !reply.raw.destroyed) {
+        const message = queue.shift()!;
+        buffered -= Buffer.byteLength(message);
+        if (!reply.raw.write(message))
+          await new Promise<void>((resolve) => {
+            reply.raw.once("drain", resolve);
+            reply.raw.once("close", resolve);
+          });
+      }
+      if (reply.raw.destroyed) queue.length = 0;
     };
-    const keepalive = setInterval(() => {
-      if (!terminal && !reply.raw.destroyed) reply.raw.write(": keepalive\n\n");
-    }, 15_000);
+    const startPump = (): void => {
+      if (pumping !== undefined) return;
+      pumping = pump().finally(() => {
+        pumping = undefined;
+        if (queue.length > 0) startPump();
+      });
+    };
+    const enqueue = (message: string): void => {
+      if (terminal || reply.raw.destroyed) return;
+      buffered += Buffer.byteLength(message);
+      if (buffered > (options.sseBufferBytes ?? 64 * 1024)) {
+        controller.abort();
+        throw new UnavailableError("Progress stream exceeded its buffer");
+      }
+      queue.push(message);
+      startPump();
+    };
+    const flush = async (): Promise<void> => {
+      while (pumping !== undefined || queue.length > 0) {
+        startPump();
+        await pumping;
+      }
+    };
+    const write = (event: string, data: unknown): void =>
+      enqueue(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    reply.raw.once("close", () => {
+      if (!terminal) controller.abort();
+    });
+    const keepalive = setInterval(
+      () => enqueue(": keepalive\n\n"),
+      options.sseKeepaliveMs ?? 15_000,
+    );
     try {
       const result = await options.kernel.execute(parsed.data.target, parsed.data.input, {
         principal,
@@ -260,8 +314,9 @@ export function createHost(options: HostOptions): EmbodyHost {
       const response = toErrorEnvelope(error, String(reply.getHeader("x-request-id")), environment);
       write("error", response.body);
     } finally {
-      terminal = true;
       clearInterval(keepalive);
+      await flush();
+      terminal = true;
       reply.raw.end();
     }
   });

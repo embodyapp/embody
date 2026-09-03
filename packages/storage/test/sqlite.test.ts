@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { compileEntity, z } from "@embody/core";
+import { compileEntity, Kernel, z, type EntityStoreAccessor } from "@embody/core";
 
 import { SqliteStorage } from "../src/index.js";
 
@@ -73,6 +73,109 @@ describe("SQLite storage conformance", () => {
     });
   });
 
+  it("rolls back a mutation when an event payload is not serializable", async () => {
+    const db = await storage();
+    const kernel = new Kernel({
+      storage: {
+        ensureSchema: () => Promise.resolve(),
+        transaction: db.transaction.bind(db),
+        close: () => Promise.resolve(),
+      },
+      plugins: [
+        {
+          id: "invalid",
+          version: "1.0.0",
+          entities: { note: { schema: z.object({ body: z.string() }) } },
+          actions: {
+            publish: {
+              input: z.object({}),
+              handler: async (_input, ctx) => {
+                await (
+                  ctx.entities["note"] as unknown as EntityStoreAccessor<{ body: string }>
+                ).create({
+                  body: "must roll back",
+                });
+                const circular: { self?: unknown } = {};
+                circular.self = circular;
+                await ctx.events.publish("invalid.note.created", circular);
+              },
+            },
+          },
+        },
+      ],
+    });
+    await kernel.boot();
+    await expect(
+      kernel.execute(
+        "invalid.publish",
+        {},
+        {
+          orgId: "org-a",
+          actorId: "test",
+          actorType: "system",
+          roles: [],
+          scopes: [],
+        },
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await db.transaction("org-a", async (tx) => {
+      expect(await tx.entities.list("org-a", "note")).toEqual([]);
+      expect(await tx.outbox.list()).toEqual([]);
+    });
+  });
+
+  it("persists injected event identity, timestamp, and correlation metadata", async () => {
+    const db = await storage();
+    const id = "55555555-5555-4555-8555-555555555555";
+    const occurredAt = new Date("2026-02-03T04:05:06.000Z");
+    const kernel = new Kernel({
+      eventId: () => id,
+      now: () => occurredAt,
+      storage: {
+        ensureSchema: () => Promise.resolve(),
+        transaction: db.transaction.bind(db),
+        close: () => Promise.resolve(),
+      },
+      plugins: [
+        {
+          id: "publisher",
+          version: "1.0.0",
+          actions: {
+            publish: {
+              input: z.object({}),
+              handler: (_input, ctx) => ctx.events.publish("publisher.note.created", { ok: true }),
+            },
+          },
+        },
+      ],
+    });
+    await kernel.boot();
+    await kernel.execute(
+      "publisher.publish",
+      {},
+      {
+        principal: {
+          orgId: "org-a",
+          actorId: "test",
+          actorType: "system",
+          roles: [],
+          scopes: ["publisher:*"],
+        },
+        requestId: "request-123",
+      },
+    );
+    await db.transaction("org-a", async (tx) => {
+      expect(await tx.outbox.list()).toMatchObject([
+        {
+          id,
+          occurredAt: occurredAt.toISOString(),
+          correlationId: "request-123",
+          producerPluginId: "publisher",
+        },
+      ]);
+    });
+  });
+
   it("rejects entity reads from another org", async () => {
     const db = await storage();
     const id = "11111111-1111-4111-8111-111111111111";
@@ -122,6 +225,48 @@ describe("SQLite storage conformance", () => {
         ),
       ).toEqual(["now"]);
       expect(await tx.outbox.claimBatch({ workerId: "b", limit: 10, now })).toEqual([]);
+    });
+  });
+
+  it("snapshots each event destination once and recovers expired delivery leases", async () => {
+    const db = await storage();
+    const eventId = "11111111-1111-4111-8111-111111111111";
+    await db.transaction("org-a", async (tx) => {
+      const input = {
+        eventId,
+        orgId: "org-a",
+        destinationAppId: "email",
+        destinationEndpoint: "https://email.example/",
+        envelope: { id: eventId },
+        scheduledAt: "2026-01-01T00:00:00.000Z",
+      };
+      await tx.eventDeliveries.create(input);
+      await tx.eventDeliveries.create(input);
+      expect(await tx.eventDeliveries.list()).toHaveLength(1);
+      expect(
+        await tx.eventDeliveries.claimBatch({
+          workerId: "one",
+          limit: 10,
+          now: "2026-01-01T00:00:01.000Z",
+          leaseMs: 1_000,
+        }),
+      ).toHaveLength(1);
+      expect(
+        await tx.eventDeliveries.claimBatch({
+          workerId: "two",
+          limit: 10,
+          now: "2026-01-01T00:00:01.500Z",
+          leaseMs: 1_000,
+        }),
+      ).toHaveLength(0);
+      expect(
+        await tx.eventDeliveries.claimBatch({
+          workerId: "two",
+          limit: 10,
+          now: "2026-01-01T00:00:02.001Z",
+          leaseMs: 1_000,
+        }),
+      ).toMatchObject([{ claimedBy: "two", attempts: 2 }]);
     });
   });
 

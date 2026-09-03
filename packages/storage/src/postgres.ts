@@ -8,6 +8,8 @@ import type {
   EntityListOptions,
   EntityRecord,
   EntityUpdate,
+  EventDelivery,
+  CreateEventDeliveryInput,
   InboxReservation,
   OutboxEvent,
   OutboxStatus,
@@ -46,12 +48,48 @@ function outbox(value: unknown): OutboxEvent {
       : undefined;
   const claimedBy = typeof row["claimed_by"] === "string" ? row["claimed_by"] : undefined;
   const lastError = typeof row["last_error"] === "string" ? row["last_error"] : undefined;
+  const optional = (field: string): string | undefined =>
+    typeof row[field] === "string" ? String(row[field]) : undefined;
+  const correlationId = optional("correlation_id");
+  const causationId = optional("causation_id");
+  const producerPluginId = optional("producer_plugin_id");
+  const schemaVersion = optional("schema_version");
   return {
     id: String(row["id"]),
     orgId: String(row["org_id"]),
     eventName: String(row["event_name"]),
     payload: row["payload"],
     occurredAt: normalizeTimestamp(String(row["occurred_at"])),
+    scheduledAt: normalizeTimestamp(String(row["scheduled_at"])),
+    attempts: Number(row["attempts"]),
+    status: String(row["status"]) as OutboxStatus,
+    ...(claimedAt === undefined ? {} : { claimedAt }),
+    ...(claimedBy === undefined ? {} : { claimedBy }),
+    ...(lastError === undefined ? {} : { lastError }),
+    ...(correlationId === undefined ? {} : { correlationId }),
+    ...(causationId === undefined ? {} : { causationId }),
+    ...(producerPluginId === undefined ? {} : { producerPluginId }),
+    ...(schemaVersion === undefined ? {} : { schemaVersion }),
+  };
+}
+function delivery(value: unknown): EventDelivery {
+  const row = asRow(value);
+  const optionalTimestamp = (field: string): string | undefined => {
+    const value = row[field];
+    return typeof value === "string" || value instanceof Date
+      ? normalizeTimestamp(value)
+      : undefined;
+  };
+  const claimedAt = optionalTimestamp("claimed_at");
+  const claimedBy = typeof row["claimed_by"] === "string" ? row["claimed_by"] : undefined;
+  const lastError = typeof row["last_error"] === "string" ? row["last_error"] : undefined;
+  return {
+    id: String(row["id"]),
+    eventId: String(row["event_id"]),
+    orgId: String(row["org_id"]),
+    destinationAppId: String(row["destination_app_id"]),
+    destinationEndpoint: String(row["destination_endpoint"]),
+    envelope: row["envelope"],
     scheduledAt: normalizeTimestamp(String(row["scheduled_at"])),
     attempts: Number(row["attempts"]),
     status: String(row["status"]) as OutboxStatus,
@@ -144,9 +182,15 @@ class PostgresTransaction implements StorageTransaction {
         scheduledAt: timestamp(input.scheduledAt),
         attempts: 0,
         status: "pending" as const,
+        ...(input.correlationId === undefined ? {} : { correlationId: input.correlationId }),
+        ...(input.causationId === undefined ? {} : { causationId: input.causationId }),
+        ...(input.producerPluginId === undefined
+          ? {}
+          : { producerPluginId: input.producerPluginId }),
+        ...(input.schemaVersion === undefined ? {} : { schemaVersion: input.schemaVersion }),
       };
       const result = await this.client.query(
-        "INSERT INTO embody_outbox (id, org_id, event_name, payload, occurred_at, scheduled_at, attempts, status) VALUES ($1, $2, $3, $4::jsonb, $5, $6, 0, 'pending') RETURNING *",
+        "INSERT INTO embody_outbox (id, org_id, event_name, payload, occurred_at, scheduled_at, attempts, status, correlation_id, causation_id, producer_plugin_id, schema_version) VALUES ($1, $2, $3, $4::jsonb, $5, $6, 0, 'pending', $7, $8, $9, $10) RETURNING *",
         [
           value.id,
           orgId,
@@ -154,6 +198,10 @@ class PostgresTransaction implements StorageTransaction {
           JSON.stringify(value.payload),
           value.occurredAt,
           value.scheduledAt,
+          value.correlationId ?? null,
+          value.causationId ?? null,
+          value.producerPluginId ?? null,
+          value.schemaVersion ?? null,
         ],
       );
       return outbox(result.rows[0]);
@@ -183,6 +231,62 @@ class PostgresTransaction implements StorageTransaction {
               [options.status, limit],
             );
       return result.rows.map(outbox);
+    },
+  };
+  public readonly eventDeliveries = {
+    create: async (input: CreateEventDeliveryInput): Promise<EventDelivery> => {
+      const result = await this.client.query(
+        `INSERT INTO embody_event_deliveries (id, event_id, org_id, destination_app_id, destination_endpoint, envelope, scheduled_at, attempts, status, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, 0, 'pending', $8)
+         ON CONFLICT (event_id, destination_app_id) DO UPDATE SET event_id = EXCLUDED.event_id RETURNING *`,
+        [
+          input.id ?? randomUUID(),
+          input.eventId,
+          input.orgId,
+          input.destinationAppId,
+          input.destinationEndpoint,
+          JSON.stringify(input.envelope),
+          timestamp(input.scheduledAt),
+          timestamp(),
+        ],
+      );
+      return delivery(result.rows[0]);
+    },
+    claimBatch: async (options: ClaimOutboxOptions): Promise<readonly EventDelivery[]> => {
+      this.assertClaimOptions(options);
+      const now = timestamp(options.now);
+      const expired = new Date(new Date(now).getTime() - (options.leaseMs ?? 30_000)).toISOString();
+      const result = await this.client.query(
+        `WITH candidates AS (SELECT id FROM embody_event_deliveries WHERE (status IN ('pending', 'failed') AND scheduled_at <= $1) OR (status = 'processing' AND claimed_at <= $2) ORDER BY scheduled_at, id FOR UPDATE SKIP LOCKED LIMIT $3)
+         UPDATE embody_event_deliveries AS d SET status = 'processing', claimed_at = $1, claimed_by = $4, attempts = d.attempts + 1 FROM candidates WHERE d.id = candidates.id RETURNING d.*`,
+        [now, expired, options.limit, options.workerId],
+      );
+      return result.rows.map(delivery);
+    },
+    complete: async (id: string): Promise<void> => {
+      await this.client.query(
+        "UPDATE embody_event_deliveries SET status = 'completed', completed_at = $1, claimed_at = NULL, claimed_by = NULL WHERE id = $2",
+        [timestamp(), id],
+      );
+    },
+    fail: async (id: string, error: string, retryAt?: string) =>
+      this.failDelivery(id, error, retryAt, false),
+    deadLetter: async (id: string, error: string) => this.failDelivery(id, error, undefined, true),
+    list: async (options: { readonly status?: OutboxStatus; readonly limit?: number } = {}) => {
+      const limit = options.limit ?? 100;
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+        throw new RangeError("Invalid limit");
+      const result =
+        options.status === undefined
+          ? await this.client.query(
+              "SELECT * FROM embody_event_deliveries ORDER BY scheduled_at, id LIMIT $1",
+              [limit],
+            )
+          : await this.client.query(
+              "SELECT * FROM embody_event_deliveries WHERE status = $1 ORDER BY scheduled_at, id LIMIT $2",
+              [options.status, limit],
+            );
+      return result.rows.map(delivery);
     },
   };
   public readonly inbox = {
@@ -229,9 +333,12 @@ class PostgresTransaction implements StorageTransaction {
     public readonly orgId: string,
     private readonly client: Client,
   ) {}
-  private async claim(options: ClaimOutboxOptions): Promise<readonly OutboxEvent[]> {
+  private assertClaimOptions(options: ClaimOutboxOptions): void {
     if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)
       throw new RangeError("Invalid claim limit");
+  }
+  private async claim(options: ClaimOutboxOptions): Promise<readonly OutboxEvent[]> {
+    this.assertClaimOptions(options);
     const now = timestamp(options.now);
     const expired = new Date(new Date(now).getTime() - (options.leaseMs ?? 30_000)).toISOString();
     const result = await this.client.query(
@@ -239,6 +346,23 @@ class PostgresTransaction implements StorageTransaction {
       [now, expired, options.limit, options.workerId],
     );
     return result.rows.map(outbox);
+  }
+  private async failDelivery(
+    id: string,
+    error: string,
+    retryAt: string | undefined,
+    dead: boolean,
+  ): Promise<EventDelivery | null> {
+    const result = await this.client.query(
+      "UPDATE embody_event_deliveries SET status = $1, last_error = $2, scheduled_at = COALESCE($3, scheduled_at), claimed_at = NULL, claimed_by = NULL WHERE id = $4 RETURNING *",
+      [
+        dead ? "dead_letter" : "failed",
+        error,
+        retryAt === undefined ? null : timestamp(retryAt),
+        id,
+      ],
+    );
+    return result.rows[0] === undefined ? null : delivery(result.rows[0]);
   }
   private async fail(
     id: string,
@@ -260,6 +384,7 @@ class PostgresTransaction implements StorageTransaction {
 }
 
 export class PostgresStorage implements StorageConnection {
+  public readonly dialect = "postgres" as const;
   private readonly pool: Pool;
   public constructor(config: PoolConfig) {
     this.pool = new Pool(config);

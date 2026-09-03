@@ -49,6 +49,8 @@ export interface KernelOptions {
   readonly components?: readonly KernelComponent[];
   readonly principal?: Principal;
   readonly onPhase?: (phase: BootPhase) => void;
+  readonly eventId?: () => string;
+  readonly now?: () => Date;
 }
 export interface HookTrace {
   readonly handlerId: string;
@@ -417,7 +419,15 @@ export class Kernel {
           if (tx.outbox === undefined)
             throw new DependencyError("Storage transaction does not support outbox");
           this.validateEvent(eventName, payload);
-          await tx.outbox.enqueue(principal.orgId, { eventName, payload });
+          const id = this.options.eventId?.();
+          await tx.outbox.enqueue(principal.orgId, {
+            ...(id === undefined ? {} : { id }),
+            eventName,
+            payload,
+            occurredAt: (this.options.now?.() ?? new Date()).toISOString(),
+            ...(execution.requestId === undefined ? {} : { correlationId: execution.requestId }),
+            producerPluginId: eventName.split(".")[0]!,
+          });
         },
       },
       progress: (update: ProgressUpdate) => {
@@ -437,11 +447,20 @@ export class Kernel {
       throw new ValidationError("Event name is invalid");
     let encoded: string;
     try {
-      encoded = JSON.stringify(payload);
+      encoded = JSON.stringify(payload, (_key, value: unknown) => {
+        if (
+          typeof value === "bigint" ||
+          typeof value === "function" ||
+          typeof value === "symbol" ||
+          (typeof value === "number" && !Number.isFinite(value))
+        )
+          throw new TypeError("Unsupported JSON value");
+        return value;
+      });
     } catch {
       throw new ValidationError("Event payload must be JSON serializable");
     }
-    if (encoded === undefined || encoded.length > 256 * 1024)
+    if (encoded === undefined || Buffer.byteLength(encoded, "utf8") > 256 * 1024)
       throw new ValidationError("Event payload must be JSON serializable and at most 256 KiB");
   }
   private normalizeExecutionOptions(

@@ -14,14 +14,14 @@ Domain plugins only publish through `ctx.events.publish(name, payload)` and rece
 - Publishing persists a versioned event envelope in the same transaction as the domain mutation.
 - Delivery is at least once. Receivers authenticate envelopes and deduplicate `(eventId, handlerId)` in a durable inbox.
 - External handler effects must use event-derived idempotency keys because a crash after an external effect but before inbox completion can repeat the effect.
-- A destination has independent status and retries; one failing destination does not rerun or block a completed destination.
+- A destination has independent status and a configurable attempt policy; one failing destination does not rerun or block a completed destination. The safe framework default is one automatic attempt followed by a durable dead letter, while production deployments commonly opt into five attempts with exponential backoff.
 - The destination set is resolved and durably snapshotted when routing starts. Temporarily unhealthy destinations remain pending. Later subscription changes affect new events, not an event already being delivered.
 - No matching subscriber is successful and produces an audit record.
 - Envelopes are limited to 256 KiB. Completed delivery and inbox records are retained for at least 30 days; dead letters require explicit resolution or administrative deletion. Payloads are hidden from audit and inspection by default.
 
 ### Direct transport
 
-The publisher resolves matching subscriptions through a configured directory adapter, persists one local delivery row per destination, and calls each receiver's authenticated `/events/deliver` endpoint. Static configuration supports small deployments; gateway-backed discovery may be added when the registry exists. The publisher owns retries and dead letters until every destination reaches a terminal state.
+The publisher resolves matching subscriptions through a configured directory adapter, persists one local delivery row per destination, and calls each receiver's authenticated `/events/deliver` endpoint. Static configuration supports small deployments; gateway-backed discovery may be added when the registry exists. The publisher owns attempts and dead letters until every destination reaches a terminal state. Automatic retries are configuration rather than a domain semantic: the default makes one attempt, while a production profile can raise `maxAttempts` without changing plugins or persisted envelopes.
 
 The receiver verifies the producer identity, destination audience, organization, signature, expiry, protocol version, and payload limits. Direct deployments must explicitly configure trusted app credentials and allowed destination origins; discovered URLs are subject to SSRF/network policy.
 

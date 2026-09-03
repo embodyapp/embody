@@ -103,20 +103,56 @@ describePostgres("PostgreSQL storage conformance", () => {
     }
   });
 
-  it("lets concurrent worker connections claim disjoint eligible events", async () => {
+  it("lets concurrent delivery workers claim disjoint destinations", async () => {
     const db = storage!;
-    const ids = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
-    await db.transaction("claim-org", async (tx) => {
-      for (const id of ids)
-        await tx.outbox.enqueue("claim-org", { id, eventName: "card.created", payload: {} });
+    const orgId = `delivery-${randomUUID()}`;
+    const eventId = randomUUID();
+    await db.transaction(orgId, async (tx) => {
+      for (let index = 0; index < 100; index++)
+        await tx.eventDeliveries.create({
+          eventId,
+          orgId,
+          destinationAppId: `app-${index}`,
+          destinationEndpoint: `https://app-${index}.example/`,
+          envelope: { id: eventId },
+        });
     });
     const other = new PostgresStorage({ connectionString });
     try {
       const [first, second] = await Promise.all([
-        db.transaction("claim-org", (tx) => tx.outbox.claimBatch({ workerId: "one", limit: 4 })),
-        other.transaction("claim-org", (tx) => tx.outbox.claimBatch({ workerId: "two", limit: 4 })),
+        db.transaction(orgId, (tx) =>
+          tx.eventDeliveries.claimBatch({ workerId: "one", limit: 50 }),
+        ),
+        other.transaction(orgId, (tx) =>
+          tx.eventDeliveries.claimBatch({ workerId: "two", limit: 50 }),
+        ),
       ]);
-      const claimed = [...first, ...second].map(({ id }) => id);
+      expect(first).toHaveLength(50);
+      expect(second).toHaveLength(50);
+      expect(new Set([...first, ...second].map(({ id }) => id)).size).toBe(100);
+    } finally {
+      await other.close();
+    }
+  });
+
+  it("lets two workers claim 1,000 events without duplicate claims", async () => {
+    const db = storage!;
+    const ids = Array.from({ length: 1_000 }, () => randomUUID());
+    const orgId = `claim-${randomUUID()}`;
+    await db.transaction(orgId, async (tx) => {
+      for (const id of ids)
+        await tx.outbox.enqueue(orgId, { id, eventName: "card.created", payload: {} });
+    });
+    const other = new PostgresStorage({ connectionString });
+    try {
+      const claimed: string[] = [];
+      for (let batch = 0; batch < 10; batch++) {
+        const [first, second] = await Promise.all([
+          db.transaction(orgId, (tx) => tx.outbox.claimBatch({ workerId: "one", limit: 50 })),
+          other.transaction(orgId, (tx) => tx.outbox.claimBatch({ workerId: "two", limit: 50 })),
+        ]);
+        claimed.push(...first.map(({ id }) => id), ...second.map(({ id }) => id));
+      }
       expect(claimed).toHaveLength(ids.length);
       expect(new Set(claimed)).toEqual(new Set(ids));
     } finally {

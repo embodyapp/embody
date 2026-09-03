@@ -325,12 +325,26 @@ export interface EntityTransaction {
         }): Promise<EntityRecord<TData> | null>;
         delete<TData>(orgId: string, entityType: string, id: string): Promise<EntityRecord<TData> | null>;
     };
+    // (undocumented)
+    readonly inbox?: {
+        reserve(eventId: string, handlerId: string): Promise<{
+            readonly state: string;
+        }>;
+        complete(eventId: string, handlerId: string): Promise<void>;
+        fail(eventId: string, handlerId: string, error: string): Promise<void>;
+    };
     readonly lifecycle?: EntityLifecycle;
     // (undocumented)
     readonly outbox?: {
         enqueue(orgId: string, input: {
+            readonly id?: string;
             readonly eventName: string;
             readonly payload: unknown;
+            readonly occurredAt?: string;
+            readonly correlationId?: string;
+            readonly causationId?: string;
+            readonly producerPluginId?: string;
+            readonly schemaVersion?: string;
         }): Promise<unknown>;
     };
 }
@@ -368,6 +382,30 @@ export const errorEnvelopeSchema: z.ZodObject<{
             message: z.ZodString;
         }, z.core.$strict>>>;
         requestId: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+
+// @public (undocumented)
+export type EventDeliveryRequest = z.infer<typeof eventDeliveryRequestSchema>;
+
+// @public (undocumented)
+export const eventDeliveryRequestSchema: z.ZodObject<{
+    protocolVersion: z.ZodLiteral<1>;
+    deliveryId: z.ZodUUID;
+    destinationAppId: z.ZodString;
+    attempt: z.ZodNumber;
+    event: z.ZodObject<{
+        protocolVersion: z.ZodLiteral<1>;
+        id: z.ZodUUID;
+        name: z.ZodString;
+        orgId: z.ZodString;
+        producerAppId: z.ZodString;
+        producerPluginId: z.ZodOptional<z.ZodString>;
+        payload: z.ZodUnknown;
+        occurredAt: z.ZodISODateTime;
+        correlationId: z.ZodOptional<z.ZodString>;
+        causationId: z.ZodOptional<z.ZodString>;
+        schemaVersion: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>;
 }, z.core.$strict>;
 
@@ -495,6 +533,7 @@ export class Kernel {
     // (undocumented)
     boot(): Promise<void>;
     execute(target: string, input: unknown, options: ExecutionOptions | Principal): Promise<unknown>;
+    handleEvent(event: DomainEvent, tx: EntityTransaction): Promise<void>;
     // (undocumented)
     get manifest(): AppManifest;
     // (undocumented)
@@ -547,6 +586,10 @@ export interface KernelContext {
 export interface KernelOptions {
     // (undocumented)
     readonly components?: readonly KernelComponent[];
+    // (undocumented)
+    readonly eventId?: () => string;
+    // (undocumented)
+    readonly now?: () => Date;
     // (undocumented)
     readonly onPhase?: (phase: BootPhase) => void;
     // (undocumented)

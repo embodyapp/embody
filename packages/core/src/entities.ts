@@ -55,7 +55,16 @@ export interface EntityTransaction {
   readonly outbox?: {
     enqueue(
       orgId: string,
-      input: { readonly eventName: string; readonly payload: unknown },
+      input: {
+        readonly id?: string;
+        readonly eventName: string;
+        readonly payload: unknown;
+        readonly occurredAt?: string;
+        readonly correlationId?: string;
+        readonly causationId?: string;
+        readonly producerPluginId?: string;
+        readonly schemaVersion?: string;
+      },
     ): Promise<unknown>;
   };
   readonly inbox?: {

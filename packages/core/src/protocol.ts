@@ -118,6 +118,16 @@ export const eventEnvelopeSchema = z
   })
   .strict();
 
+export const eventDeliveryRequestSchema = z
+  .object({
+    protocolVersion: protocolVersionSchema,
+    deliveryId: z.uuid(),
+    destinationAppId: identifier,
+    attempt: z.number().int().positive(),
+    event: eventEnvelopeSchema,
+  })
+  .strict();
+
 export const progressUpdateSchema = z
   .object({
     percent: z.number().finite().min(0).max(100).optional(),
@@ -162,3 +172,4 @@ export type HeartbeatRequest = z.infer<typeof heartbeatRequestSchema>;
 export type ExecutionRequest = z.infer<typeof executionRequestSchema>;
 export type PrincipalClaims = z.infer<typeof principalClaimsSchema>;
 export type EventEnvelope = z.infer<typeof eventEnvelopeSchema>;
+export type EventDeliveryRequest = z.infer<typeof eventDeliveryRequestSchema>;

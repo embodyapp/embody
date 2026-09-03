@@ -1,28 +1,54 @@
 import { createHmac, randomUUID } from "node:crypto";
 import type { Kernel } from "@embody/core";
-import { eventEnvelopeSchema, stableStringify, type EventEnvelope } from "@embody/core";
-import type { OutboxEvent, StorageConnection } from "@embody/storage";
+import {
+  eventDeliveryRequestSchema,
+  eventEnvelopeSchema,
+  stableStringify,
+  type EventDeliveryRequest,
+  type EventEnvelope,
+} from "@embody/core";
+import type {
+  EventDelivery,
+  EventDeliveryRepository,
+  OutboxEvent,
+  StorageConnection,
+} from "@embody/storage";
 
 export interface Clock {
   now(): Date;
 }
-export interface OutboxWorkerOptions {
-  readonly storage: StorageConnection;
-  readonly kernel: Kernel;
+interface WorkerPolicy {
   readonly workerId?: string;
   readonly batchSize?: number;
   readonly concurrency?: number;
   readonly intervalMs?: number;
   readonly leaseMs?: number;
-  readonly producerAppId?: string;
+  /** Total attempts before dead-lettering. Defaults to 1; production commonly configures 5. */
+  readonly maxAttempts?: number;
+  /** Base exponential retry delay. Defaults to one second. */
+  readonly retryBaseMs?: number;
   readonly clock?: Clock;
-  /** Called after local handlers, for transport-neutral cross-app fan-out. */
+}
+export interface OutboxWorkerOptions extends WorkerPolicy {
+  readonly storage: StorageConnection;
+  readonly kernel: Kernel;
+  readonly producerAppId?: string;
+  /** Exactly one transport owns durable destination routing. */
   readonly transport?: EventTransport;
+  readonly audit?: (event: {
+    readonly eventId: string;
+    readonly outcome: "routed" | "no-subscriber";
+  }) => void | Promise<void>;
+}
+export interface DeliveryWorkerOptions extends WorkerPolicy {
+  readonly storage: StorageConnection;
+  readonly transport: EventTransport;
 }
 
-/** A deliberately small seam: one transport owns outbound delivery of an outbox event. */
+/** Infrastructure seam for durable destination snapshotting and direct transmission. */
 export interface EventTransport {
-  deliver(event: EventEnvelope): Promise<void>;
+  route(event: EventEnvelope, repository: EventDeliveryRepository): Promise<number>;
+  send(delivery: EventDelivery): Promise<void>;
 }
 export interface EventDestination {
   readonly appId: string;
@@ -36,34 +62,60 @@ export interface DirectEventTransportOptions {
   readonly secret: string;
   readonly send?: (
     destination: EventDestination,
-    event: EventEnvelope,
+    request: EventDeliveryRequest,
     signature: string,
   ) => Promise<void>;
 }
 
-/** Direct app-to-app adapter; retries remain owned by the outbox worker. */
+/** Publisher-owned durable direct transport. Network calls are performed only by DeliveryWorker. */
 export class DirectEventTransport implements EventTransport {
-  private readonly send: (
+  private readonly transmit: (
     destination: EventDestination,
-    event: EventEnvelope,
+    request: EventDeliveryRequest,
     signature: string,
   ) => Promise<void>;
   public constructor(private readonly options: DirectEventTransportOptions) {
-    this.send =
+    this.transmit =
       options.send ??
-      (async (destination, event, signature) => {
+      (async (destination, request, signature) => {
         const response = await fetch(new URL("/events/deliver", destination.endpoint), {
           method: "POST",
           headers: { "content-type": "application/json", "x-embody-event-signature": signature },
-          body: JSON.stringify(event),
+          body: JSON.stringify(request),
         });
         if (!response.ok) throw new Error(`Event delivery failed (${response.status})`);
       });
   }
-  public async deliver(event: EventEnvelope): Promise<void> {
-    const signature = signEvent(event, this.options.secret);
-    for (const destination of await this.options.directory.destinations(event))
-      await this.send(destination, event, signature);
+  public async route(event: EventEnvelope, repository: EventDeliveryRepository): Promise<number> {
+    const destinations = await this.options.directory.destinations(event);
+    for (const destination of destinations) {
+      const endpoint = new URL(destination.endpoint);
+      if (!/^https?:$/.test(endpoint.protocol)) throw new Error("Event endpoint is not HTTP(S)");
+      await repository.create({
+        eventId: event.id,
+        orgId: event.orgId,
+        destinationAppId: destination.appId,
+        destinationEndpoint: endpoint.toString(),
+        envelope: event,
+        scheduledAt: event.occurredAt,
+      });
+    }
+    return destinations.length;
+  }
+  public async send(delivery: EventDelivery): Promise<void> {
+    const event = parseDeliveredEvent(delivery.envelope);
+    const request: EventDeliveryRequest = {
+      protocolVersion: 1,
+      deliveryId: delivery.id,
+      destinationAppId: delivery.destinationAppId,
+      attempt: delivery.attempts,
+      event,
+    };
+    await this.transmit(
+      { appId: delivery.destinationAppId, endpoint: delivery.destinationEndpoint },
+      request,
+      signDelivery(request, this.options.secret),
+    );
   }
 }
 
@@ -76,56 +128,96 @@ export class StaticEventDirectory implements EventDirectory {
   }
 }
 
-/** At-least-once outbox worker. `tick` is intentionally public for deterministic operation and tests. */
+interface PolicyValues {
+  readonly workerId: string;
+  readonly batchSize: number;
+  readonly concurrency: number;
+  readonly intervalMs: number;
+  readonly maxAttempts: number;
+  readonly retryBaseMs: number;
+  readonly clock: Clock;
+}
+function policy(options: WorkerPolicy): PolicyValues {
+  const result = {
+    workerId: options.workerId ?? randomUUID(),
+    batchSize: options.batchSize ?? 50,
+    concurrency: options.concurrency ?? 4,
+    intervalMs: options.intervalMs ?? 500,
+    maxAttempts: options.maxAttempts ?? 1,
+    retryBaseMs: options.retryBaseMs ?? 1_000,
+    clock: options.clock ?? { now: () => new Date() },
+  };
+  if (
+    !Number.isInteger(result.batchSize) ||
+    result.batchSize < 1 ||
+    !Number.isInteger(result.concurrency) ||
+    result.concurrency < 1 ||
+    !Number.isInteger(result.maxAttempts) ||
+    result.maxAttempts < 1 ||
+    !Number.isFinite(result.retryBaseMs) ||
+    result.retryBaseMs < 0
+  )
+    throw new RangeError("Worker limits and retry policy must be positive");
+  return result;
+}
+function safeError(error: unknown): string {
+  return error instanceof Error
+    ? error.message.replace(/[\r\n]/g, " ").slice(0, 1_000)
+    : "Event delivery failed";
+}
+function retryAt(values: PolicyValues, attempts: number): string {
+  return new Date(
+    values.clock.now().getTime() + 2 ** (attempts - 1) * values.retryBaseMs,
+  ).toISOString();
+}
+
+/** Routes outbox events to local handlers and atomically snapshots remote destinations. */
 export class OutboxWorker {
-  private readonly workerId: string;
-  private readonly batchSize: number;
-  private readonly concurrency: number;
-  private readonly intervalMs: number;
-  private readonly clock: Clock;
+  private readonly values: PolicyValues;
   private timer: ReturnType<typeof setInterval> | undefined;
   private stopping = false;
   private readonly active = new Set<Promise<void>>();
-
   public constructor(private readonly options: OutboxWorkerOptions) {
-    this.workerId = options.workerId ?? randomUUID();
-    this.batchSize = options.batchSize ?? 50;
-    this.concurrency = options.concurrency ?? 4;
-    this.intervalMs = options.intervalMs ?? 500;
-    this.clock = options.clock ?? { now: () => new Date() };
-    if (this.batchSize < 1 || this.concurrency < 1)
-      throw new RangeError("batchSize and concurrency must be positive");
+    this.values = policy(options);
   }
-  public start(): void {
-    if (this.timer !== undefined) return;
-    this.stopping = false;
-    this.timer = setInterval(() => void this.tick(), this.intervalMs);
+  public start(): Promise<void> {
+    if (this.timer === undefined) {
+      this.stopping = false;
+      this.timer = setInterval(() => void this.tick(), this.values.intervalMs);
+    }
+    return Promise.resolve();
   }
   public async stop(deadlineMs = 30_000): Promise<void> {
     this.stopping = true;
     if (this.timer !== undefined) clearInterval(this.timer);
     this.timer = undefined;
-    const settle = Promise.allSettled([...this.active]);
-    await Promise.race([settle, new Promise<void>((resolve) => setTimeout(resolve, deadlineMs))]);
+    await Promise.race([
+      Promise.allSettled([...this.active]),
+      new Promise<void>((resolve) => setTimeout(resolve, deadlineMs)),
+    ]);
   }
   public async tick(): Promise<void> {
     if (this.stopping) return;
-    // Claiming is atomic in both adapters. A worker deployment must use a database role permitted
-    // to claim every tenant's outbox rows; handlers themselves run in the event's tenant transaction.
     const claimed = await this.options.storage.transaction("system", (tx) =>
       tx.outbox.claimBatch({
-        limit: this.batchSize,
-        workerId: this.workerId,
-        now: this.clock.now().toISOString(),
+        limit: this.values.batchSize,
+        workerId: this.values.workerId,
+        now: this.values.clock.now().toISOString(),
         ...(this.options.leaseMs === undefined ? {} : { leaseMs: this.options.leaseMs }),
       }),
     );
+    await this.concurrent(claimed, (event) => this.process(event));
+  }
+  private async concurrent<T>(
+    items: readonly T[],
+    process: (item: T) => Promise<void>,
+  ): Promise<void> {
     let cursor = 0;
     const run = async (): Promise<void> => {
       while (!this.stopping) {
-        const event = claimed[cursor++];
-        if (event === undefined) return;
-        const task = this.process(event);
+        const item = items[cursor++];
+        if (item === undefined) return;
+        const task = process(item);
         this.active.add(task);
         try {
           await task;
@@ -134,7 +226,8 @@ export class OutboxWorker {
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(this.concurrency, claimed.length) }, run));
+    const concurrency = this.options.storage.dialect === "sqlite" ? 1 : this.values.concurrency;
+    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
   }
   private async process(row: OutboxEvent): Promise<void> {
     try {
@@ -146,37 +239,116 @@ export class OutboxWorker {
         producerAppId: this.options.producerAppId ?? "local",
         payload: row.payload,
         occurredAt: row.occurredAt,
+        ...(row.correlationId === undefined ? {} : { correlationId: row.correlationId }),
+        ...(row.causationId === undefined ? {} : { causationId: row.causationId }),
+        ...(row.producerPluginId === undefined ? {} : { producerPluginId: row.producerPluginId }),
+        ...(row.schemaVersion === undefined ? {} : { schemaVersion: row.schemaVersion }),
       };
+      let destinations = 0;
       await this.options.storage.transaction(row.orgId, async (tx) => {
         await this.options.kernel.handleEvent(envelope, tx);
-        await this.options.transport?.deliver(envelope);
+        destinations = (await this.options.transport?.route(envelope, tx.eventDeliveries)) ?? 0;
         await tx.outbox.complete(row.id);
       });
+      await this.options.audit?.({
+        eventId: row.id,
+        outcome: destinations === 0 ? "no-subscriber" : "routed",
+      });
     } catch (error) {
-      const safe =
-        error instanceof Error
-          ? error.message.replace(/[\r\n]/g, " ").slice(0, 1_000)
-          : "Event handler failed";
       await this.options.storage.transaction(row.orgId, async (tx) => {
-        if (row.attempts >= 5) await tx.outbox.deadLetter(row.id, safe);
-        else {
-          const retryAt = new Date(
-            this.clock.now().getTime() + 2 ** (row.attempts - 1) * 1_000,
-          ).toISOString();
-          await tx.outbox.fail(row.id, safe, retryAt);
-        }
+        if (row.attempts >= this.values.maxAttempts)
+          await tx.outbox.deadLetter(row.id, safeError(error));
+        else await tx.outbox.fail(row.id, safeError(error), retryAt(this.values, row.attempts));
       });
     }
   }
 }
 
-/** Validates a receiver envelope before it reaches application handlers. */
+/** Independently retries snapshotted destinations without rerunning completed destinations. */
+export class DeliveryWorker {
+  private readonly values: PolicyValues;
+  private timer: ReturnType<typeof setInterval> | undefined;
+  private stopping = false;
+  private readonly active = new Set<Promise<void>>();
+  public constructor(private readonly options: DeliveryWorkerOptions) {
+    this.values = policy(options);
+  }
+  public start(): Promise<void> {
+    if (this.timer === undefined) {
+      this.stopping = false;
+      this.timer = setInterval(() => void this.tick(), this.values.intervalMs);
+    }
+    return Promise.resolve();
+  }
+  public async stop(deadlineMs = 30_000): Promise<void> {
+    this.stopping = true;
+    if (this.timer !== undefined) clearInterval(this.timer);
+    this.timer = undefined;
+    await Promise.race([
+      Promise.allSettled([...this.active]),
+      new Promise<void>((resolve) => setTimeout(resolve, deadlineMs)),
+    ]);
+  }
+  public async tick(): Promise<void> {
+    if (this.stopping) return;
+    const claimed = await this.options.storage.transaction("system", (tx) =>
+      tx.eventDeliveries.claimBatch({
+        limit: this.values.batchSize,
+        workerId: this.values.workerId,
+        now: this.values.clock.now().toISOString(),
+        ...(this.options.leaseMs === undefined ? {} : { leaseMs: this.options.leaseMs }),
+      }),
+    );
+    let cursor = 0;
+    const run = async (): Promise<void> => {
+      while (!this.stopping) {
+        const delivery = claimed[cursor++];
+        if (delivery === undefined) return;
+        const task = this.process(delivery);
+        this.active.add(task);
+        try {
+          await task;
+        } finally {
+          this.active.delete(task);
+        }
+      }
+    };
+    const concurrency = this.options.storage.dialect === "sqlite" ? 1 : this.values.concurrency;
+    await Promise.all(Array.from({ length: Math.min(concurrency, claimed.length) }, run));
+  }
+  private async process(delivery: EventDelivery): Promise<void> {
+    try {
+      await this.options.transport.send(delivery);
+      await this.options.storage.transaction(delivery.orgId, (tx) =>
+        tx.eventDeliveries.complete(delivery.id),
+      );
+    } catch (error) {
+      await this.options.storage.transaction(delivery.orgId, async (tx) => {
+        if (delivery.attempts >= this.values.maxAttempts)
+          await tx.eventDeliveries.deadLetter(delivery.id, safeError(error));
+        else
+          await tx.eventDeliveries.fail(
+            delivery.id,
+            safeError(error),
+            retryAt(this.values, delivery.attempts),
+          );
+      });
+    }
+  }
+}
+
 export function signEvent(event: EventEnvelope, secret: string): string {
   return createHmac("sha256", secret).update(stableStringify(event)).digest("hex");
 }
-export function parseDeliveredEvent(value: unknown): EventEnvelope {
+export function signDelivery(request: EventDeliveryRequest, secret: string): string {
+  return createHmac("sha256", secret).update(stableStringify(request)).digest("hex");
+}
+export function parseDeliveryRequest(value: unknown): EventDeliveryRequest {
   const serialized = JSON.stringify(value);
   if (Buffer.byteLength(serialized) > 256 * 1024)
-    throw new RangeError("Event envelope exceeds 256 KiB");
+    throw new RangeError("Event delivery exceeds 256 KiB");
+  return eventDeliveryRequestSchema.parse(value);
+}
+export function parseDeliveredEvent(value: unknown): EventEnvelope {
   return eventEnvelopeSchema.parse(value);
 }

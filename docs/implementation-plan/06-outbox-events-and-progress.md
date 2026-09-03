@@ -17,7 +17,7 @@ Guarantee atomic event persistence, at-least-once processing, direct cross-app d
 
 - Expose deterministic `tick()` plus scheduler default of 500 ms and batch default 50.
 - Claim eligible rows atomically with worker ID/lease; process different events with bounded concurrency. For one event, invoke matching handlers in deterministic order and define all-handlers success semantics.
-- On failure increment retry count, store a redacted/truncated error, schedule exponential delays `2^retry * 1s` (clarify whether first is 1s or 2s), and dead-letter at five attempts.
+- On failure increment attempt count and store a redacted/truncated error. `maxAttempts` defaults to one (immediate durable dead letter); deployments may configure a larger value, with exponential delays beginning at 1 second. The recommended production profile uses five attempts.
 - Recover expired processing leases after crashes. Use heartbeat/lease extension for long handlers or enforce handler timeout below lease.
 - Shutdown stops claims, awaits active handlers to deadline, then leaves recoverable leases.
 
@@ -54,7 +54,7 @@ Document the at-least-once seam: the framework suppresses repeated completed han
 
 - `tick()` claims at most 50 eligible rows in order and bounded concurrency never exceeds config.
 - Two PostgreSQL workers process 1,000 rows without simultaneous duplicate claims; injected post-handler/pre-complete crash causes allowed redelivery.
-- Failures schedule exact fake-clock backoffs, retain truncated safe errors, and dead-letter on the fifth configured failure.
+- Failures schedule exact fake-clock backoffs, retain truncated safe errors, dead-letter after the configured attempt limit, and prove both the one-attempt default and five-attempt production profile.
 - Expired leases recover; unexpired leases do not. Shutdown/restart eventually processes all non-dead-letter rows.
 - No arbitrary sleep is used in these tests.
 

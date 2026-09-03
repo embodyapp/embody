@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-09-02 by `pi`
+Last updated: 2026-09-03 by `pi`
 
 This file is intentionally simple so small agents can coordinate without a project-management service. Update one row when claiming and completing work. Preserve item IDs because plans and commits may reference them.
 
@@ -29,10 +29,10 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P5-01 | Execution engine and authorization | DONE | pi | P4-02 | Transport-neutral execution options, scope authorization, request context, cancellation/progress/audit; `pnpm lint && pnpm api-report`, `pnpm test`, `pnpm typecheck`, and `pnpm build` passed. |
 | P5-02 | Remote HTTP host and verifier plugins | DONE | pi | P5-01 | Fastify execute/health host, capacity/body/timeout controls, gateway-JWT verifier and production local-dev rejection; host/auth injection and JWT-negative tests pass. |
 | P5-03 | Registration/heartbeat client | DONE | pi | P5-02 | Deterministic SHA-256 manifest generation, authenticated registration, 30-second heartbeat, 404 re-registration, bounded jittered retry, injectable timers, and stop cleanup covered by host tests. |
-| P6-01 | Transactional outbox publishing | IN_PROGRESS | pi | P2-03,P5-01 | Event payload/name validation added; atomic storage behavior pre-existing. |
-| P6-02 | Worker retries, concurrency, and shutdown | IN_PROGRESS | pi | P6-01 | Deterministic worker, exponential retry, dead letters, and expired lease recovery implemented; dedicated conformance tests remain. |
-| P6-03 | Local and direct cross-app event delivery | IN_PROGRESS | pi | D-03,P6-02 | HMAC-authenticated receiver, local inbox idempotency, and direct/static transport seam implemented; destination snapshots/delivery persistence remain. |
-| P6-04 | SSE/progress transport | IN_PROGRESS | pi | P5-02 | `/execute/stream` SSE implementation, ordered progress validation, and basic wire test added; backpressure/disconnect tests remain. |
+| P6-01 | Transactional outbox publishing | DONE | pi | P2-03,P5-01 | Transactional publishing validates names/JSON/256 KiB and persists injected IDs, timestamps, producer, and correlation metadata; rollback integration passes. |
+| P6-02 | Worker retries, concurrency, and shutdown | DONE | pi | P6-01 | Deterministic workers, bounded concurrency, configurable attempts (default 1), exact exponential retry, dead letters, shutdown, and lease recovery; two PostgreSQL workers claim 1,000 rows without duplicates. |
+| P6-03 | Local and direct cross-app event delivery | DONE | pi | D-03,P6-02 | Migration-backed destination snapshots, independent delivery worker, HMAC/audience/org receiver checks, inbox idempotency, no-subscriber audit, and SQLite restart/offline recovery tests pass. |
+| P6-04 | SSE/progress transport | DONE | pi | P5-02 | Authenticated `/execute/stream` emits ordered JSON progress and one terminal result/error, validates monotonic progress, bounds backpressure buffering, cancels disconnects, and closes keepalives. |
 | P7-01 | Gateway registry and health watcher | NOT_STARTED | — | P5-03 | |
 | P7-02 | Gateway auth, token exchange, RBAC, audit, limits | NOT_STARTED | — | P5-02,P7-01 | |
 | P7-03 | Dispatch proxy | NOT_STARTED | — | P7-02 | |
@@ -59,8 +59,8 @@ This file is intentionally simple so small agents can coordinate without a proje
 | Install | `pnpm install --frozen-lockfile` | Passed | 2026-09-01/pi |
 | Lint | `pnpm lint` | Passed | 2026-09-01/pi (P2) |
 | Type check | `pnpm typecheck` | Passed | 2026-09-01/pi (P2) |
-| Unit/integration | `set -a && source .env && set +a && pnpm test` | 62 passed against SQLite and local PostgreSQL 16 | 2026-09-02/pi (P4) |
-| PostgreSQL integration | `set -a && source .env && set +a && pnpm test:postgres` | Passed: 4 PostgreSQL 16 runtime-role/RLS/concurrency/generated-CRUD tests | 2026-09-02/pi (P4) |
+| Unit/integration | `pnpm test` | Passed: 74 tests (PostgreSQL suites separately enabled) | 2026-09-03/pi (P6) |
+| PostgreSQL integration | `set -a && source .env && set +a && pnpm test:postgres` | Passed: 5 PostgreSQL 16 runtime-role/RLS tests, including two workers claiming 1,000 events and independent destination claims | 2026-09-03/pi (P6) |
 | End-to-end | `pnpm test:e2e` | Passed; no suites until later phases | 2026-09-01/pi |
 | Build | `pnpm build` | Passed for all packages | 2026-09-01/pi (P2) |
 
@@ -80,3 +80,4 @@ Append concise entries; do not rewrite history.
 - 2026-09-02 `pi`: completed P4-02 generated CRUD lifecycle. Five generated actions run via org-bound kernel transactions with hooks and atomic outbox events; SQLite/PostgreSQL integrations and `pnpm verify` passed.
 - 2026-09-02 `pi`: completed P5-01 execution pipeline: explicit verified-principal options, segment-aware scopes, request/cancellation/progress context, and redacted audit metadata. `pnpm lint && pnpm api-report`, `pnpm test`, `pnpm typecheck`, and `pnpm build` passed.
 - 2026-09-02 `pi`: completed P5-02/P5-03: gateway JWT/local development verifiers, Fastify execute/health host, and registration/heartbeat client with deterministic manifest hash, bounded retry, re-registration, and timer cleanup. `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and `pnpm api-report` passed.
+- 2026-09-03 `pi`: completed P6-01 through P6-04: transactional event validation/metadata, durable destination snapshots, independent direct-delivery worker with configurable attempts (default one), authenticated/idempotent receiver, and bounded SSE streaming. Workspace checks and real PostgreSQL 16 concurrency tests passed.

@@ -73,6 +73,10 @@ export interface OutboxEvent {
   readonly claimedAt?: string;
   readonly claimedBy?: string;
   readonly lastError?: string;
+  readonly correlationId?: string;
+  readonly causationId?: string;
+  readonly producerPluginId?: string;
+  readonly schemaVersion?: string;
 }
 
 export interface EnqueueOutboxInput {
@@ -81,6 +85,10 @@ export interface EnqueueOutboxInput {
   readonly payload: unknown;
   readonly occurredAt?: string;
   readonly scheduledAt?: string;
+  readonly correlationId?: string;
+  readonly causationId?: string;
+  readonly producerPluginId?: string;
+  readonly schemaVersion?: string;
 }
 
 export interface ClaimOutboxOptions {
@@ -103,6 +111,44 @@ export interface OutboxRepository {
   }): Promise<readonly OutboxEvent[]>;
 }
 
+export interface EventDelivery {
+  readonly id: string;
+  readonly eventId: string;
+  readonly orgId: string;
+  readonly destinationAppId: string;
+  readonly destinationEndpoint: string;
+  readonly envelope: unknown;
+  readonly scheduledAt: string;
+  readonly attempts: number;
+  readonly status: OutboxStatus;
+  readonly claimedAt?: string;
+  readonly claimedBy?: string;
+  readonly lastError?: string;
+}
+
+export interface CreateEventDeliveryInput {
+  readonly id?: string;
+  readonly eventId: string;
+  readonly orgId: string;
+  readonly destinationAppId: string;
+  readonly destinationEndpoint: string;
+  readonly envelope: unknown;
+  readonly scheduledAt?: string;
+}
+
+export interface EventDeliveryRepository {
+  /** Idempotently creates a snapshotted destination for an event. */
+  create(input: CreateEventDeliveryInput): Promise<EventDelivery>;
+  claimBatch(options: ClaimOutboxOptions): Promise<readonly EventDelivery[]>;
+  complete(id: string): Promise<void>;
+  fail(id: string, error: string, retryAt?: string): Promise<EventDelivery | null>;
+  deadLetter(id: string, error: string): Promise<EventDelivery | null>;
+  list(options?: {
+    readonly status?: OutboxStatus;
+    readonly limit?: number;
+  }): Promise<readonly EventDelivery[]>;
+}
+
 export interface InboxReservation {
   readonly state: "new" | "duplicate" | "in-progress" | "completed";
   readonly eventId: string;
@@ -119,6 +165,7 @@ export interface TransactionRepositories {
   readonly entities: EntityRepository;
   readonly outbox: OutboxRepository;
   readonly inbox: InboxRepository;
+  readonly eventDeliveries: EventDeliveryRepository;
 }
 
 export interface StorageTransaction extends TransactionRepositories {
@@ -126,6 +173,7 @@ export interface StorageTransaction extends TransactionRepositories {
 }
 
 export interface StorageConnection {
+  readonly dialect: StorageDialect;
   /** Applies all missing numbered infrastructure migrations. Safe to call repeatedly. */
   ensureSchema(): Promise<void>;
   transaction<T>(orgId: string, callback: (tx: StorageTransaction) => Promise<T>): Promise<T>;
@@ -255,6 +303,47 @@ export const STORAGE_MIGRATIONS: readonly SchemaMigration[] = [
         claimed_by TEXT, last_error TEXT, UNIQUE (event_id, app_id));
       CREATE INDEX idx_gateway_deliveries_claim ON embody_gateway_deliveries (status, scheduled_at);
       CREATE TABLE IF NOT EXISTS embody_schema_migrations (version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL);
+    `.trim(),
+  },
+  {
+    version: 2,
+    description: "durable direct event destinations",
+    sqlite: `
+      CREATE TABLE embody_event_deliveries (id TEXT PRIMARY KEY, event_id TEXT NOT NULL,
+        org_id TEXT NOT NULL, destination_app_id TEXT NOT NULL, destination_endpoint TEXT NOT NULL,
+        envelope TEXT NOT NULL, scheduled_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending', claimed_at TEXT, claimed_by TEXT, last_error TEXT,
+        created_at TEXT NOT NULL, completed_at TEXT, UNIQUE (event_id, destination_app_id));
+      CREATE INDEX idx_event_deliveries_claim ON embody_event_deliveries (status, scheduled_at);
+    `.trim(),
+    postgres: `
+      CREATE TABLE embody_event_deliveries (id UUID PRIMARY KEY, event_id UUID NOT NULL,
+        org_id TEXT NOT NULL, destination_app_id TEXT NOT NULL, destination_endpoint TEXT NOT NULL,
+        envelope JSONB NOT NULL, scheduled_at TIMESTAMPTZ NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending', claimed_at TIMESTAMPTZ, claimed_by TEXT, last_error TEXT,
+        created_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ,
+        UNIQUE (event_id, destination_app_id));
+      CREATE INDEX idx_event_deliveries_claim ON embody_event_deliveries (status, scheduled_at);
+      ALTER TABLE embody_event_deliveries ENABLE ROW LEVEL SECURITY;
+      CREATE POLICY embody_event_deliveries_tenant_isolation ON embody_event_deliveries
+        USING (org_id = current_setting('app.current_org', true))
+        WITH CHECK (org_id = current_setting('app.current_org', true));
+    `.trim(),
+  },
+  {
+    version: 3,
+    description: "event envelope metadata",
+    sqlite: `
+      ALTER TABLE embody_outbox ADD COLUMN correlation_id TEXT;
+      ALTER TABLE embody_outbox ADD COLUMN causation_id TEXT;
+      ALTER TABLE embody_outbox ADD COLUMN producer_plugin_id TEXT;
+      ALTER TABLE embody_outbox ADD COLUMN schema_version TEXT;
+    `.trim(),
+    postgres: `
+      ALTER TABLE embody_outbox ADD COLUMN correlation_id TEXT;
+      ALTER TABLE embody_outbox ADD COLUMN causation_id TEXT;
+      ALTER TABLE embody_outbox ADD COLUMN producer_plugin_id TEXT;
+      ALTER TABLE embody_outbox ADD COLUMN schema_version TEXT;
     `.trim(),
   },
 ];

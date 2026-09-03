@@ -10,6 +10,8 @@ import type {
   EntityListOptions,
   EntityRecord,
   EntityUpdate,
+  EventDelivery,
+  CreateEventDeliveryInput,
   InboxReservation,
   OutboxEvent,
   OutboxStatus,
@@ -56,12 +58,42 @@ function outboxFromRow(row: Row): OutboxEvent {
   const claimedAt = typeof row["claimed_at"] === "string" ? row["claimed_at"] : undefined;
   const claimedBy = typeof row["claimed_by"] === "string" ? row["claimed_by"] : undefined;
   const lastError = typeof row["last_error"] === "string" ? row["last_error"] : undefined;
+  const optional = (field: string): string | undefined =>
+    typeof row[field] === "string" ? String(row[field]) : undefined;
+  const correlationId = optional("correlation_id");
+  const causationId = optional("causation_id");
+  const producerPluginId = optional("producer_plugin_id");
+  const schemaVersion = optional("schema_version");
   return {
     id: String(row["id"]),
     orgId: String(row["org_id"]),
     eventName: String(row["event_name"]),
     payload: parseJson(row["payload"], "outbox payload"),
     occurredAt: normalizeTimestamp(String(row["occurred_at"])),
+    scheduledAt: normalizeTimestamp(String(row["scheduled_at"])),
+    attempts: Number(row["attempts"]),
+    status: String(row["status"]) as OutboxStatus,
+    ...(claimedAt === undefined ? {} : { claimedAt }),
+    ...(claimedBy === undefined ? {} : { claimedBy }),
+    ...(lastError === undefined ? {} : { lastError }),
+    ...(correlationId === undefined ? {} : { correlationId }),
+    ...(causationId === undefined ? {} : { causationId }),
+    ...(producerPluginId === undefined ? {} : { producerPluginId }),
+    ...(schemaVersion === undefined ? {} : { schemaVersion }),
+  };
+}
+
+function deliveryFromRow(row: Row): EventDelivery {
+  const claimedAt = typeof row["claimed_at"] === "string" ? row["claimed_at"] : undefined;
+  const claimedBy = typeof row["claimed_by"] === "string" ? row["claimed_by"] : undefined;
+  const lastError = typeof row["last_error"] === "string" ? row["last_error"] : undefined;
+  return {
+    id: String(row["id"]),
+    eventId: String(row["event_id"]),
+    orgId: String(row["org_id"]),
+    destinationAppId: String(row["destination_app_id"]),
+    destinationEndpoint: String(row["destination_endpoint"]),
+    envelope: parseJson(row["envelope"], "event delivery envelope"),
     scheduledAt: normalizeTimestamp(String(row["scheduled_at"])),
     attempts: Number(row["attempts"]),
     status: String(row["status"]) as OutboxStatus,
@@ -185,10 +217,16 @@ class SqliteTransaction implements StorageTransaction {
         scheduledAt: timestamp(input.scheduledAt),
         attempts: 0,
         status: "pending",
+        ...(input.correlationId === undefined ? {} : { correlationId: input.correlationId }),
+        ...(input.causationId === undefined ? {} : { causationId: input.causationId }),
+        ...(input.producerPluginId === undefined
+          ? {}
+          : { producerPluginId: input.producerPluginId }),
+        ...(input.schemaVersion === undefined ? {} : { schemaVersion: input.schemaVersion }),
       };
       this.database
         .prepare(
-          "INSERT INTO embody_outbox (id, org_id, event_name, payload, occurred_at, scheduled_at, attempts, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO embody_outbox (id, org_id, event_name, payload, occurred_at, scheduled_at, attempts, status, correlation_id, causation_id, producer_plugin_id, schema_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .run(
           event.id,
@@ -199,6 +237,10 @@ class SqliteTransaction implements StorageTransaction {
           event.scheduledAt,
           event.attempts,
           event.status,
+          event.correlationId ?? null,
+          event.causationId ?? null,
+          event.producerPluginId ?? null,
+          event.schemaVersion ?? null,
         );
       return event;
     },
@@ -229,6 +271,89 @@ class SqliteTransaction implements StorageTransaction {
               )
               .all(options.status, limit);
       return (rows as Row[]).map(outboxFromRow);
+    },
+  };
+
+  public readonly eventDeliveries = {
+    create: async (input: CreateEventDeliveryInput): Promise<EventDelivery> => {
+      const id = input.id ?? randomUUID();
+      const scheduledAt = timestamp(input.scheduledAt);
+      this.database
+        .prepare(
+          "INSERT INTO embody_event_deliveries (id, event_id, org_id, destination_app_id, destination_endpoint, envelope, scheduled_at, attempts, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?) ON CONFLICT(event_id, destination_app_id) DO NOTHING",
+        )
+        .run(
+          id,
+          input.eventId,
+          input.orgId,
+          input.destinationAppId,
+          input.destinationEndpoint,
+          JSON.stringify(input.envelope),
+          scheduledAt,
+          timestamp(),
+        );
+      const row = this.database
+        .prepare(
+          "SELECT * FROM embody_event_deliveries WHERE event_id = ? AND destination_app_id = ?",
+        )
+        .get(input.eventId, input.destinationAppId) as Row;
+      return deliveryFromRow(row);
+    },
+    claimBatch: async (options: ClaimOutboxOptions): Promise<readonly EventDelivery[]> => {
+      this.assertClaimOptions(options);
+      const now = timestamp(options.now);
+      const expired = new Date(new Date(now).getTime() - (options.leaseMs ?? 30_000)).toISOString();
+      const rows = this.database
+        .prepare(
+          "SELECT * FROM embody_event_deliveries WHERE (status IN ('pending', 'failed') AND scheduled_at <= ?) OR (status = 'processing' AND claimed_at <= ?) ORDER BY scheduled_at, id LIMIT ?",
+        )
+        .all(now, expired, options.limit) as Row[];
+      const claimed: EventDelivery[] = [];
+      for (const row of rows) {
+        const changed = this.database
+          .prepare(
+            "UPDATE embody_event_deliveries SET status = 'processing', claimed_at = ?, claimed_by = ?, attempts = attempts + 1 WHERE id = ? AND (status IN ('pending', 'failed') OR (status = 'processing' AND claimed_at <= ?))",
+          )
+          .run(now, options.workerId, row["id"], expired);
+        if (changed.changes === 1)
+          claimed.push(
+            deliveryFromRow({
+              ...row,
+              status: "processing",
+              claimed_at: now,
+              claimed_by: options.workerId,
+              attempts: Number(row["attempts"]) + 1,
+            }),
+          );
+      }
+      return claimed;
+    },
+    complete: async (id: string): Promise<void> => {
+      this.database
+        .prepare(
+          "UPDATE embody_event_deliveries SET status = 'completed', completed_at = ?, claimed_at = NULL, claimed_by = NULL WHERE id = ?",
+        )
+        .run(timestamp(), id);
+    },
+    fail: async (id: string, error: string, retryAt?: string) =>
+      this.transitionDeliveryFailure(id, error, retryAt, false),
+    deadLetter: async (id: string, error: string) =>
+      this.transitionDeliveryFailure(id, error, undefined, true),
+    list: async (options: { readonly status?: OutboxStatus; readonly limit?: number } = {}) => {
+      const limit = options.limit ?? 100;
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+        throw new RangeError("Invalid limit");
+      const rows =
+        options.status === undefined
+          ? this.database
+              .prepare("SELECT * FROM embody_event_deliveries ORDER BY scheduled_at, id LIMIT ?")
+              .all(limit)
+          : this.database
+              .prepare(
+                "SELECT * FROM embody_event_deliveries WHERE status = ? ORDER BY scheduled_at, id LIMIT ?",
+              )
+              .all(options.status, limit);
+      return (rows as Row[]).map(deliveryFromRow);
     },
   };
 
@@ -273,9 +398,13 @@ class SqliteTransaction implements StorageTransaction {
     private readonly database: SqliteDatabase,
   ) {}
 
-  private async claim(options: ClaimOutboxOptions): Promise<readonly OutboxEvent[]> {
+  private assertClaimOptions(options: ClaimOutboxOptions): void {
     if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)
       throw new RangeError("Invalid claim limit");
+  }
+
+  private async claim(options: ClaimOutboxOptions): Promise<readonly OutboxEvent[]> {
+    this.assertClaimOptions(options);
     const now = timestamp(options.now);
     const expired = new Date(new Date(now).getTime() - (options.leaseMs ?? 30_000)).toISOString();
     const rows = this.database
@@ -302,6 +431,28 @@ class SqliteTransaction implements StorageTransaction {
         );
     }
     return claimed;
+  }
+
+  private async transitionDeliveryFailure(
+    id: string,
+    error: string,
+    retryAt: string | undefined,
+    dead: boolean,
+  ): Promise<EventDelivery | null> {
+    this.database
+      .prepare(
+        "UPDATE embody_event_deliveries SET status = ?, last_error = ?, scheduled_at = COALESCE(?, scheduled_at), claimed_at = NULL, claimed_by = NULL WHERE id = ?",
+      )
+      .run(
+        dead ? "dead_letter" : "failed",
+        error,
+        retryAt === undefined ? null : timestamp(retryAt),
+        id,
+      );
+    const row = this.database
+      .prepare("SELECT * FROM embody_event_deliveries WHERE id = ?")
+      .get(id) as Row | undefined;
+    return row === undefined ? null : deliveryFromRow(row);
   }
 
   private async transitionFailure(
@@ -332,6 +483,7 @@ export interface SqliteStorageOptions {
 
 /** SQLite/JSON1 adapter. A connection serializes claims with BEGIN IMMEDIATE. */
 export class SqliteStorage implements StorageConnection {
+  public readonly dialect = "sqlite" as const;
   private readonly database: SqliteDatabase;
   private active = false;
 

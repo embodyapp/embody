@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Kernel } from "@embody/core";
-import { createHost, createRegistrationClient, signEvent } from "../src/index.js";
+import { createHost, createRegistrationClient, signDelivery } from "../src/index.js";
 
 const principal = {
   orgId: "org-1",
@@ -72,6 +72,31 @@ describe("remote host", () => {
     );
     await host.stop();
   });
+  it("streams progress followed by exactly one structured error", async () => {
+    const execute = vi.fn(
+      (
+        _target: string,
+        _input: unknown,
+        options: { progress?: (update: { message: string }) => void },
+      ) => {
+        options.progress?.({ message: "line one\nline two ☃" });
+        return Promise.reject(new Error("failed"));
+      },
+    );
+    const { host } = makeHost(execute as unknown as Kernel["execute"]);
+    await host.start();
+    const response = await host.app.inject({
+      method: "POST",
+      url: "/execute/stream",
+      headers: { "x-gateway-auth": "Bearer token" },
+      payload: { protocolVersion: 1, target: "kanban.card.create", input: {} },
+    });
+    expect(response.body).toContain('event: progress\ndata: {"message":"line one\\nline two ☃"}');
+    expect(response.body).toContain('event: error\ndata: {"error":{"code":"INTERNAL_ERROR"');
+    expect(response.body).not.toContain("event: result");
+    await host.stop();
+  });
+
   it("accepts only signed event envelopes", async () => {
     const handleEvent = vi.fn(() => Promise.resolve());
     const storage = {
@@ -82,7 +107,11 @@ describe("remote host", () => {
       verifier: { id: "test", verify: () => Promise.resolve(principal) },
       appId: "kanban",
       version: "1",
-      eventDelivery: { storage: storage as never, secret: "shared-secret" },
+      eventDelivery: {
+        storage: storage as never,
+        secret: "shared-secret",
+        authorize: (event) => event.producerAppId === "email" && event.orgId === "org-1",
+      },
     });
     const event = {
       protocolVersion: 1 as const,
@@ -93,17 +122,42 @@ describe("remote host", () => {
       payload: {},
       occurredAt: "2026-01-01T00:00:00.000Z",
     };
+    const delivery = {
+      protocolVersion: 1 as const,
+      deliveryId: "22222222-2222-4222-8222-222222222222",
+      destinationAppId: "kanban",
+      attempt: 1,
+      event,
+    };
     const rejected = await host.app.inject({
       method: "POST",
       url: "/events/deliver",
-      payload: event,
+      payload: delivery,
     });
     expect(rejected.statusCode).toBe(401);
+    const wrongAudience = { ...delivery, destinationAppId: "analytics" };
+    const wrongDestination = await host.app.inject({
+      method: "POST",
+      url: "/events/deliver",
+      headers: {
+        "x-embody-event-signature": signDelivery(wrongAudience, "shared-secret"),
+      },
+      payload: wrongAudience,
+    });
+    expect(wrongDestination.statusCode).toBe(401);
+    const wrongOrg = { ...delivery, event: { ...event, orgId: "other-org" } };
+    const rejectedOrg = await host.app.inject({
+      method: "POST",
+      url: "/events/deliver",
+      headers: { "x-embody-event-signature": signDelivery(wrongOrg, "shared-secret") },
+      payload: wrongOrg,
+    });
+    expect(rejectedOrg.statusCode).toBe(401);
     const accepted = await host.app.inject({
       method: "POST",
       url: "/events/deliver",
-      headers: { "x-embody-event-signature": signEvent(event, "shared-secret") },
-      payload: event,
+      headers: { "x-embody-event-signature": signDelivery(delivery, "shared-secret") },
+      payload: delivery,
     });
     expect(accepted.statusCode).toBe(200);
     expect(handleEvent).toHaveBeenCalledOnce();
