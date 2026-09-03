@@ -33,10 +33,10 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P6-02 | Worker retries, concurrency, and shutdown | DONE | pi | P6-01 | Deterministic workers, bounded concurrency, configurable attempts (default 1), exact exponential retry, dead letters, shutdown, and lease recovery; two PostgreSQL workers claim 1,000 rows without duplicates. |
 | P6-03 | Local and direct cross-app event delivery | DONE | pi | D-03,P6-02 | Migration-backed destination snapshots, independent delivery worker, HMAC/audience/org receiver checks, inbox idempotency, no-subscriber audit, and SQLite restart/offline recovery tests pass. |
 | P6-04 | SSE/progress transport | DONE | pi | P5-02 | Authenticated `/execute/stream` emits ordered JSON progress and one terminal result/error, validates monotonic progress, bounds backpressure buffering, cancels disconnects, and closes keepalives. |
-| P7-01 | Gateway registry and health watcher | NOT_STARTED | — | P5-03 | |
-| P7-02 | Gateway auth, token exchange, RBAC, audit, limits | NOT_STARTED | — | P5-02,P7-01 | |
-| P7-03 | Dispatch proxy | NOT_STARTED | — | P7-02 | |
-| P7-04 | Optional durable gateway event relay | NOT_STARTED | — | P6-03,P7-03 | Optional adapter; not on the MVP release critical path |
+| P7-01 | Gateway registry and health watcher | DONE | pi | P5-03 | Copy-on-write registry, credentialed generations, TTL health and endpoint policy. |
+| P7-02 | Gateway auth, token exchange, RBAC, audit, limits | DONE | pi | P5-02,P7-01 | API key/OIDC chain, short-lived audience JWT, scopes, memory limits/audit. |
+| P7-03 | Dispatch proxy | DONE | pi | P7-02 | Catalog-gated, authenticated canonical `/execute` dispatch with cancellation. |
+| P7-04 | Optional durable gateway event relay | DONE | pi | P6-03,P7-03 | Opt-in registry-backed EventTransport for existing durable workers. |
 | P8-01 | MCP tool catalog and transports | NOT_STARTED | — | P7-03 | |
 | P8-02 | Hierarchical CLI and discovery | NOT_STARTED | — | P7-03 | |
 | P8-03 | End-to-end progress forwarding | NOT_STARTED | — | P6-04,P8-01,P8-02 | |
@@ -81,3 +81,4 @@ Append concise entries; do not rewrite history.
 - 2026-09-02 `pi`: completed P5-01 execution pipeline: explicit verified-principal options, segment-aware scopes, request/cancellation/progress context, and redacted audit metadata. `pnpm lint && pnpm api-report`, `pnpm test`, `pnpm typecheck`, and `pnpm build` passed.
 - 2026-09-02 `pi`: completed P5-02/P5-03: gateway JWT/local development verifiers, Fastify execute/health host, and registration/heartbeat client with deterministic manifest hash, bounded retry, re-registration, and timer cleanup. `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and `pnpm api-report` passed.
 - 2026-09-03 `pi`: completed P6-01 through P6-04: transactional event validation/metadata, durable destination snapshots, independent direct-delivery worker with configurable attempts (default one), authenticated/idempotent receiver, and bounded SSE streaming. Workspace checks and real PostgreSQL 16 concurrency tests passed.
+- 2026-09-03 `pi`: completed P7-01 through P7-04: copy-on-write gateway registry and liveness catalog, API key/OIDC authentication chain, scoped audited rate-limited dispatch, short-lived app-audience JWT exchange, and opt-in registry-backed durable event transport.
