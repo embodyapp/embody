@@ -37,9 +37,9 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P7-02 | Gateway auth, token exchange, RBAC, audit, limits | DONE | pi | P5-02,P7-01 | API key/OIDC chain, short-lived audience JWT, scopes, memory limits/audit. |
 | P7-03 | Dispatch proxy | DONE | pi | P7-02 | Catalog-gated, authenticated canonical `/execute` dispatch with cancellation. |
 | P7-04 | Optional durable gateway event relay | DONE | pi | P6-03,P7-03 | Opt-in registry-backed EventTransport for existing durable workers. |
-| P8-01 | MCP tool catalog and transports | NOT_STARTED | — | P7-03 | |
-| P8-02 | Hierarchical CLI and discovery | NOT_STARTED | — | P7-03 | |
-| P8-03 | End-to-end progress forwarding | NOT_STARTED | — | P6-04,P8-01,P8-02 | |
+| P8-01 | MCP tool catalog and transports | DONE | pi | P7-03 | Official SDK Streamable HTTP sessions, global/scoped catalogs, identity pinning, mapping/collision checks, calls, cancellation, and safe errors |
+| P8-02 | Hierarchical CLI and discovery | DONE | pi | P7-03 | Spawned binary test covers live discovery, schema coercion, execution, progress separation, and JSON output; profiles, protected config, ETag cache, help, CRUD/action hierarchy, and stable exits implemented |
+| P8-03 | End-to-end progress forwarding | DONE | pi | P6-04,P8-01,P8-02 | Bounded remote SSE parsing/proxying, awaited MCP progress notifications, CLI stderr progress, terminal-result isolation, and cancellation propagation |
 | P9-01 | Testing harness | NOT_STARTED | — | P5-01,P6-02 | |
 | P9-02 | `embody dev` and inspector | NOT_STARTED | — | P8-01,P9-01 | |
 | P9-03 | App scaffolder | NOT_STARTED | — | P9-01,P9-02 | |
@@ -59,7 +59,7 @@ This file is intentionally simple so small agents can coordinate without a proje
 | Install | `pnpm install --frozen-lockfile` | Passed | 2026-09-01/pi |
 | Lint | `pnpm lint` | Passed | 2026-09-01/pi (P2) |
 | Type check | `pnpm typecheck` | Passed | 2026-09-01/pi (P2) |
-| Unit/integration | `pnpm test` | Passed: 74 tests (PostgreSQL suites separately enabled) | 2026-09-03/pi (P6) |
+| Unit/integration | `pnpm test` | Passed: 78 tests; 6 PostgreSQL tests skipped unless separately enabled | 2026-09-03/pi (P8) |
 | PostgreSQL integration | `set -a && source .env && set +a && pnpm test:postgres` | Passed: 5 PostgreSQL 16 runtime-role/RLS tests, including two workers claiming 1,000 events and independent destination claims | 2026-09-03/pi (P6) |
 | End-to-end | `pnpm test:e2e` | Passed; no suites until later phases | 2026-09-01/pi |
 | Build | `pnpm build` | Passed for all packages | 2026-09-01/pi (P2) |
@@ -82,3 +82,4 @@ Append concise entries; do not rewrite history.
 - 2026-09-02 `pi`: completed P5-02/P5-03: gateway JWT/local development verifiers, Fastify execute/health host, and registration/heartbeat client with deterministic manifest hash, bounded retry, re-registration, and timer cleanup. `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and `pnpm api-report` passed.
 - 2026-09-03 `pi`: completed P6-01 through P6-04: transactional event validation/metadata, durable destination snapshots, independent direct-delivery worker with configurable attempts (default one), authenticated/idempotent receiver, and bounded SSE streaming. Workspace checks and real PostgreSQL 16 concurrency tests passed.
 - 2026-09-03 `pi`: completed P7-01 through P7-04: copy-on-write gateway registry and liveness catalog, API key/OIDC authentication chain, scoped audited rate-limited dispatch, short-lived app-audience JWT exchange, and opt-in registry-backed durable event transport.
+- 2026-09-03 `pi`: completed P8-01 through P8-03: official SDK stateful Streamable HTTP MCP with dynamic authorized global/scoped catalogs, hierarchical spawned CLI with profiles/config/ETag discovery and schema coercion, and ordered cancellable progress forwarding to MCP notifications and CLI stderr. `pnpm verify` passed with 78 tests plus 6 separately enabled PostgreSQL tests.

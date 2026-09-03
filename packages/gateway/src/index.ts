@@ -1,6 +1,6 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { SignJWT, createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import {
   BadRequestError,
@@ -16,6 +16,12 @@ import {
   type Principal,
 } from "@embody/core";
 import { DirectEventTransport, type EventDestination, type EventDirectory } from "@embody/host";
+import {
+  createMcpCatalog,
+  McpHttpHandler,
+  type McpCatalogEntry,
+  type McpExecutionEvent,
+} from "@embody/mcp";
 
 export interface Clock {
   now(): Date;
@@ -105,6 +111,12 @@ function validateRegistration(value: Registration, options: GatewayRegistryOptio
     throw new BadRequestError("Health URL must share endpoint origin");
   const names = [...Object.keys(value.manifest.actions), ...Object.keys(value.manifest.entities)];
   if (new Set(names).size !== names.length) throw new ConflictError("Manifest target collision");
+  // Registration is the earliest safe point to reject lossy MCP name mappings.
+  try {
+    createMcpCatalog([{ appId: value.appId, manifest: value.manifest }], value.appId);
+  } catch {
+    throw new ConflictError("Manifest MCP tool name collision");
+  }
   return createHash("sha256").update(serialized).digest("hex");
 }
 /** Atomic copy-on-write registry; snapshots can safely be read concurrently. */
@@ -369,9 +381,182 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     app.post(`${prefix}/register`, register);
     app.post(`${prefix}/heartbeat`, heartbeat);
   }
-  app.get("/api/catalog", () =>
-    options.registry.snapshot().filter((entry) => entry.status === "healthy"),
-  );
+  app.get("/api/catalog", async (request, reply) => {
+    const principal = await options.auth.authenticate(
+      bearer(
+        typeof request.headers["authorization"] === "string"
+          ? request.headers["authorization"]
+          : undefined,
+      ),
+    );
+    const catalog = options.registry
+      .snapshot()
+      .filter((entry) => entry.status === "healthy")
+      .map((entry) => ({
+        ...entry,
+        manifest: {
+          ...entry.manifest,
+          actions: Object.fromEntries(
+            Object.entries(entry.manifest.actions).filter(([target]) =>
+              scopeAllows(principal, entry.appId, target),
+            ),
+          ),
+        },
+      }))
+      .filter((entry) => Object.keys(entry.manifest.actions).length > 0);
+    const etag = `"${createHash("sha256").update(stableStringify(catalog)).digest("hex")}"`;
+    reply.header("etag", etag).header("cache-control", "private, max-age=30");
+    if (request.headers["if-none-match"] === etag) return reply.status(304).send();
+    return catalog;
+  });
+  const catalogFor = (principal: Principal, scoped?: string): readonly McpCatalogEntry[] =>
+    createMcpCatalog(
+      options.registry
+        .snapshot()
+        .filter((entry) => entry.status === "healthy")
+        .filter((entry) => scoped === undefined || entry.appId === scoped)
+        .map((entry) => ({ appId: entry.appId, manifest: entry.manifest })),
+      scoped,
+    ).filter((entry) => scopeAllows(principal, entry.appId, entry.target));
+  const remoteEvents = async function* (
+    principal: Principal,
+    entry: McpCatalogEntry,
+    input: unknown,
+    signal: AbortSignal,
+  ): AsyncGenerator<McpExecutionEvent> {
+    const registered = options.registry.get(entry.appId);
+    if (!registered || registered.status !== "healthy") {
+      yield { type: "error", message: "App is unavailable" };
+      return;
+    }
+    if (!scopeAllows(principal, entry.appId, entry.target)) {
+      yield { type: "error", message: "Tool not found or no longer authorized" };
+      return;
+    }
+    const requestId = randomUUID();
+    const response = await fetcher(new URL("/execute/stream", new URL(registered.endpoint)), {
+      method: "POST",
+      signal,
+      headers: {
+        "content-type": "application/json",
+        "x-request-id": requestId,
+        "x-gateway-auth": `Bearer ${await issueGatewayToken(principal, entry.appId, requestId, options.token)}`,
+      },
+      body: JSON.stringify({ target: entry.target, input }),
+    });
+    if (!response.ok || !response.body) {
+      yield { type: "error", message: "Tool execution failed" };
+      return;
+    }
+    const decoder = new TextDecoder();
+    const reader = response.body.getReader();
+    let pending = "";
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      const bytes: unknown = chunk.value;
+      if (!(bytes instanceof Uint8Array)) throw new UnavailableError("Invalid remote stream");
+      pending += decoder.decode(bytes, { stream: true });
+      if (pending.length > 64 * 1024)
+        throw new UnavailableError("Remote progress frame is too large");
+      let boundary: number;
+      while ((boundary = pending.indexOf("\n\n")) >= 0) {
+        const frame = pending.slice(0, boundary);
+        pending = pending.slice(boundary + 2);
+        const event = /^event: (.+)$/m.exec(frame)?.[1];
+        const data = /^data: (.+)$/m.exec(frame)?.[1];
+        if (!event || !data) continue;
+        const value: unknown = JSON.parse(data);
+        if (event === "progress") {
+          const update = value as { percent?: number; message?: unknown };
+          if (typeof update.message === "string")
+            yield {
+              type: "progress",
+              update: {
+                message: update.message,
+                ...(typeof update.percent === "number" ? { percent: update.percent } : {}),
+              },
+            };
+        } else if (event === "result") yield { type: "result", value };
+        else if (event === "error") yield { type: "error", message: "Tool execution failed" };
+      }
+    }
+  };
+  const mcp = new McpHttpHandler<Principal>({ catalog: catalogFor, execute: remoteEvents });
+  const mcpRoute = async (request: FastifyRequest, reply: FastifyReply) => {
+    const principal = await options.auth.authenticate(
+      bearer(
+        typeof request.headers["authorization"] === "string"
+          ? request.headers["authorization"]
+          : undefined,
+      ),
+    );
+    const scoped = (request.params as { appId?: string }).appId;
+    reply.hijack();
+    await mcp.handle({
+      request: request.raw,
+      response: reply.raw,
+      ...(request.body === undefined ? {} : { body: request.body }),
+      ...(scoped === undefined ? {} : { scopedAppId: scoped }),
+      identity: `${principal.orgId}:${principal.actorId}`,
+      context: principal,
+    });
+  };
+  for (const url of ["/mcp", "/mcp/:appId"])
+    app.route({ method: ["GET", "POST", "DELETE"], url, handler: mcpRoute });
+  app.addHook("onClose", async () => mcp.close());
+  app.post("/api/execute/stream/:appId/:target", async (request, reply) => {
+    const principal = await options.auth.authenticate(
+      bearer(
+        typeof request.headers["authorization"] === "string"
+          ? request.headers["authorization"]
+          : undefined,
+      ),
+    );
+    const { appId, target } = request.params as { appId: string; target: string };
+    const registered = options.registry.get(appId);
+    if (!registered || registered.status !== "healthy")
+      throw new UnavailableError("App is unavailable");
+    if (!(target in registered.manifest.actions))
+      throw new NotFoundError("Target is not advertised");
+    if (!scopeAllows(principal, appId, target)) throw new ForbiddenError();
+    const requestId = String(reply.getHeader("x-request-id"));
+    const controller = new AbortController();
+    request.raw.once("aborted", () => controller.abort());
+    const response = await fetcher(new URL("/execute/stream", new URL(registered.endpoint)), {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "content-type": "application/json",
+        "x-request-id": requestId,
+        "x-gateway-auth": `Bearer ${await issueGatewayToken(principal, appId, requestId, options.token)}`,
+      },
+      body: JSON.stringify({ target, input: request.body }),
+    });
+    if (!response.ok || !response.body) {
+      reply.status(response.status);
+      return await response.json();
+    }
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-request-id": requestId,
+    });
+    try {
+      for await (const chunk of response.body) {
+        if (!reply.raw.write(chunk))
+          await new Promise<void>((resolve) => {
+            reply.raw.once("drain", resolve);
+            reply.raw.once("close", resolve);
+          });
+      }
+    } finally {
+      controller.abort();
+      reply.raw.end();
+    }
+  });
   app.post("/api/execute/:appId/:target", async (request, reply) => {
     const started = Date.now();
     const requestId = String(reply.getHeader("x-request-id"));

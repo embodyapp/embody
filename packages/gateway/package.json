@@ -20,6 +20,7 @@
   "dependencies": {
     "@embody/core": "workspace:*",
     "@embody/host": "workspace:*",
+    "@embody/mcp": "workspace:*",
     "fastify": "^5.12.1",
     "jose": "^6.1.3"
   },

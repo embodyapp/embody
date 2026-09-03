@@ -6,6 +6,9 @@
   "files": [
     "dist"
   ],
+  "bin": {
+    "embody": "./dist/bin.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,8 +16,9 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && chmod +x dist/bin.js",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "test": "pnpm build && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "engines": {
@@ -22,5 +26,9 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "vitest": "^4.0.18"
   }
 }
