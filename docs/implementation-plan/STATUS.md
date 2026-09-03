@@ -40,9 +40,9 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P8-01 | MCP tool catalog and transports | DONE | pi | P7-03 | Official SDK Streamable HTTP sessions, global/scoped catalogs, identity pinning, mapping/collision checks, calls, cancellation, and safe errors |
 | P8-02 | Hierarchical CLI and discovery | DONE | pi | P7-03 | Spawned binary test covers live discovery, schema coercion, execution, progress separation, and JSON output; profiles, protected config, ETag cache, help, CRUD/action hierarchy, and stable exits implemented |
 | P8-03 | End-to-end progress forwarding | DONE | pi | P6-04,P8-01,P8-02 | Bounded remote SSE parsing/proxying, awaited MCP progress notifications, CLI stderr progress, terminal-result isolation, and cancellation propagation |
-| P9-01 | Testing harness | NOT_STARTED | — | P5-01,P6-02 | |
-| P9-02 | `embody dev` and inspector | NOT_STARTED | — | P8-01,P9-01 | |
-| P9-03 | App scaffolder | NOT_STARTED | — | P9-01,P9-02 | |
+| P9-01 | Testing harness | DONE | pi | P5-01,P6-02 | Isolated SQLite real-kernel harness with principal views, explicit service overrides, deterministic outbox tick, progress/audit/outbox inspection, cleanup, and benchmark methodology; 100-sample warm median 5.72 ms/p95 7.32 ms (Node 24 x86_64); `pnpm verify` passed. |
+| P9-02 | `embody dev` and inspector | DONE | pi | P8-01,P9-01 | Loopback SQLite dev host, config reload/recovery, and development-only JSON manifest/execute/redacted-outbox endpoints; no framework UI by approved scope change. `pnpm verify` passed. |
+| P9-03 | App scaffolder | DONE | pi | P9-01,P9-02 | Safe `create-embody-app` binary/API generates public-import starter layout, tests, Docker healthcheck, env/git files, and deterministic `--no-install`; traversal/nonempty-directory tests pass. |
 | P10-01 | Kanban reference app | NOT_STARTED | — | P9-03 | |
 | P10-02 | Email reference app | NOT_STARTED | — | P10-01 | |
 | P10-03 | Distributed reference E2E suite | NOT_STARTED | — | P10-02,P7-03,P8-03 | |
@@ -83,3 +83,6 @@ Append concise entries; do not rewrite history.
 - 2026-09-03 `pi`: completed P6-01 through P6-04: transactional event validation/metadata, durable destination snapshots, independent direct-delivery worker with configurable attempts (default one), authenticated/idempotent receiver, and bounded SSE streaming. Workspace checks and real PostgreSQL 16 concurrency tests passed.
 - 2026-09-03 `pi`: completed P7-01 through P7-04: copy-on-write gateway registry and liveness catalog, API key/OIDC authentication chain, scoped audited rate-limited dispatch, short-lived app-audience JWT exchange, and opt-in registry-backed durable event transport.
 - 2026-09-03 `pi`: completed P8-01 through P8-03: official SDK stateful Streamable HTTP MCP with dynamic authorized global/scoped catalogs, hierarchical spawned CLI with profiles/config/ETag discovery and schema coercion, and ordered cancellable progress forwarding to MCP notifications and CLI stderr. `pnpm verify` passed with 78 tests plus 6 separately enabled PostgreSQL tests.
+- 2026-09-03 `pi`: completed P9-01 `@embody/testing`: isolated real SQLite/kernel harness with scoped principals, explicit service overrides, deterministic outbox ticks, captured progress/audit inspection, cleanup, and benchmark methodology (100-sample median 5.72 ms/p95 7.32 ms). `pnpm verify` passed.
+- 2026-09-03 `pi`: completed P9-02 `embody dev` with loopback SQLite host, reload/recovery, and development-only JSON inspector endpoints. The spec was revised to deliberately omit a framework web UI; `pnpm verify` passed.
+- 2026-09-03 `pi`: completed P9-03 `create-embody-app`: safe deterministic scaffold API/binary with starter config/plugin/harness test, Docker healthcheck, and no-install mode. `pnpm verify` passed.

@@ -4,6 +4,14 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { stdin as input, stdout, stderr } from "node:process";
 
+export {
+  loadDevConfig,
+  startDevServer,
+  watchDevServer,
+  type DevServer,
+  type EmbodyDevConfig,
+} from "./dev.js";
+
 export const EXIT = {
   usage: 2,
   auth: 3,

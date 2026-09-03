@@ -14,7 +14,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "benchmark": "pnpm build && node benchmark.mjs",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "engines": {
@@ -22,5 +24,13 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "@embody/core": "workspace:*",
+    "@embody/host": "workspace:*",
+    "@embody/storage": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1"
   }
 }

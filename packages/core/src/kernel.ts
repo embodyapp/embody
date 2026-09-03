@@ -316,11 +316,23 @@ export class Kernel {
         }
       await this.options.storage.ensureSchema();
       this.phase("services");
-      for (const plugin of this.sorted)
-        for (const [name, value] of Object.entries(
-          plugin.services?.(bootContext(this.registry, plugin, principal)) ?? {},
-        ))
-          this.registry.register(plugin.id, name, value);
+      const serviceOverrides = (
+        this.options as KernelOptions & {
+          readonly serviceOverrides?: Readonly<Record<string, unknown>>;
+        }
+      ).serviceOverrides;
+      const availableServiceKeys = new Set<string>();
+      for (const plugin of this.sorted) {
+        const services = plugin.services?.(bootContext(this.registry, plugin, principal)) ?? {};
+        for (const [name, value] of Object.entries(services)) {
+          const key = formatTarget([plugin.id, name]);
+          availableServiceKeys.add(key);
+          this.registry.register(plugin.id, name, serviceOverrides?.[key] ?? value);
+        }
+      }
+      for (const key of Object.keys(serviceOverrides ?? {}))
+        if (!availableServiceKeys.has(key))
+          throw new DependencyError(`Cannot override unavailable service ${key}`);
       this.phase("init");
       for (const plugin of this.sorted)
         await plugin.init?.(bootContext(this.registry, plugin, principal));

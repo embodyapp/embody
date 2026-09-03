@@ -20,11 +20,11 @@ Implement `createTestHarness`:
 
 - Load `embody.config.ts` through a documented dev loader, boot local verifier and SQLite, show host/MCP/inspector URLs and registered tools.
 - Hot reload using process restart or fresh worker isolation; drain old host before rebinding. Failed reload keeps clear error state and can recover after file correction.
-- Inspector at `/__inspector` only in development, loopback by default, with strict CSP/no arbitrary code execution.
-- Features: manifest/schema-driven action form, invocation/result/progress view, outbox status stream, and hook trace/latency view.
-- Inspector API uses the same execution path and escapes all plugin descriptions/payloads to prevent stored/reflected XSS. Redact sensitive payload fields.
+- Development inspection endpoints at `/__inspector` only in development, loopback by default. They return machine-readable JSON and never evaluate app-provided content.
+- Endpoints expose manifest/schema data, execution results, and redacted outbox status. Hook traces are available only when an execution integration supplies them; no browser UI is part of the framework.
+- Inspector execution uses the same execution path. Redact sensitive payload fields.
 
-Prefer a minimal static frontend with generated assets; avoid coupling core to UI framework.
+The framework deliberately provides no web frontend: applications or external developer tools may consume these stable development-only endpoints.
 
 ## P9-03: `create-embody-app`
 
@@ -49,9 +49,9 @@ Prefer a minimal static frontend with generated assets; avoid coupling core to U
 
 - Spawn built CLI in a fixture: startup output URLs respond and registered tool list matches manifest.
 - Editing valid plugin triggers one reload and new tool appears; syntax error shows failure; fixing it recovers without orphan port/process.
-- Inspector action run exercises auth/validation/hooks/outbox and renders progress/result.
-- Malicious HTML/script in description, input, result, hook error, and event payload remains inert under browser test; CSP disallows inline/external unauthorized scripts.
-- Inspector/outbox endpoints are absent in production and inaccessible from non-loopback under defaults.
+- Inspector execution exercises auth/validation/hooks/outbox and returns the result as JSON.
+- Descriptions, inputs, results, hook errors, and event payloads are returned as JSON without HTML interpolation or code evaluation; outbox payloads are redacted.
+- Inspector/outbox endpoints are development-only and inaccessible from non-loopback under defaults.
 
 ### Scaffolder tests
 

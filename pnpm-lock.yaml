@@ -47,6 +47,19 @@ importers:
         version: 22.20.1
 
   packages/cli:
+    dependencies:
+      '@embody/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@embody/core':
+        specifier: workspace:*
+        version: link:../core
+      '@embody/host':
+        specifier: workspace:*
+        version: link:../host
+      '@embody/storage':
+        specifier: workspace:*
+        version: link:../storage
     devDependencies:
       '@types/node':
         specifier: ^22.20.1
@@ -65,7 +78,14 @@ importers:
         specifier: ^22.19.11
         version: 22.20.1
 
-  packages/create-embody-app: {}
+  packages/create-embody-app:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      vitest:
+        specifier: ^4.0.18
+        version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
 
   packages/gateway:
     dependencies:
@@ -149,7 +169,21 @@ importers:
         specifier: ^12.1.0
         version: 12.1.0(supports-color@8.1.1)
 
-  packages/testing: {}
+  packages/testing:
+    dependencies:
+      '@embody/core':
+        specifier: workspace:*
+        version: link:../core
+      '@embody/host':
+        specifier: workspace:*
+        version: link:../host
+      '@embody/storage':
+        specifier: workspace:*
+        version: link:../storage
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
 
   test/fixtures/core-consumer:
     dependencies:

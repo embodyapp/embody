@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { afterEach, expect, it } from "vitest";
+import { definePlugin, z } from "@embody/core";
+import { startDevServer } from "../src/dev.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => Promise.all(cleanups.splice(0).map((cleanup) => cleanup())));
@@ -82,4 +84,38 @@ it("spawns the binary, coerces schema flags, separates progress and JSON result"
   expect(stderr).toContain("Halfway");
   expect(stderr).not.toContain("secret");
   expect(dispatched).toEqual({ count: 2, dryRun: true });
+});
+
+it("serves development-only inspector JSON through the production execution pipeline", async () => {
+  const source = {
+    id: "dev",
+    version: "1.0.0",
+    actions: {
+      echo: {
+        input: z.object({ message: z.string() }),
+        handler: (input: { message: string }) => input,
+      },
+    },
+  };
+  const directory = await mkdtemp(join(tmpdir(), "embody-dev-"));
+  const server = await startDevServer({
+    appId: "dev",
+    plugins: [definePlugin(source)],
+    port: 0,
+    sqlitePath: join(directory, "dev.sqlite"),
+  });
+  try {
+    expect((await server.host.app.inject("/__inspector")).json()).toEqual({
+      endpoints: ["/__inspector/manifest", "/__inspector/execute", "/__inspector/outbox"],
+    });
+    const result = await server.host.app.inject({
+      method: "POST",
+      url: "/__inspector/execute",
+      payload: { target: "dev.echo", input: { message: "ok" } },
+    });
+    expect(result.json()).toEqual({ message: "ok" });
+  } finally {
+    await server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

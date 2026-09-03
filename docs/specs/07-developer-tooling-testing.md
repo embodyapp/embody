@@ -31,8 +31,7 @@ Running `embody dev` boots the local microkernel host with hot-reloading and mou
 $ embody dev
 
   🚀 Embody Host running on http://localhost:8080
-  🔍 MCP Endpoint: http://localhost:8080/mcp
-  🛠  Dev Inspector: http://localhost:8080/__inspector
+  🛠  Dev Inspector API: http://localhost:8080/__inspector
 
   Registered Tools:
     ✔ kanban.card.create
@@ -42,10 +41,13 @@ $ embody dev
     ✔ kanban.card.delete
 ```
 
-### 2.1 Web Dev Inspector Features
-* **Interactive Tool Runner**: Execute actions with dynamic JSON schema form inputs.
-* **Live Outbox Visualizer**: Watch domain events transition from `pending` to `completed` in real-time.
-* **Hook Inspector**: Inspect which vetoable guardrail hooks triggered and measure execution latency.
+### 2.1 Development Inspector API
+
+The framework provides no web frontend. Its development-only, loopback-bound `/__inspector` endpoints expose JSON for external tools:
+
+* **Manifest and execution**: Read schemas and invoke actions through the normal execution path.
+* **Outbox status**: Read redacted event metadata and status transitions.
+* **Hook diagnostics**: Integrations may expose hook traces/latency where available; the base API does not require a UI.
 
 ---
 
