@@ -7,3 +7,5 @@ temp/
 .env.*
 !.env.example
 .DS_Store
+firebase.json
+.firebaserc
