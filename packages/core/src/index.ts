@@ -12,6 +12,7 @@ export {
   type ExecutionAuditEvent,
   type ExecutionOptions,
   type EmbodyPlugin,
+  type EntityBulkUpdate,
   type EntityDefinition,
   type EntityListOptions,
   type EntityRecord,

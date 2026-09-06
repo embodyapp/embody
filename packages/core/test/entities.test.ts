@@ -19,12 +19,13 @@ type Card = z.output<typeof card>;
 function transaction(): EntityTransaction & { readonly calls: unknown[][] } {
   const records = new Map<string, EntityRecord<Card>>();
   const calls: unknown[][] = [];
+  let sequence = 0;
   return {
     calls,
     entities: {
       create: async (orgId: string, entityType: string, { data }: { data: unknown }) => {
         const record = {
-          id: "00000000-0000-4000-8000-000000000001",
+          id: `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
           orgId,
           entityType,
           data: data as Card,
@@ -119,6 +120,30 @@ describe("contextual entity stores", () => {
     expect(updated.data).toMatchObject({ title: "B", status: "todo" });
     await expect(store.update(created.id, { title: "" })).rejects.toBeInstanceOf(ValidationError);
     await expect(store.update(created.id, {})).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("bulk reads preserve order and bulk updates reject unsafe inputs", async () => {
+    const tx = transaction();
+    const store = compileEntity<Card>("kanban", "card", { schema: card }).createStore("org-a", tx);
+    // Use the repository fixture's stable first ID and an explicitly inserted second record.
+    const first = await store.create({ title: "A" } as Card);
+    const second = await store.create({ title: "B" } as Card);
+
+    expect((await store.getMany([second.id, first.id])).map(({ id }) => id)).toEqual([
+      second.id,
+      first.id,
+    ]);
+    expect(await store.getMany([])).toEqual([]);
+    await expect(
+      store.getMany([first.id, "00000000-0000-4000-8000-999999999999"]),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(store.updateMany([])).rejects.toBeInstanceOf(ValidationError);
+    await expect(
+      store.updateMany([
+        { id: first.id, data: { status: "done" } },
+        { id: first.id, data: { title: "duplicate" } },
+      ]),
+    ).rejects.toBeInstanceOf(ValidationError);
   });
 
   it("rejects invalid declarations during compilation", () => {

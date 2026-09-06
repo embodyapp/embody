@@ -191,6 +191,9 @@ class Store<TData extends Record<string, unknown>> implements EntityStoreAccesso
     if (record === null) throw new NotFoundError("Entity was not found");
     return record;
   }
+  public async getMany(ids: readonly string[]): Promise<readonly EntityRecord<TData>[]> {
+    return Promise.all(ids.map((id) => this.get(id)));
+  }
   public async list(
     options: EntityListOptions<TData> = {},
   ): Promise<readonly EntityRecord<TData>[]> {
@@ -205,15 +208,41 @@ class Store<TData extends Record<string, unknown>> implements EntityStoreAccesso
     );
   }
   public async update(id: string, patch: Partial<TData>): Promise<EntityRecord<TData>> {
+    const current = await this.get(id);
+    const data = this.validateUpdate(current, patch);
+    return this.applyUpdate(current, patch, data);
+  }
+  public async updateMany(
+    updates: readonly { readonly id: string; readonly data: Partial<TData> }[],
+  ): Promise<readonly EntityRecord<TData>[]> {
+    if (updates.length === 0)
+      throw new ValidationError("Bulk entity update must contain at least one item");
+    if (new Set(updates.map(({ id }) => id)).size !== updates.length)
+      throw new ValidationError("Bulk entity update IDs must be unique");
+
+    // Resolve ownership/existence and validate every merged record before the first mutation.
+    const current = await this.getMany(updates.map(({ id }) => id));
+    const data = updates.map((update, index) => this.validateUpdate(current[index]!, update.data));
+    const result: EntityRecord<TData>[] = [];
+    for (let index = 0; index < updates.length; index++)
+      result.push(await this.applyUpdate(current[index]!, updates[index]!.data, data[index]!));
+    return result;
+  }
+  private validateUpdate(current: EntityRecord<TData>, patch: Partial<TData>): TData {
     if (Object.keys(patch).length === 0)
       throw new ValidationError("Entity patch must not be empty");
-    const current = await this.get(id);
-    const data = parse(this.entity.definition.schema, { ...current.data, ...patch }) as TData;
+    return parse(this.entity.definition.schema, { ...current.data, ...patch }) as TData;
+  }
+  private async applyUpdate(
+    current: EntityRecord<TData>,
+    patch: Partial<TData>,
+    data: TData,
+  ): Promise<EntityRecord<TData>> {
     await this.transaction.lifecycle?.beforeUpdate?.({ current, patch });
     const updated = await this.transaction.entities.update<TData>(
       this.orgId,
       this.entity.entityType,
-      id,
+      current.id,
       { data, expectedUpdatedAt: current.updatedAt },
     );
     if (updated === null) throw new NotFoundError("Entity was not found");

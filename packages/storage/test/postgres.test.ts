@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { compileEntity, Kernel, z } from "@embody/core";
+import { compileEntity, HookVetoError, Kernel, z } from "@embody/core";
 
 import { PostgresStorage } from "../src/index.js";
 
@@ -37,6 +37,56 @@ describePostgres("PostgreSQL storage conformance", () => {
         { data: { title: "A" } },
         { data: { title: "B" } },
       ]);
+    });
+  });
+
+  it("rolls back bulk updates, lifecycle hooks, and events as one transaction", async () => {
+    const db = storage!;
+    const orgId = `bulk-${randomUUID()}`;
+    const entity = compileEntity<{ title: string; status: "todo" | "done" }>("kanban", "card", {
+      schema: z.object({ title: z.string().min(1), status: z.enum(["todo", "done"]) }),
+    });
+    const [first, second] = await db.transaction(orgId, async (tx) => {
+      const store = entity.createStore(orgId, tx);
+      return Promise.all([
+        store.create({ title: "First", status: "todo" }),
+        store.create({ title: "Second", status: "todo" }),
+      ]);
+    });
+
+    await db.transaction(orgId, async (tx) => {
+      const store = entity.createStore(orgId, tx);
+      expect(await store.getMany([first.id, second.id])).toHaveLength(2);
+    });
+
+    await expect(
+      db.transaction(orgId, async (tx) => {
+        const store = entity.createStore(orgId, {
+          ...tx,
+          lifecycle: {
+            beforeUpdate: (payload) => {
+              const current = (payload as { current: { id: string } }).current;
+              if (current.id === second.id) throw new HookVetoError("second card is guarded");
+              return Promise.resolve();
+            },
+            publish: (eventName, payload) =>
+              tx.outbox.enqueue(orgId, { eventName, payload }).then(() => undefined),
+          },
+        });
+        await store.updateMany([
+          { id: first.id, data: { status: "done" } },
+          { id: second.id, data: { status: "done" } },
+        ]);
+      }),
+    ).rejects.toBeInstanceOf(HookVetoError);
+
+    await db.transaction(orgId, async (tx) => {
+      const store = entity.createStore(orgId, tx);
+      expect((await store.getMany([second.id, first.id])).map(({ data }) => data.status)).toEqual([
+        "todo",
+        "todo",
+      ]);
+      expect(await tx.outbox.list()).toEqual([]);
     });
   });
 

@@ -27,11 +27,20 @@ export interface EntityListOptions<TData> {
   readonly offset?: number;
 }
 
+export interface EntityBulkUpdate<TData> {
+  readonly id: string;
+  readonly data: Partial<TData>;
+}
+
 export interface EntityStoreAccessor<TData = Record<string, unknown>> {
   create(data: TData): Promise<EntityRecord<TData>>;
   get(id: string): Promise<EntityRecord<TData>>;
+  /** Returns records in input order. Empty input is allowed; any missing record rejects the call. */
+  getMany(ids: readonly string[]): Promise<readonly EntityRecord<TData>[]>;
   list(options?: EntityListOptions<TData>): Promise<readonly EntityRecord<TData>[]>;
   update(id: string, data: Partial<TData>): Promise<EntityRecord<TData>>;
+  /** Updates at least one unique ID atomically in input order using normal hooks and events. */
+  updateMany(updates: readonly EntityBulkUpdate<TData>[]): Promise<readonly EntityRecord<TData>[]>;
   delete(id: string): Promise<EntityRecord<TData>>;
 }
 

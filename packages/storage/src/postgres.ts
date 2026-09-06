@@ -30,13 +30,17 @@ const timestamp = (value?: string) => normalizeTimestamp(value ?? new Date());
 
 function entity<T>(value: unknown): EntityRecord<T> {
   const row = asRow(value);
+  const date = (field: string): string => {
+    const value = row[field];
+    return normalizeTimestamp(value instanceof Date ? value : String(value));
+  };
   return {
     id: String(row["id"]),
     orgId: String(row["org_id"]),
     entityType: String(row["entity_type"]),
     data: row["data"] as T,
-    createdAt: normalizeTimestamp(String(row["created_at"])),
-    updatedAt: normalizeTimestamp(String(row["updated_at"])),
+    createdAt: date("created_at"),
+    updatedAt: date("updated_at"),
   };
 }
 function outbox(value: unknown): OutboxEvent {
