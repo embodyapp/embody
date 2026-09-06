@@ -16,35 +16,64 @@ export const CODE_SAMPLES: CodeSample[] = [
     filename: 'crm.decl.ts',
     language: 'typescript',
     description: 'Define deals, pipeline stages, discount policies, and stage guards once in pure typed data.',
-    code: `import { entity, field, state, action, policy } from '@embdy/kernel';
+    code: `import { definePlugin, HookVetoError, z } from "@embody/core";
+import { defineApp } from "@embody/host";
 
-export const Deal = entity('Deal', {
-  summary: 'B2B Enterprise Deal & Pipeline Opportunity',
-  fields: {
-    dealNumber: field.string({ unique: true }), // e.g. "DEAL-8402"
-    title: field.string({ min: 3, max: 120 }),
-    value: field.number({ min: 0 }).default(25000), // USD
-    account: field.ref('Account'),
-    owner: field.ref('User').optional(),
-    discountPct: field.number({ min: 0, max: 100 }).default(0)
-  },
-  states: state.machine({
-    initial: 'lead',
-    states: ['lead', 'qualified', 'proposal', 'won', 'lost']
-  }),
-  actions: {
-    assign: action({
-      params: { rep: field.ref('User') },
-      guard: policy.expr('actor.role in ["admin", "sales_lead", "rep"]'),
-      effect: (draft, { rep }) => { draft.owner = rep; }
-    }),
-    advance: action({
-      from: ['lead', 'qualified', 'proposal'],
-      to: ['qualified', 'proposal', 'won'],
-      guard: policy.expr('draft.discountPct <= 20 || actor.role == "vp_sales"'),
-      roles: ['rep', 'sales_lead', 'ai_agent']
-    })
-  }
+// 1. Declare dynamic entity schema with Zod
+export const TaskSchema = z.object({
+  title: z.string().min(1),
+  status: z.enum(["todo", "in_progress", "done"]).default("todo"),
+  priority: z.enum(["low", "medium", "high"]).default("medium"),
+  prUrl: z.string().url().optional(),
+});
+
+export default defineApp({
+  appId: "ops",
+  version: "1.0.0",
+  plugins: [
+    definePlugin(
+      {
+        id: "tasks",
+        version: "1.0.0",
+        entities: {
+          task: {
+            description: "Work items and tickets executed by autonomous agents",
+            schema: TaskSchema,
+            indexes: ["status", "priority"],
+          },
+        },
+      },
+      (define) => ({
+        // 2. Declare typed business actions
+        actions: {
+          bulkComplete: define.action({
+            description: "Atomically mark multiple tasks as completed",
+            input: z.object({ taskIds: z.array(z.string().uuid()) }),
+            handler: async ({ taskIds }, context) => {
+              const updated = await context.entities.task.updateMany(
+                taskIds.map((id) => ({ id, data: { status: "done" } }))
+              );
+              return { completedCount: updated.length };
+            },
+          }),
+        },
+
+        // 3. Mechanical Safety Guardrail: Prevent AI agents from closing tasks without a PR
+        hooks: [
+          define.beforeUpdate("task", ({ current, patch }, context) => {
+            if (
+              context.principal.actorType === "agent" &&
+              patch.status === "done" &&
+              !current.data.prUrl &&
+              !patch.prUrl
+            ) {
+              throw new HookVetoError("Agents cannot mark a task 'done' without a verified PR URL");
+            }
+          }),
+        ],
+      })
+    ),
+  ],
 });`
   },
   {
