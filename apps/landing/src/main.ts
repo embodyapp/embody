@@ -253,33 +253,31 @@ function setupAgentSandbox() {
     const amount = Number(amountSlider.value);
     const isDryRun = dryRunCheck?.checked ?? false;
 
-    outputEl.innerHTML = `<span class="token-comment">// Dispatching MCP tool call: crm_advance_stage (actor: agent:deal-desk:rex-09)...</span>\n`;
+    outputEl.innerHTML = `<span class="token-comment">// Rex dispatched MCP tool call: crm_advance_stage...</span>\n`;
 
     setTimeout(() => {
       if (amount > 500) {
         outputEl.innerHTML += `
 <span style="color: #D66248; font-weight: 700;">⛔ [EMBDY-REFUSAL E4102] ACTOR_BUDGET_EXCEEDED</span>
-  Actor:      agent:deal-desk:rex-09 (role: ai_agent)
-  Requested:  Operation spend ($${amount}.00 USD)
-  Budget Max: $500.00 USD / transaction limit
-  Action:     Refused before execution. Mechanical policy protected state.
-  Audit Hash: sha256:e1a90c4b...`;
+  Actor:      agent:deal-desk:rex-09
+  Requested:  Operation discount override ($${amount}.00 USD)
+  Budget Max: $500.00 USD / transaction
+  Action:     Refused before side effects. Audit ledger hash chained.`;
       } else if (isDryRun) {
         outputEl.innerHTML += `
 <span style="color: #4E9B8F; font-weight: 700;">🧪 [DRY RUN VALIDATION PASSED]</span>
-  Actor:      agent:deal-desk:rex-09 (role: ai_agent)
+  Actor:      agent:deal-desk:rex-09
   Target:     DEAL-8402 (Advance: qualified → proposal)
-  Simulation: Spend $${amount}.00 <= $500.00 cap. Discount within 20% limit.
-  State:      Preconditions valid. Zero database mutations committed.`;
+  Simulation: Discount policy verified (15% <= 20% max). Tenant isolated.
+  State:      Preconditions valid with zero state mutations.`;
       } else {
         outputEl.innerHTML += `
 <span style="color: #FDB849; font-weight: 700;">✅ [TRANSACTION COMMITTED]</span>
   Deal:       DEAL-8402 ("Acme Corp Global Cloud Migration")
   Transition: qualified → proposal ($120,000 ARR)
-  Actor:      agent:deal-desk:rex-09 (role: ai_agent)
-  Spend Used: $${amount}.00 (Hard limit: $500.00)
+  Actor:      agent:deal-desk:rex-09
   Audit Hash: sha256:8f92a1c0d4e3...
-  Policy:     Passed mechanical discount rule & FSM constraints.`;
+  Policy:     Discount rule passed (15% within auto-approval limits).`;
       }
     }, 150);
   });
@@ -362,36 +360,6 @@ function initHeroCanvasAnimations() {
     repeat: -1,
     ease: 'none',
     transformOrigin: '0px 0px',
-  }, 0);
-
-  // Robot Agent Co-Pilot responsive bobbing & telemetry pulse
-  driveTimeline.to('#robot-agent-companion', {
-    y: -2,
-    rotation: -0.6,
-    transformOrigin: '73px 20px',
-    duration: 0.18,
-    yoyo: true,
-    repeat: -1,
-    ease: 'sine.inOut',
-  }, 0.04);
-
-  driveTimeline.to('#robot-antenna-tip', {
-    scale: 1.35,
-    fill: '#FDB849',
-    duration: 0.6,
-    yoyo: true,
-    repeat: -1,
-    ease: 'power1.inOut',
-    transformOrigin: 'center center',
-  }, 0);
-
-  driveTimeline.to('#sensor-pulse-wave', {
-    scale: 1.4,
-    opacity: 0.2,
-    duration: 0.8,
-    repeat: -1,
-    ease: 'power2.out',
-    transformOrigin: '0px -15px',
   }, 0);
 
   // Car Exhaust Smoke Puffs
@@ -480,8 +448,6 @@ function initHeroCanvasAnimations() {
     // Headlight beam turns ON as darkness arrives
     .to('#headlight-beam', { opacity: 0.85, duration: 2.5, ease: 'power2.inOut' }, 8)
     .to('#car-headlight-bulb', { fill: '#FFFBEA', duration: 1.5 }, 8)
-    .to('#robot-visor', { fill: '#38BDF8', duration: 1.5 }, 8)
-    .to('#robot-tablet rect', { fill: '#E0F2FE', duration: 1.5 }, 8)
 
     // Deep Midnight Cruising Peak (12s - 15s)
     .to({}, { duration: 3 })
@@ -493,11 +459,9 @@ function initHeroCanvasAnimations() {
     // Stars fade out
     .to('#sky-stars', { opacity: 0, duration: 3, ease: 'power1.inOut' }, 15)
 
-    // Headlight beam fades OFF & Robot returns to daytime mode
+    // Headlight beam fades OFF
     .to('#headlight-beam', { opacity: 0, duration: 3, ease: 'power2.inOut' }, 15.5)
     .to('#car-headlight-bulb', { fill: '#FFFDF9', duration: 2 }, 15.5)
-    .to('#robot-visor', { fill: '#4E9B8F', duration: 2 }, 15.5)
-    .to('#robot-tablet rect', { fill: '#A3D9C9', duration: 2 }, 15.5)
 
     // Villa windows turn off
     .to('.villa-window', { fill: '#2C2230', duration: 1.5 }, 16)
