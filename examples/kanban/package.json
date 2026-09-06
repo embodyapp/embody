@@ -1,0 +1,27 @@
+{
+  "name": "@embody/example-kanban",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    "./plugin": "./src/plugin.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "dev": "embody dev",
+    "prestart": "pnpm build",
+    "start": "node dist/src/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@embody/cli": "workspace:*",
+    "@embody/core": "workspace:*",
+    "@embody/host": "workspace:*"
+  },
+  "devDependencies": {
+    "@embody/testing": "workspace:*",
+    "@types/node": "^22.20.1"
+  }
+}

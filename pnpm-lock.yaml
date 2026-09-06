@@ -33,6 +33,47 @@ importers:
         specifier: ^4.0.18
         version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
 
+  examples/email:
+    dependencies:
+      '@embody/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@embody/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@embody/host':
+        specifier: workspace:*
+        version: link:../../packages/host
+    devDependencies:
+      '@embody/example-kanban':
+        specifier: workspace:*
+        version: link:../kanban
+      '@embody/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+
+  examples/kanban:
+    dependencies:
+      '@embody/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@embody/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@embody/host':
+        specifier: workspace:*
+        version: link:../../packages/host
+    devDependencies:
+      '@embody/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+
   packages/auth:
     dependencies:
       '@embody/core':
