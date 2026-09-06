@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-09-03 by `pi`
+Last updated: 2026-09-06 by `pi`
 
 This file is intentionally simple so small agents can coordinate without a project-management service. Update one row when claiming and completing work. Preserve item IDs because plans and commits may reference them.
 
@@ -12,6 +12,7 @@ This file is intentionally simple so small agents can coordinate without a proje
 | D-02 | Resolve durable workflow semantics/scope | DONE | pi | ADR 0003: included in MVP as Phase 11; durable DAG, version-pinned instances, at-least-once steps, retries, cancellation/compensation, per-step auth |
 | D-03 | Approve cross-app event delivery protocol | DONE | pi | ADR 0004: direct delivery baseline through a transport seam; durable gateway relay is optional P7-04 |
 | D-04 | Set supported Node/PostgreSQL/SQLite versions | DONE | pi | ADR 0002: Node 22/24, PostgreSQL 16+, SQLite 3.45+ JSON1 |
+| D-05 | Select first-party licensing model | DONE | pi | Source-available dual licensing inspired by n8n: Sustainable Use community terms plus paid commercial terms and separate trademark policy; not OSI open source |
 
 ## Work items
 
@@ -26,6 +27,7 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P3-02 | Kernel boot state machine and hook/action registries | DONE | pi | P2-01,P3-01 | Seven-phase single-flight kernel, lifecycle cleanup, registries, hook traces/vetoes, immutable manifest, and real SQLite/PostgreSQL adapter boot tests; `pnpm verify` passed |
 | P4-01 | Entity compiler and stores | DONE | pi | P2-02,P2-03,P3-02 | Compiled Zod object declarations at boot; tenant/transaction-bound typed stores validate data, nested containment filters, sort paths, pagination, and merged updates. SQLite/PostgreSQL integrations passed. |
 | P4-02 | Auto-CRUD lifecycle and manifests | DONE | pi | P4-01 | Generated create/get/list/update/delete actions execute in org-bound transactions, run lifecycle hooks, and atomically enqueue standard events. SQLite and PostgreSQL CRUD integrations passed; `pnpm verify` passed. |
+| P4-03 | Transactional bulk entity operations | DONE | pi | P4-02 | Typed ordered getMany/updateMany; complete prevalidation, duplicate/empty update rejection, lifecycle/event parity, SQLite rollback via Kanban and real PostgreSQL rollback coverage. |
 | P5-01 | Execution engine and authorization | DONE | pi | P4-02 | Transport-neutral execution options, scope authorization, request context, cancellation/progress/audit; `pnpm lint && pnpm api-report`, `pnpm test`, `pnpm typecheck`, and `pnpm build` passed. |
 | P5-02 | Remote HTTP host and verifier plugins | DONE | pi | P5-01 | Fastify execute/health host, capacity/body/timeout controls, gateway-JWT verifier and production local-dev rejection; host/auth injection and JWT-negative tests pass. |
 | P5-03 | Registration/heartbeat client | DONE | pi | P5-02 | Deterministic SHA-256 manifest generation, authenticated registration, 30-second heartbeat, 404 re-registration, bounded jittered retry, injectable timers, and stop cleanup covered by host tests. |
@@ -43,26 +45,32 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P9-01 | Testing harness | DONE | pi | P5-01,P6-02 | Isolated SQLite real-kernel harness with principal views, explicit service overrides, deterministic outbox tick, progress/audit/outbox inspection, cleanup, and benchmark methodology; 100-sample warm median 5.72 ms/p95 7.32 ms (Node 24 x86_64); `pnpm verify` passed. |
 | P9-02 | `embody dev` and inspector | DONE | pi | P8-01,P9-01 | Loopback SQLite dev host, config reload/recovery, and development-only JSON manifest/execute/redacted-outbox endpoints; no framework UI by approved scope change. `pnpm verify` passed. |
 | P9-03 | App scaffolder | DONE | pi | P9-01,P9-02 | Safe `create-embody-app` binary/API generates public-import starter layout, tests, Docker healthcheck, env/git files, and deterministic `--no-install`; traversal/nonempty-directory tests pass. |
-| P10-01 | Kanban reference app | NOT_STARTED | — | P9-03 | |
-| P10-02 | Email reference app | NOT_STARTED | — | P10-01 | |
+| P9-04 | Typed testing harness clients | DONE | pi | P9-01,P4-02 | Schema-inferred action/entity clients, dynamic escape hatch, cancellation, immutable agent/human views, and structured veto/progress/event queries; compile-time and runtime parity tests pass. |
+| P10-01 | Kanban reference app | DONE | pi | P9-03 | Public-package Kanban workspace app: card schema/index metadata, atomic bulkMove, agent PR guardrail, review event, conventional SQLite/PostgreSQL app host, dev seed, README, and domain/host contract tests. Typed plugin builder and conventional `defineApp`/`createAppHost` runtime included; workspace lint, typecheck, tests, build, API report, and format checks passed. |
+| P10-02 | Email reference app | DONE | pi | P10-01 | Cancellable validated sendBatch with exact progress and >500 guardrail; explicit Mailer abstraction, recording/idempotent adapter, Kanban event subscription, failure/dead-letter coverage, host config and docs. |
 | P10-03 | Distributed reference E2E suite | NOT_STARTED | — | P10-02,P7-03,P8-03 | |
 | P11-01 | Approve durable workflow contract | NOT_STARTED | — | D-02,P10-03 | Baseline semantics approved by ADR 0003; finalize executable contract in P11-01 |
 | P11-02 | Workflow persistence and engine | NOT_STARTED | — | P11-01 | |
 | P11-03 | Workflow surfaces and tooling | NOT_STARTED | — | P11-02 | |
 | P12-01 | Security, resilience, and performance hardening | NOT_STARTED | — | P10-03,P11-03 | |
 | P12-02 | Packaging, compatibility, and release docs | NOT_STARTED | — | P12-01 | |
+| P13-01 | Ownership and legal foundation | NOT_STARTED | — | P12-02,D-05 | Establish rightsholder and chain of title; approve CLA/relicensing rights; clear trademarks and regulatory issues |
+| P13-02 | Community and commercial terms | NOT_STARTED | — | P13-01 | Counsel-approved Sustainable Use/community license, commercial agreements, trademark policy, definitions, examples, and FAQ |
+| P13-03 | Repository, artifacts, and entitlements | NOT_STARTED | — | P13-02 | Apply metadata/notices without claiming generated apps; package exact terms; implement privacy-preserving commercial entitlements |
+| P13-04 | Third-party and distribution compliance | NOT_STARTED | — | P13-03 | Audit every shipped model/dependency/asset; archive SBOM/attributions; enforce compatibility policy in CI |
+| P13-05 | Commercial launch readiness | NOT_STARTED | — | P13-04 | Validate ICP/pricing/economics; prepare contracts, privacy, billing, support, sales, security, and end-to-end purchase operations |
 
 ## Current verification snapshot
 
 | Check | Command | Last result | Date/owner |
 |---|---|---|---|
-| Install | `pnpm install --frozen-lockfile` | Passed | 2026-09-01/pi |
-| Lint | `pnpm lint` | Passed | 2026-09-01/pi (P2) |
-| Type check | `pnpm typecheck` | Passed | 2026-09-01/pi (P2) |
-| Unit/integration | `pnpm test` | Passed: 78 tests; 6 PostgreSQL tests skipped unless separately enabled | 2026-09-03/pi (P8) |
-| PostgreSQL integration | `set -a && source .env && set +a && pnpm test:postgres` | Passed: 5 PostgreSQL 16 runtime-role/RLS tests, including two workers claiming 1,000 events and independent destination claims | 2026-09-03/pi (P6) |
+| Install | `pnpm install --frozen-lockfile --offline` | Passed | 2026-09-06/pi |
+| Lint | `pnpm lint` | Passed | 2026-09-06/pi (P4/P9/P10) |
+| Type check | `pnpm typecheck` | Passed | 2026-09-06/pi (P4/P9/P10) |
+| Unit/integration | `pnpm test` | Passed: 102 tests; 7 PostgreSQL tests skipped unless separately enabled | 2026-09-06/pi (P4/P9/P10) |
+| PostgreSQL integration | `set -a && source .env && set +a && pnpm --filter @embody/storage test:postgres` | Passed: 6 PostgreSQL 16 tests, including bulk lifecycle/event rollback and two-worker claims | 2026-09-06/pi (P4-03) |
 | End-to-end | `pnpm test:e2e` | Passed; no suites until later phases | 2026-09-01/pi |
-| Build | `pnpm build` | Passed for all packages | 2026-09-01/pi (P2) |
+| Build | `pnpm build` | Passed for all packages and examples | 2026-09-06/pi (P4/P9/P10) |
 
 ## Activity log
 
@@ -86,3 +94,8 @@ Append concise entries; do not rewrite history.
 - 2026-09-03 `pi`: completed P9-01 `@embody/testing`: isolated real SQLite/kernel harness with scoped principals, explicit service overrides, deterministic outbox ticks, captured progress/audit inspection, cleanup, and benchmark methodology (100-sample median 5.72 ms/p95 7.32 ms). `pnpm verify` passed.
 - 2026-09-03 `pi`: completed P9-02 `embody dev` with loopback SQLite host, reload/recovery, and development-only JSON inspector endpoints. The spec was revised to deliberately omit a framework web UI; `pnpm verify` passed.
 - 2026-09-03 `pi`: completed P9-03 `create-embody-app`: safe deterministic scaffold API/binary with starter config/plugin/harness test, Docker healthcheck, and no-install mode. `pnpm verify` passed.
+- 2026-09-03 `pi`: completed P10-01 Kanban reference app with public Embody package imports, atomic bulk move, agent completion guardrail, review event, validated host configuration, development seed helper, deployment README, and seven SQLite harness/manifest tests. Package tests/typecheck plus workspace lint and format checks passed.
+- 2026-09-03 `pi`: improved app DX: added typed two-stage plugin definitions, conventional `defineApp`/`createAppHost` runtime assembly, a working Kanban `embody dev` configuration, corrected CLI examples/start scripts, and updated scaffolder output. Added P4-03 bulk store operations and P9-04 typed harness clients as explicit follow-ups. Workspace lint, typecheck, tests, build, API report, and format checks passed.
+- 2026-09-06 `pi`: added Phase 13 as the final public-release gate and selected Apache-2.0 for all first-party repository material. Planned license/notice metadata, generated-app ownership boundaries, shipped-artifact SBOM/attribution auditing, and CI compliance gates.
+- 2026-09-06 `pi`: superseded the Apache-2.0 decision after monetization review. Phase 13 now specifies an n8n-inspired source-available dual-license model, commercial-use boundaries, chain-of-title/CLA and trademark work, artifact compliance, entitlements, pricing validation, contracting, billing, privacy, support, and commercial launch gates.
+- 2026-09-06 `pi`: completed P4-03, P9-04, and P10-02. Added transactional ordered bulk stores with SQLite/PostgreSQL rollback proof, typed harness clients and structured actor/observation helpers, and the Email reference app with cancellable guarded batches, progress, idempotent event mail, explicit adapter failure, and dead-letter tests. Fixed PostgreSQL timestamp precision preservation uncovered by optimistic bulk updates. `pnpm verify` and six real PostgreSQL tests passed.

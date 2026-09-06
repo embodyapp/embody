@@ -1,6 +1,6 @@
 # Phase 9 — Developer tooling and testing package
 
-**Spec:** 07. **Status:** P9-01 to P9-03.
+**Spec:** 07. **Status:** P9-01 to P9-04.
 
 ## Objective
 
@@ -34,6 +34,10 @@ The framework deliberately provides no web frontend: applications or external de
 - Template uses public imports, development-safe defaults, no committed secret, and graceful app shutdown.
 - Offer `--no-install` for deterministic CI and offline use.
 
+## P9-04: typed harness clients
+
+Generate or infer a typed harness client from plugin entity/action schemas. Replace string targets and `unknown` results with discoverable calls such as `harness.client.kanban.card.create(...)`, while retaining `call(target, input)` as the dynamic escape hatch. Add typed principal conveniences (`asAgent`, `asHuman`) and structured assertions/queries for vetoes, progress, and named events without coupling tests to adapter internals. The typed client must execute through the same kernel seam as dynamic calls and add no mutable request state.
+
 ## Tests and success criteria
 
 ### Harness tests
@@ -44,6 +48,7 @@ The framework deliberately provides no web frontend: applications or external de
 - `tickOutbox()` deterministically exercises success/retry/dead-letter without sleeps.
 - Closing after success and injected boot/action/worker failure leaves no DB files, timers, or open handles.
 - Warm startup benchmark records median and p95; p95 target is <10 ms if feasible, otherwise discrepancy is documented before release.
+- Typed calls infer required/defaulted action input and result types, reject misspelled targets/fields at compile time, and have runtime parity with dynamic `call`; typed actor and event helpers preserve tenant isolation and deterministic inspection.
 
 ### Dev/inspector tests
 

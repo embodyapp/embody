@@ -1,10 +1,10 @@
-# Phase 12 — Hardening and release
+# Phase 12 — Hardening and release readiness
 
 **Specs:** non-functional implications across 01–08. **Status:** P12-01, P12-02.
 
 ## Objective
 
-Validate security, operability, compatibility, and packaging before declaring an MVP release. Set measurable budgets from baseline results instead of making unverified claims.
+Validate security, operability, compatibility, and packaging before source-available/commercial licensing and public release in Phase 13. Set measurable budgets from baseline results instead of making unverified claims.
 
 ## P12-01: security and resilience
 
@@ -39,7 +39,7 @@ Set release budgets after baseline review. Include a representative scale fixtur
 
 ## P12-02: packaging and release
 
-- Verify package exports, types, source maps, license/readme/changelog, provenance, and no test/source secrets in tarballs.
+- Verify package exports, types, source maps, readmes, changelogs, provenance, and no test/source secrets in tarballs. Phase 13 adds and verifies community/commercial license material against these exact artifacts.
 - Define semver policy for TypeScript APIs, plugin SPI, manifests/wire protocol, storage schema, and CLI output. Add deprecation/migration process.
 - Test supported Node, PostgreSQL, and SQLite versions from D-04; publish compatibility table.
 - Produce signed/pinned gateway and example container images running as non-root with healthchecks and graceful signals.
@@ -72,4 +72,4 @@ Set release budgets after baseline review. Include a representative scale fixtur
 - Performance results meet approved budgets with no material regression from stored baseline; exceptions require explicit review.
 - Documentation maps every advertised feature to implemented/tested status and calls out deferred workflows/provider limitations.
 
-Phase 12 passes only when release checklist evidence is linked in `STATUS.md`; “tests pass locally” alone is insufficient. ADR 0003 makes successful Phase 11 durable-workflow verification a release prerequisite.
+Phase 12 passes only when release-readiness checklist evidence is linked in `STATUS.md`; “tests pass locally” alone is insufficient. ADR 0003 makes successful Phase 11 durable-workflow verification a prerequisite, and Phase 13 licensing must also pass before public release.

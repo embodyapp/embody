@@ -30,9 +30,10 @@ Use this matrix during review to prevent a green implementation from omitting a 
 | `create-embody-app` | 9 | External packed-project smoke | TBD |
 | `embody dev` and inspector | 9 | Process + browser security tests | TBD |
 | `@embody/testing` under-10ms goal | 9, 11 | Functional suite + benchmark | TBD |
-| Kanban reference behavior | 10 | Domain and distributed tests | TBD |
+| Kanban reference behavior | 10 | Domain and distributed tests | `examples/kanban/test/plugin.test.ts` — `Kanban reference plugin` |
 | Email/reference cross-app event | 6, 10 | Relay/restart/idempotency tests | TBD |
 | Audit and rate limiting | 7, 12 | Outcome/redaction/isolation tests | TBD |
+| Source-available/commercial licensing and viability | 13 | Ownership review, dual-license scenario tests, package/container inspection, SBOM, attribution, entitlement tests, and purchase-path rehearsal | `docs/implementation-plan/13-commercial-licensing.md` — licensing decision and commercial launch gates |
 
 ## Review rule
 

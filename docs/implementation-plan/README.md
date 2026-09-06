@@ -18,7 +18,8 @@ This directory is the execution source of truth for agents implementing the spec
 | 9 | [Developer tooling and testing package](./09-developer-tooling.md) | 3–8 |
 | 10 | [Reference applications and end-to-end proof](./10-reference-apps.md) | 4–9 |
 | 11 | [Durable workflows](./11-durable-workflows.md) | 3, 6, 8–10, D-02 |
-| 12 | [Hardening and release](./12-hardening-and-release.md) | 1–11 |
+| 12 | [Hardening and release readiness](./12-hardening-and-release.md) | 1–11 |
+| 13 | [Commercial and source-available licensing](./13-commercial-licensing.md) | 12 |
 
 Also read [the cross-cutting test strategy](./TEST-STRATEGY.md) and [specification traceability matrix](./SPEC-TRACEABILITY.md). Each phase contains its own executable success criteria; a phase is not complete merely because code exists.
 
@@ -76,4 +77,4 @@ For every phase:
 
 ## Scope rule
 
-The specifications are authoritative for product behavior. The architecture decision document supplies implementation detail where the specs are silent. Items explicitly deferred by an approved ADR (for example provider-specific Clerk integration) must not be presented as implemented. ADR 0003 includes durable workflows in MVP, so phase 11 must pass before phase 12 and release.
+The specifications are authoritative for product behavior. The architecture decision document supplies implementation detail where the specs are silent. Items explicitly deferred by an approved ADR (for example provider-specific Clerk integration) must not be presented as implemented. ADR 0003 includes durable workflows in MVP, so phase 11 must pass before phase 12. Phase 13 establishes source-available and commercial licensing and is the final public-release gate.

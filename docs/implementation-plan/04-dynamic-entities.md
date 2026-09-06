@@ -1,6 +1,6 @@
 # Phase 4 — Dynamic entities and auto-CRUD
 
-**Spec:** 03 and Kanban portions of 08. **Status:** P4-01, P4-02.
+**Spec:** 03 and Kanban portions of 08. **Status:** P4-01 to P4-03.
 
 ## Objective
 
@@ -25,6 +25,10 @@ Generate `<plugin>.<entity>.create|get|list|update|delete`:
 
 Resolve generated event naming consistently (`plugin.entity.created|updated|deleted`). Publishing must share the mutation transaction via transaction-bound context. Return records only after successful commit.
 
+## P4-03: transactional bulk entity operations
+
+Add typed `getMany` and `updateMany` contextual-store operations so custom actions do not reimplement common atomicity rules. The interface must explicitly define empty and duplicate ID behavior, validate tenant ownership for the complete input before mutation, preserve input/result ordering, run each record's normal lifecycle hooks and events, and roll back the entire operation after any validation, guardrail, conflict, or outbox failure. Implement equivalent behavior on SQLite and PostgreSQL without exposing adapter transactions to plugins.
+
 Zod errors become safe field-path validation details. Unknown fields obey the schema's explicit policy; generated patch must not accidentally make nested required objects partially valid.
 
 ## Tests and success criteria
@@ -43,6 +47,7 @@ Run CRUD lifecycle tests once against SQLite and once against PostgreSQL:
 10. Entity data with Zod evolution (new optional/default field) reads old records without DDL; newly written records use new validation/default behavior.
 11. Contextual store calls from a custom action have identical validation, hook, tenant, transaction, and event behavior; they must not be a lower-level bypass.
 12. UUID/timestamp and pagination output are stable across adapters.
+13. Bulk reads preserve order and reject missing/cross-tenant IDs without partial results; bulk updates reject duplicate/empty IDs according to the documented policy, run all normal hooks/events, and roll back every mutation when any item fails.
 
 Add compile-time tests showing inferred entity create/update/store types. Add manifest golden tests for the Kanban card schema, including enum/default/URL/optional fields.
 
