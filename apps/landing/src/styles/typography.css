@@ -1,0 +1,94 @@
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  line-height: 1.15;
+  color: var(--text-main);
+  letter-spacing: -0.025em;
+}
+
+h1 {
+  font-size: clamp(2.5rem, 5.5vw + 1rem, 4.75rem);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+}
+
+h2 {
+  font-size: clamp(2rem, 3.5vw + 0.5rem, 3.25rem);
+  letter-spacing: -0.025em;
+}
+
+h3 {
+  font-size: clamp(1.35rem, 2vw + 0.2rem, 1.85rem);
+  letter-spacing: -0.02em;
+}
+
+h4 {
+  font-size: 1.25rem;
+}
+
+p {
+  font-size: 1.0625rem;
+  color: var(--text-muted);
+  line-height: 1.65;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+p.lead {
+  font-size: clamp(1.125rem, 1.4vw + 0.4rem, 1.35rem);
+  line-height: 1.55;
+  color: var(--text-main);
+  font-weight: 500;
+  letter-spacing: -0.015em;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+.text-gradient-sun {
+  background: linear-gradient(135deg, var(--color-terracotta) 0%, var(--color-sunset-orange) 50%, var(--color-sun-yellow) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.text-gradient-coastal {
+  background: linear-gradient(135deg, var(--color-deep-purple) 0%, var(--color-sky-blue) 60%, var(--color-mint) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.badge-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: var(--stroke-width) solid var(--stroke-main);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-hard-sm);
+}
+
+.badge-sun {
+  background: var(--color-sun-yellow);
+  color: var(--bg-dark);
+}
+
+.badge-mint {
+  background: var(--color-mint);
+  color: var(--bg-dark);
+}
+
+.badge-terracotta {
+  background: var(--color-terracotta);
+  color: #fff;
+}
+
+.badge-purple {
+  background: var(--color-twilight-purple);
+  color: #fff;
+}

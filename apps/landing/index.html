@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>embdy — Build Apps For Agents | The Open-Source Agent Application Framework</title>
+  <meta name="description" content="Build software autonomous AI agents can safely run. Declare once, project everywhere—typed MCP tools, deterministic state machines, Postgres, and UI." />
+
+  <!-- Fonts: Rhymezlikedimez 70s display + clean sans + monospace -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;0,700;1,400&family=Outfit:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body class="halftone-bg">
+  <!-- Subtle Film Grain Overlay -->
+  <div class="grain-overlay"></div>
+
+  <!-- Navigation Bar -->
+  <header class="navbar">
+    <div class="container navbar-inner">
+      <a href="#" class="brand-logo">
+        <svg width="34" height="34" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2" y="2" width="32" height="32" rx="10" fill="#FDB849" stroke="#2C2230" stroke-width="2.5"/>
+          <path d="M10 12H26M10 18H22M10 24H26" stroke="#2C2230" stroke-width="2.5" stroke-linecap="round"/>
+          <circle cx="25" cy="18" r="3" fill="#F27A3D" stroke="#2C2230" stroke-width="2"/>
+        </svg>
+        <span>embdy</span>
+        <span class="brand-badge">v1.0</span>
+      </a>
+
+      <nav class="nav-links">
+        <a href="#philosophy" class="nav-link">The Connected Hub</a>
+        <a href="#lifecycle" class="nav-link">Lifecycle Reality</a>
+        <a href="#extendability" class="nav-link">Use Cases</a>
+        <a href="#agents" class="nav-link">Safety Sandbox</a>
+        <a href="#playground" class="nav-link">5 Surfaces</a>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="https://github.com/nimrod4278/embdy" target="_blank" class="btn btn-secondary btn-sm" id="btn-github">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+          </svg>
+          <span>Star</span>
+        </a>
+        <a href="#quickstart" class="btn btn-primary btn-sm">Get Started</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="section hero-section">
+    <div class="container hero-grid">
+      
+      <!-- Hero Content -->
+      <div class="hero-content">
+        <div class="hero-sticker-row">
+          <span class="sticker badge-sun">Built for AI Agents</span>
+          <span class="sticker badge-mint">Zero-Config Plug &amp; Play</span>
+          <span class="sticker badge-purple">Safe by Design</span>
+        </div>
+
+        <h1 class="hero-title">
+          BUILD APPS<br />
+          <span class="text-gradient-sun">FOR AGENTS.</span>
+        </h1>
+
+        <p class="hero-description">
+          <b>Tools like Lovable build web pages for humans to click.</b> embdy builds the connected backends your AI agents need to run your business.
+        </p>
+
+        <div class="hero-cta-group">
+          <a href="#quickstart" class="btn btn-primary btn-lg">Start Building Free</a>
+          <div class="hero-terminal-pill">
+            <code>pnpm create embdy@latest</code>
+            <button class="copy-btn" data-copy="pnpm create embdy@latest" title="Copy CLI Command">Copy</button>
+          </div>
+        </div>
+
+        <div class="hero-metrics-row">
+          <div class="metric-card">
+            <span class="metric-value">0 Setup</span>
+            <span class="metric-label">Instant agent tools (MCP &amp; CLI)</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-value">1 Hub</span>
+            <span class="metric-label">Shared live data across all agents</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-value">100% Safe</span>
+            <span class="metric-label">Built-in spending &amp; approval gates</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hero Visual (Rhymezlikedimez Coastal Sunset & Lo-Fi Vinyl Deck) -->
+      <div class="hero-visual">
+        <div class="visual-art-card">
+          <div class="art-canvas-frame" id="hero-art-canvas">
+            <!-- Custom Vector SVG Scene -->
+            <svg id="hero-art-svg" viewBox="0 0 500 360" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <!-- Sky Gradient: Day -> Sunset -> Night -> Dawn -->
+                <linearGradient id="skyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop id="skyStopTop" offset="0%" stop-color="#7BB8D4" />
+                  <stop id="skyStopMid" offset="55%" stop-color="#FDB849" />
+                  <stop id="skyStopBottom" offset="100%" stop-color="#F27A3D" />
+                </linearGradient>
+
+                <!-- Sun Radial Gradient -->
+                <radialGradient id="sunGlow" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stop-color="#FFFDF9" stop-opacity="1" />
+                  <stop offset="40%" stop-color="#FDB849" stop-opacity="0.9" />
+                  <stop offset="100%" stop-color="#F27A3D" stop-opacity="0" />
+                </radialGradient>
+
+                <!-- Moon Radial Glow -->
+                <radialGradient id="moonGlow" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stop-color="#FFFBEA" stop-opacity="0.9" />
+                  <stop offset="50%" stop-color="#D5E3F7" stop-opacity="0.5" />
+                  <stop offset="100%" stop-color="#1E1B4B" stop-opacity="0" />
+                </radialGradient>
+
+                <!-- Ocean Linear Gradient -->
+                <linearGradient id="seaGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop id="seaStopTop" offset="0%" stop-color="#7BB8D4" />
+                  <stop id="seaStopBottom" offset="100%" stop-color="#4E9B8F" />
+                </linearGradient>
+
+                <!-- Headlight Beam Linear Gradient -->
+                <linearGradient id="headlightGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#FFFBEA" stop-opacity="0.9" />
+                  <stop offset="60%" stop-color="#FFF5C2" stop-opacity="0.35" />
+                  <stop offset="100%" stop-color="#FAF3E8" stop-opacity="0" />
+                </linearGradient>
+
+                <!-- Distant Mountain Gradients (Day & Night) -->
+                <linearGradient id="mountainGrad1" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop id="mount1Stop1" offset="0%" stop-color="#A084B6" />
+                  <stop id="mount1Stop2" offset="100%" stop-color="#7A5E96" />
+                </linearGradient>
+                <linearGradient id="mountainGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop id="mount2Stop1" offset="0%" stop-color="#56486E" />
+                  <stop id="mount2Stop2" offset="100%" stop-color="#3A2D4F" />
+                </linearGradient>
+              </defs>
+
+              <!-- Sky Backdrop -->
+              <rect id="sky-backdrop" x="0" y="0" width="500" height="360" fill="url(#skyGrad)" />
+
+              <!-- Stars Group (Hidden in day, sparkles in night) -->
+              <g id="sky-stars" opacity="0">
+                <circle cx="45" cy="35" r="1.5" fill="#FFFDF9" class="canvas-star star-1" />
+                <circle cx="85" cy="65" r="1" fill="#FFFDF9" class="canvas-star star-2" />
+                <circle cx="130" cy="25" r="2" fill="#FFFDF9" class="canvas-star star-3" />
+                <circle cx="170" cy="75" r="1.2" fill="#FAF3E8" class="canvas-star star-1" />
+                <circle cx="210" cy="40" r="1.8" fill="#FFFDF9" class="canvas-star star-2" />
+                <circle cx="265" cy="20" r="1" fill="#FAF3E8" class="canvas-star star-3" />
+                <circle cx="310" cy="55" r="2.2" fill="#FFFDF9" class="canvas-star star-1" />
+                <circle cx="350" cy="30" r="1.4" fill="#FFFDF9" class="canvas-star star-2" />
+                <circle cx="395" cy="60" r="1" fill="#FAF3E8" class="canvas-star star-3" />
+                <circle cx="440" cy="25" r="1.6" fill="#FFFDF9" class="canvas-star star-1" />
+                <circle cx="475" cy="70" r="1.2" fill="#FFFDF9" class="canvas-star star-2" />
+                <circle cx="110" cy="110" r="1.2" fill="#FAF3E8" class="canvas-star star-3" />
+                <circle cx="370" cy="95" r="1.5" fill="#FFFDF9" class="canvas-star star-1" />
+                <!-- 4-point cross sparkles -->
+                <path d="M 130 20 L 130 30 M 125 25 L 135 25" stroke="#FFFDF9" stroke-width="0.8" opacity="0.9" />
+                <path d="M 310 50 L 310 60 M 305 55 L 315 55" stroke="#FFFDF9" stroke-width="0.8" opacity="0.9" />
+              </g>
+
+              <!-- Sun Group (Sets behind mountains in dusk) -->
+              <g id="sky-sun" transform="translate(0, 0)">
+                <circle id="sun-glow-circle" cx="250" cy="140" r="95" fill="url(#sunGlow)" />
+                <circle id="sun-core" cx="250" cy="140" r="50" fill="#FFFBEA" stroke="#2C2230" stroke-width="2.5" />
+              </g>
+
+              <!-- Moon Group (Rises in night) -->
+              <g id="sky-moon" opacity="0" transform="translate(250, 190)">
+                <circle cx="0" cy="0" r="45" fill="url(#moonGlow)" />
+                <circle cx="0" cy="0" r="22" fill="#FFFBEA" stroke="#2C2230" stroke-width="2.5" />
+                <!-- Moon craters / subtle textures -->
+                <circle cx="-5" cy="-4" r="4" fill="#E2E8F0" opacity="0.7" />
+                <circle cx="6" cy="6" r="3.5" fill="#E2E8F0" opacity="0.7" />
+                <circle cx="7" cy="-7" r="2.5" fill="#E2E8F0" opacity="0.6" />
+              </g>
+
+              <!-- Distant Coastal Mountains & Mid-century Silhouettes -->
+              <path id="mountains-far" d="M-10 230 Q 120 180 250 220 T 510 200 L 510 260 L -10 260 Z" fill="url(#mountainGrad1)" stroke="#2C2230" stroke-width="2.5" />
+              <path id="mountains-near" d="M-10 240 Q 180 200 360 245 T 510 230 L 510 270 L -10 270 Z" fill="url(#mountainGrad2)" stroke="#2C2230" stroke-width="2.5" />
+
+              <!-- Mid Century Cantilever Villa Deck on Cliff -->
+              <g id="villa-structure">
+                <rect x="20" y="195" width="110" height="8" rx="2" fill="#FAF3E8" stroke="#2C2230" stroke-width="2.5" />
+                <rect x="35" y="203" width="80" height="24" fill="#FAF3E8" stroke="#2C2230" stroke-width="2" />
+                <line x1="50" y1="203" x2="50" y2="227" stroke="#2C2230" stroke-width="1.5" />
+                <line x1="75" y1="203" x2="75" y2="227" stroke="#2C2230" stroke-width="1.5" />
+                <!-- Villa Warm Windows (Light up at night) -->
+                <rect class="villa-window" x="40" y="208" width="8" height="14" rx="1" fill="#2C2230" stroke="#2C2230" stroke-width="1" />
+                <rect class="villa-window" x="55" y="208" width="15" height="14" rx="1" fill="#2C2230" stroke="#2C2230" stroke-width="1" />
+                <rect class="villa-window" x="80" y="208" width="15" height="14" rx="1" fill="#2C2230" stroke="#2C2230" stroke-width="1" />
+                <rect class="villa-window" x="100" y="208" width="8" height="14" rx="1" fill="#2C2230" stroke="#2C2230" stroke-width="1" />
+              </g>
+
+              <!-- Ocean Horizon -->
+              <g id="ocean-group">
+                <rect id="ocean-body" x="-10" y="250" width="520" height="40" fill="url(#seaGrad)" stroke="#2C2230" stroke-width="2.5" />
+                <line class="ocean-wave wave-1" x1="80" y1="265" x2="160" y2="265" stroke="#FFFDF9" stroke-width="2" stroke-linecap="round" />
+                <line class="ocean-wave wave-2" x1="260" y1="272" x2="380" y2="272" stroke="#FFFDF9" stroke-width="2" stroke-linecap="round" />
+                <line class="ocean-wave wave-3" x1="30" y1="280" x2="90" y2="280" stroke="#FFFDF9" stroke-width="1.5" stroke-linecap="round" opacity="0.6" />
+                <line class="ocean-wave wave-4" x1="410" y1="262" x2="470" y2="262" stroke="#FFFDF9" stroke-width="1.5" stroke-linecap="round" opacity="0.6" />
+              </g>
+
+              <!-- Coastal Highway -->
+              <g id="highway-group">
+                <path id="road-body" d="M -10 360 Q 200 275 510 320 L 510 360 Z" fill="#EADBC8" stroke="#2C2230" stroke-width="3" />
+                <!-- Dashed Center Lines (High-speed animated dash translation) -->
+                <path id="road-lines" d="M -10 360 Q 200 275 510 320" stroke="#FDB849" stroke-width="3.5" stroke-dasharray="16 14" stroke-linecap="round" fill="none" />
+              </g>
+
+              <!-- Headlight Projection Beam (Casts onto highway in front of car at dusk/night) -->
+              <g id="headlight-beam" opacity="0">
+                <polygon points="382,307 510,290 510,345 382,312" fill="url(#headlightGrad)" />
+              </g>
+
+              <!-- Classic Convertible Sports Car (Rhymezlikedimez Ligne Claire style) -->
+              <g id="hero-convertible" transform="translate(190, 275)">
+                <!-- Car Chassis with Suspension Bounce & Tilt -->
+                <g id="car-chassis">
+                  <!-- Exhaust Puff Particles -->
+                  <g id="car-exhaust" transform="translate(0, 42)">
+                    <circle cx="-5" cy="-2" r="3" fill="#FAF3E8" opacity="0" class="exhaust-puff puff-1" />
+                    <circle cx="-14" cy="-5" r="4.5" fill="#FAF3E8" opacity="0" class="exhaust-puff puff-2" />
+                    <circle cx="-24" cy="-8" r="6" fill="#FAF3E8" opacity="0" class="exhaust-puff puff-3" />
+                  </g>
+
+                  <!-- Rear Agent Telemetry Antenna / Sensor Mast -->
+                  <g id="car-sensor-mast" transform="translate(25, 26)">
+                    <line x1="0" y1="0" x2="0" y2="-14" stroke="#2C2230" stroke-width="2" stroke-linecap="round" />
+                    <circle id="sensor-mast-tip" cx="0" cy="-15" r="2.5" fill="#4E9B8F" stroke="#2C2230" stroke-width="1.5" />
+                    <path id="sensor-pulse-wave" d="M 3 -18 Q 8 -15 3 -12" fill="none" stroke="#4E9B8F" stroke-width="1.2" stroke-linecap="round" opacity="0.8" />
+                  </g>
+
+                  <!-- Car Body -->
+                  <path d="M 15 28 C 30 18 70 16 110 18 C 125 10 145 10 160 18 L 185 24 C 198 28 205 38 198 48 C 190 54 20 54 10 48 C 4 42 6 32 15 28 Z" fill="#F27A3D" stroke="#2C2230" stroke-width="2.5" />
+                  <!-- Windshield -->
+                  <path d="M 110 18 L 125 4 L 148 4 L 146 18 Z" fill="#A3D9C9" stroke="#2C2230" stroke-width="2.5" />
+
+                  <!-- Robot Agent Co-Pilot (Rhymezlikedimez Ligne Claire companion) -->
+                  <g id="robot-agent-companion">
+                    <!-- Robot Torso -->
+                    <rect x="65" y="11" width="16" height="15" rx="3.5" fill="#A084B6" stroke="#2C2230" stroke-width="2" />
+                    <!-- Robot Head -->
+                    <rect id="robot-head" x="67" y="-1" width="13" height="12" rx="3.5" fill="#FAF3E8" stroke="#2C2230" stroke-width="2" />
+                    <!-- Robot Visor Display (Glows neon teal at night) -->
+                    <rect id="robot-visor" x="69" y="2" width="9" height="4" rx="1.5" fill="#4E9B8F" stroke="#2C2230" stroke-width="1.2" />
+                    <!-- Retro Over-Ear Headphones -->
+                    <rect x="65" y="1" width="3" height="8" rx="1.5" fill="#FDB849" stroke="#2C2230" stroke-width="1.2" />
+                    <rect x="79" y="1" width="3" height="8" rx="1.5" fill="#FDB849" stroke="#2C2230" stroke-width="1.2" />
+                    <path d="M 66 1 Q 73 -6 80 1" fill="none" stroke="#2C2230" stroke-width="1.8" />
+                    <!-- Head Antenna -->
+                    <line x1="73" y1="-1" x2="73" y2="-6" stroke="#2C2230" stroke-width="1.5" stroke-linecap="round" />
+                    <circle id="robot-antenna-tip" cx="73" cy="-7" r="1.8" fill="#F27A3D" stroke="#2C2230" stroke-width="1" />
+                    <!-- Glowing Agent Telemetry Tablet -->
+                    <g id="robot-tablet" transform="translate(77, 13) rotate(14)">
+                      <rect x="0" y="0" width="13" height="10" rx="1.5" fill="#A3D9C9" stroke="#2C2230" stroke-width="1.3" />
+                      <line x1="2" y1="3" x2="8" y2="3" stroke="#2C2230" stroke-width="0.9" />
+                      <line x1="2" y1="5.5" x2="11" y2="5.5" stroke="#2C2230" stroke-width="0.9" />
+                      <line x1="2" y1="8" x2="6" y2="8" stroke="#2C2230" stroke-width="0.9" />
+                    </g>
+                  </g>
+
+                  <!-- Relaxed Character Driver with Bucket Hat & Shades -->
+                  <g id="driver-character">
+                    <circle cx="105" cy="4" r="8" fill="#FDB849" stroke="#2C2230" stroke-width="2" />
+                    <path d="M 97 -1 Q 105 -7 113 -1 L 115 2 L 95 2 Z" fill="#56486E" stroke="#2C2230" stroke-width="2" />
+                    <line x1="102" y1="4" x2="108" y2="4" stroke="#2C2230" stroke-width="2" stroke-linecap="round" />
+                  </g>
+                  <!-- Steering Wheel -->
+                  <ellipse cx="118" cy="14" rx="4" ry="7" fill="none" stroke="#2C2230" stroke-width="2" />
+                  <!-- Chrome Bumper & Headlight -->
+                  <circle id="car-headlight-bulb" cx="192" cy="32" r="5" fill="#FFFDF9" stroke="#2C2230" stroke-width="2" />
+                </g>
+
+                <!-- Wheels (Separated from chassis so wheels stay planted on road while rotating) -->
+                <!-- Rear Wheel -->
+                <g class="wheel-assembly" transform="translate(45, 50)">
+                  <circle cx="0" cy="0" r="14" fill="#2C2230" stroke="#2C2230" stroke-width="2" />
+                  <g class="car-wheel-hub">
+                    <circle cx="0" cy="0" r="6" fill="#FAF3E8" stroke="#2C2230" stroke-width="2" />
+                    <line x1="-5" y1="0" x2="5" y2="0" stroke="#2C2230" stroke-width="1.8" stroke-linecap="round" />
+                    <line x1="0" y1="-5" x2="0" y2="5" stroke="#2C2230" stroke-width="1.8" stroke-linecap="round" />
+                  </g>
+                </g>
+                <!-- Front Wheel -->
+                <g class="wheel-assembly" transform="translate(165, 50)">
+                  <circle cx="0" cy="0" r="14" fill="#2C2230" stroke="#2C2230" stroke-width="2" />
+                  <g class="car-wheel-hub">
+                    <circle cx="0" cy="0" r="6" fill="#FAF3E8" stroke="#2C2230" stroke-width="2" />
+                    <line x1="-5" y1="0" x2="5" y2="0" stroke="#2C2230" stroke-width="1.8" stroke-linecap="round" />
+                    <line x1="0" y1="-5" x2="0" y2="5" stroke="#2C2230" stroke-width="1.8" stroke-linecap="round" />
+                  </g>
+                </g>
+              </g>
+
+              <!-- Tropical Palm Tree (Ligne claire) -->
+              <g id="palm-tree" transform="translate(420, 160)">
+                <!-- Trunk -->
+                <path d="M 30 180 Q 20 100 35 15" fill="none" stroke="#2C2230" stroke-width="9" stroke-linecap="round" />
+                <path d="M 30 180 Q 20 100 35 15" fill="none" stroke="#D66248" stroke-width="5" stroke-linecap="round" />
+                <!-- Fronds -->
+                <g id="palm-fronds">
+                  <path d="M 35 15 Q 10 -25 -40 -10 Q 0 -5 35 15 Z" fill="#4E9B8F" stroke="#2C2230" stroke-width="2.5" />
+                  <path d="M 35 15 Q 65 -35 105 -15 Q 70 -5 35 15 Z" fill="#4E9B8F" stroke="#2C2230" stroke-width="2.5" />
+                  <path d="M 35 15 Q -15 0 -55 35 Q -20 20 35 15 Z" fill="#A3D9C9" stroke="#2C2230" stroke-width="2.5" />
+                  <path d="M 35 15 Q 80 10 110 50 Q 75 30 35 15 Z" fill="#A3D9C9" stroke="#2C2230" stroke-width="2.5" />
+                </g>
+                <!-- Coconuts -->
+                <circle cx="30" cy="18" r="4" fill="#56486E" stroke="#2C2230" stroke-width="1.5" />
+                <circle cx="37" cy="19" r="4" fill="#56486E" stroke="#2C2230" stroke-width="1.5" />
+              </g>
+            </svg>
+          </div>
+
+          <!-- Turntable Player Audio Widget -->
+          <div class="turntable-card">
+            <div class="turntable-info">
+              <div class="vinyl-disc" id="vinyl-disc"></div>
+              <div class="track-meta">
+                <span class="track-title">Agentic Groove (Late Summer Lo-Fi)</span>
+                <span class="track-artist" id="vinyl-status">Click to spin lo-fi beats with your Agent Co-Pilot</span>
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="vinyl-toggle">Play</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- The Two Traps vs The Commons Section -->
+  <section class="section" id="philosophy">
+    <div class="container">
+      <div class="section-header gsap-reveal">
+        <span class="badge-tag badge-terracotta">Vibe Code vs. Embdy</span>
+        <h2>WHY AGENTS NEED A FRAMEWORK?</h2>
+        <p class="lead">Building one-off apps with vibe-coding tools leaves your business fragmented. embdy gives your AI workforce a single connected backend.</p>
+      </div>
+
+      <!-- Two Comparison Diagrams: Pain vs Solution -->
+      <div class="pain-solution-diagrams-grid">
+
+        <!-- ====================================================
+             DIAGRAM 1: THE PAIN (The Isolated Islands: Disconnected UI Tools)
+             ==================================================== -->
+        <div class="diagram-comparison-card pain-card gsap-stagger-item">
+          <div class="diagram-card-header">
+            <div class="diagram-badge-row">
+              <span class="badge-tag badge-terracotta">❌ The Problem</span>
+              <span class="diagram-status-pill status-danger"><span class="status-dot pulse-danger"></span> Siloed &amp; Incompatible</span>
+            </div>
+            <h4>Pretty Screens for Humans &bull; Total Chaos for Agents</h4>
+          </div>
+
+          <!-- Visual SVG Architecture Diagram: Isolated Islands -->
+          <div class="diagram-canvas canvas-pain">
+            <div class="canvas-header-label">
+              <span>Fragmented UI Prototypes</span>
+              <span class="drift-badge">⚠️ No Agent Protocol</span>
+            </div>
+
+            <!-- SVG Network Graph: Isolated Islands -->
+            <div class="svg-diagram-wrapper">
+              <svg viewBox="0 0 520 260" class="arch-network-svg" preserveAspectRatio="xMidYMid meet">
+                <defs>
+                  <filter id="red-glow-islands" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                  </filter>
+                </defs>
+
+                <!-- Island 1: Sales UI App -->
+                <g transform="translate(85, 60)" class="svg-node-group">
+                  <rect x="-70" y="-38" width="140" height="76" rx="10" fill="#FFFDF9" stroke="#E74C3C" stroke-width="2" stroke-dasharray="4 3" />
+                  <rect x="-60" y="-30" width="120" height="20" rx="4" fill="#FFEBE8" />
+                  <text x="0" y="-16" text-anchor="middle" font-family="var(--font-sans)" font-size="11" font-weight="700" fill="#C0392B">Sales UI</text>
+                  <text x="0" y="8" text-anchor="middle" font-family="var(--font-mono)" font-size="9" fill="#786C82">Siloed Customer DB</text>
+                  <text x="0" y="24" text-anchor="middle" font-family="var(--font-sans)" font-size="8.5" font-weight="600" fill="#E74C3C">❌ No Agent Access</text>
+                </g>
+
+                <!-- Island 2: Invoicing App -->
+                <g transform="translate(260, 60)" class="svg-node-group">
+                  <rect x="-70" y="-38" width="140" height="76" rx="10" fill="#FFFDF9" stroke="#E74C3C" stroke-width="2" stroke-dasharray="4 3" />
+                  <rect x="-60" y="-30" width="120" height="20" rx="4" fill="#FFEBE8" />
+                  <text x="0" y="-16" text-anchor="middle" font-family="var(--font-sans)" font-size="11" font-weight="700" fill="#C0392B">Billing UI</text>
+                  <text x="0" y="8" text-anchor="middle" font-family="var(--font-mono)" font-size="9" fill="#786C82">Isolated Stripe Sheet</text>
+                  <text x="0" y="24" text-anchor="middle" font-family="var(--font-sans)" font-size="8.5" font-weight="600" fill="#E74C3C">❌ Screen Scraping</text>
+                </g>
+
+                <!-- Island 3: Inventory App -->
+                <g transform="translate(435, 60)" class="svg-node-group">
+                  <rect x="-70" y="-38" width="140" height="76" rx="10" fill="#FFFDF9" stroke="#E74C3C" stroke-width="2" stroke-dasharray="4 3" />
+                  <rect x="-60" y="-30" width="120" height="20" rx="4" fill="#FFEBE8" />
+                  <text x="0" y="-16" text-anchor="middle" font-family="var(--font-sans)" font-size="11" font-weight="700" fill="#C0392B">Ops UI</text>
+                  <text x="0" y="8" text-anchor="middle" font-family="var(--font-mono)" font-size="9" fill="#786C82">Separate Warehouse DB</text>
+                  <text x="0" y="24" text-anchor="middle" font-family="var(--font-sans)" font-size="8.5" font-weight="600" fill="#E74C3C">❌ Data Out of Sync</text>
+                </g>
+
+                <!-- Broken Sync Dashed Lines between Islands -->
+                <path d="M 155 60 L 190 60" stroke="#E74C3C" stroke-width="2" stroke-dasharray="3 3" />
+                <text x="172" y="52" text-anchor="middle" font-size="10">🚫</text>
+                <path d="M 330 60 L 365 60" stroke="#E74C3C" stroke-width="2" stroke-dasharray="3 3" />
+                <text x="347" y="52" text-anchor="middle" font-size="10">🚫</text>
+
+                <!-- The Frustrated Autonomous Agent Below Trying to Connect -->
+                <g transform="translate(260, 195)">
+                  <!-- Agent Avatar -->
+                  <rect x="-110" y="-32" width="220" height="64" rx="12" fill="#2C2230" stroke="#E74C3C" stroke-width="2" />
+                  <text x="-80" y="6" font-size="24">🤖</text>
+                  <text x="-50" y="-8" font-family="var(--font-display)" font-size="12" font-weight="800" fill="#FFFDF9">Your Autonomous Agent</text>
+                  <text x="-50" y="10" font-family="var(--font-sans)" font-size="9.5" fill="#FDB849">"How do I read or write to these apps?"</text>
+                  <text x="-50" y="24" font-family="var(--font-mono)" font-size="8.5" fill="#D66248">❌ No MCP &bull; No shared state &bull; $0 safety</text>
+                </g>
+
+                <!-- Broken connection arrows from Agent to Islands -->
+                <path d="M 210 163 C 180 135, 110 130, 85 100" stroke="#E74C3C" stroke-width="2" stroke-dasharray="4 4" fill="none" />
+                <path d="M 260 163 L 260 100" stroke="#E74C3C" stroke-width="2" stroke-dasharray="4 4" fill="none" />
+                <path d="M 310 163 C 340 135, 410 130, 435 100" stroke="#E74C3C" stroke-width="2" stroke-dasharray="4 4" fill="none" />
+
+                <!-- Alert Bubble in Middle -->
+                <g transform="translate(260, 130)">
+                  <rect x="-85" y="-12" width="170" height="24" rx="12" fill="#FFEBE8" stroke="#E74C3C" stroke-width="1.5" />
+                  <text x="0" y="4" text-anchor="middle" font-family="var(--font-sans)" font-size="9" font-weight="700" fill="#C0392B">⚠️ 3 Days of Glue Code to Connect</text>
+                </g>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+
+        <!-- ====================================================
+             DIAGRAM 2: THE SOLUTION (The Connected Hub: embdy Agent Backend)
+             ==================================================== -->
+        <div class="diagram-comparison-card solution-card gsap-stagger-item">
+          <div class="diagram-card-header">
+            <div class="diagram-badge-row">
+              <span class="badge-tag badge-mint">✅ The Solution</span>
+              <span class="diagram-status-pill status-success"><span class="status-dot pulse-success"></span> Instant Plug &amp; Play</span>
+            </div>
+            <h4>One Central Brain &bull; Out-Of-The-Box Agent Tools</h4>
+            <!-- <p class="diagram-desc">Declare your business once. embdy delivers out-of-the-box MCP tools and CLI commands so all your agents plug directly into one shared, safe source of truth.</p> -->
+          </div>
+
+          <!-- Visual SVG Architecture Diagram: Hub & Projections -->
+          <div class="diagram-canvas canvas-solution">
+            <div class="canvas-header-label">
+              <span>The Connected Operations Engine</span>
+              <span class="lock-badge">🔒 Instant MCP + Postgres</span>
+            </div>
+
+            <!-- SVG Network Graph: Hub & Spoke Projection -->
+            <div class="svg-diagram-wrapper">
+              <svg viewBox="0 0 520 260" class="arch-network-svg" preserveAspectRatio="xMidYMid meet">
+                <defs>
+                  <linearGradient id="laser-teal" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stop-color="#4E9B8F" />
+                    <stop offset="100%" stop-color="#27AE60" />
+                  </linearGradient>
+                </defs>
+
+                <!-- TOP ROW: Autonomous AI Workforce -->
+                <!-- Agent 1 -->
+                <g transform="translate(85, 30)" class="svg-node-group">
+                  <rect x="-65" y="-22" width="130" height="44" rx="8" class="svg-node-bg bg-success-node" />
+                  <text x="-48" y="4" class="node-emoji">💼</text>
+                  <text x="-25" y="-3" class="node-title-svg">Sales Agent</text>
+                  <text x="-25" y="11" class="node-sub-svg">Claude / Cursor</text>
+                </g>
+
+                <!-- Agent 2 -->
+                <g transform="translate(260, 30)" class="svg-node-group">
+                  <rect x="-65" y="-22" width="130" height="44" rx="8" class="svg-node-bg bg-success-node" />
+                  <text x="-48" y="4" class="node-emoji">💳</text>
+                  <text x="-25" y="-3" class="node-title-svg">Billing Agent</text>
+                  <text x="-25" y="11" class="node-sub-svg">Auto-Reconcile</text>
+                </g>
+
+                <!-- Agent 3 -->
+                <g transform="translate(435, 30)" class="svg-node-group">
+                  <rect x="-65" y="-22" width="130" height="44" rx="8" class="svg-node-bg bg-success-node" />
+                  <text x="-48" y="4" class="node-emoji">📦</text>
+                  <text x="-25" y="-3" class="node-title-svg">Ops Agent</text>
+                  <text x="-25" y="11" class="node-sub-svg">Inventory Restock</text>
+                </g>
+
+                <!-- Clean Converging Inflow Lines (All Agents connect to embdy Hub) -->
+                <path d="M 85 52 C 85 85, 220 85, 260 100" class="wire-clean wire-inflow" />
+                <path d="M 260 52 L 260 100" class="wire-clean wire-inflow" />
+                <path d="M 435 52 C 435 85, 300 85, 260 100" class="wire-clean wire-inflow" />
+
+                <!-- Badge on convergence: Out-of-the-box MCP -->
+                <g transform="translate(260, 80)">
+                  <rect x="-70" y="-11" width="140" height="22" rx="11" fill="#E8F7F4" stroke="#4E9B8F" stroke-width="1.5" />
+                  <text x="0" y="4" text-anchor="middle" font-family="var(--font-sans)" font-size="9" font-weight="700" fill="#176558">⚡ Instant Native MCP</text>
+                </g>
+
+                <!-- CENTRAL HUB (THE ONE SOURCE OF TRUTH) -->
+                <g transform="translate(260, 130)" class="svg-hub-group">
+                  <rect x="-140" y="-28" width="280" height="56" rx="14" class="hub-main-box" />
+                  <text x="-75" y="-4" class="hub-logo" font-family="var(--font-display)" font-size="14" font-weight="800">embdy Connected Hub</text>
+                  <text x="-75" y="14" font-family="var(--font-sans)" font-size="10" font-weight="600" fill="#FDB849">One Shared Company Engine &bull; Zero Silos</text>
+                </g>
+
+                <!-- Diverging Projection Lines (Hub -> 3 Guaranteed Pillars) -->
+                <path d="M 260 158 C 220 185, 100 185, 90 215" class="wire-clean wire-projection" />
+                <path d="M 260 158 L 260 215" class="wire-clean wire-projection" />
+                <path d="M 260 158 C 300 185, 420 185, 430 215" class="wire-clean wire-projection" />
+
+                <!-- BOTTOM ROW: 3 Business Value Outputs -->
+                <!-- Output 1: Instant MCP -->
+                <g transform="translate(90, 230)" class="svg-node-group">
+                  <rect x="-65" y="-18" width="130" height="36" rx="6" class="svg-node-bg bg-verified-output" />
+                  <text x="0" y="-2" text-anchor="middle" class="node-title-sm">🤖 Instant Tools</text>
+                  <text x="0" y="10" text-anchor="middle" class="node-status-ok">✔ Day 1 MCP &amp; CLI</text>
+                </g>
+
+                <!-- Output 2: Shared Postgres -->
+                <g transform="translate(260, 230)" class="svg-node-group">
+                  <rect x="-65" y="-18" width="130" height="36" rx="6" class="svg-node-bg bg-verified-output" />
+                  <text x="0" y="-2" text-anchor="middle" class="node-title-sm">🐘 Shared Database</text>
+                  <text x="0" y="10" text-anchor="middle" class="node-status-ok">✔ 1 Live Company Brain</text>
+                </g>
+
+                <!-- Output 3: Safety Guardrails -->
+                <g transform="translate(430, 230)" class="svg-node-group">
+                  <rect x="-65" y="-18" width="130" height="36" rx="6" class="svg-node-bg bg-verified-output" />
+                  <text x="0" y="-2" text-anchor="middle" class="node-title-sm">🛡️ Built-In Guardrails</text>
+                  <text x="0" y="10" text-anchor="middle" class="node-status-ok">✔ Spending &amp; Approvals</text>
+                </g>
+              </svg>
+            </div>
+          </div>
+
+
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Lifecycle Comparison Section (Day 1 -> Day 30 -> Day 90) -->
+  <section class="section section-lifecycle" id="lifecycle">
+    <div class="container">
+      <div class="section-header gsap-reveal">
+        <span class="badge-tag badge-sun">The Lifecycle Reality</span>
+        <h2>WHY CONNECTED AGENT BACKENDS WIN OVER TIME</h2>
+        <p class="lead">From day one to day ninety, see how isolated vibe-coded tools compare with running your operations on embdy's connected agent backend.</p>
+      </div>
+
+      <div class="lifecycle-timeline-grid">
+        <!-- Stage 1: Day 1 -->
+        <div class="lifecycle-card gsap-stagger-item">
+          <div class="lifecycle-card-top">
+            <span class="lifecycle-step-badge">DAY 1</span>
+            <h3>Getting Started</h3>
+          </div>
+          <div class="lifecycle-split">
+            <div class="lifecycle-side side-pain">
+              <div class="side-badge">❌ Isolated Vibe-Coded Apps</div>
+              <p>You generate a pretty UI prototype in 10 minutes, but spend the next 3 days struggling to figure out how your AI agent can actually read or write to it without breaking.</p>
+            </div>
+            <div class="lifecycle-divider"></div>
+            <div class="lifecycle-side side-solution">
+              <div class="side-badge">✅ embdy Connected Backend</div>
+              <p>Your agent connects on day one. Instant out-of-the-box tools (MCP &amp; CLI) mean your agent queries records and performs tasks immediately with zero custom integration.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stage 2: Day 30 -->
+        <div class="lifecycle-card gsap-stagger-item">
+          <div class="lifecycle-card-top">
+            <span class="lifecycle-step-badge">DAY 30</span>
+            <h3>Growing Operations</h3>
+          </div>
+          <div class="lifecycle-split">
+            <div class="lifecycle-side side-pain">
+              <div class="side-badge">❌ Isolated Vibe-Coded Apps</div>
+              <p>You built 5 separate tools (CRM, Billing, Inventory). None of them talk to each other; customer data is trapped in isolated islands and constantly out of sync.</p>
+            </div>
+            <div class="lifecycle-divider"></div>
+            <div class="lifecycle-side side-solution">
+              <div class="side-badge">✅ embdy Connected Backend</div>
+              <p>All your agents work from the exact same live company database. When the sales agent closes a deal, the billing and inventory agents already have the record.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stage 3: Day 90 -->
+        <div class="lifecycle-card gsap-stagger-item">
+          <div class="lifecycle-card-top">
+            <span class="lifecycle-step-badge">DAY 90</span>
+            <h3>Long-Term Reliability</h3>
+          </div>
+          <div class="lifecycle-split">
+            <div class="lifecycle-side side-pain">
+              <div class="side-badge">❌ Isolated Vibe-Coded Apps</div>
+              <p>Code rot sets in. Unmonitored prompts cause unexpected bugs, agents hallucinate unauthorized changes, and maintaining 5 fragile codebases becomes a nightmare.</p>
+            </div>
+            <div class="lifecycle-divider"></div>
+            <div class="lifecycle-side side-solution">
+              <div class="side-badge">✅ embdy Connected Backend</div>
+              <p>Rock-solid business rules, spending limits, and approval safeguards ensure your agents never skip steps, corrupt data, or make unauthorized purchases.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Extendability Showcase Section (Base CRM -> B2B SaaS vs E-Commerce) -->
+  <section class="section" id="extendability">
+    <div class="container">
+      <div class="section-header gsap-reveal">
+        <span class="badge-tag badge-mint">One Base Engine, Infinite Agents</span>
+        <h2>TAILOR APPS FOR SPECIALIZED AGENT WORKFLOWS</h2>
+        <p class="lead">Specialize one core business module for an autonomous B2B Deal-Desk Agent or high-velocity E-Commerce Inventory Agent—without forking or breaking upstream contracts.</p>
+      </div>  
+
+      <!-- The Abstract Visual Architecture Topology Diagram -->
+      <div class="extend-visual-canvas gsap-reveal" id="extend-canvas">
+
+        <!-- Upstream Core Base Header Card (Center Top) -->
+        <div class="extend-core-node">
+          <div class="core-node-badge">
+            <span class="badge-tag badge-sun">Base Engine Template</span>
+            <span class="core-lock-tag">@embdy/crm</span>
+          </div>
+          <div class="core-node-body">
+            <div class="core-node-icon">📦</div>
+            <div class="core-node-text">
+              <h3>Canonical Business Engine</h3>
+              <p>Domain contracts for accounts, pipeline FSM, policy engine, and role access.</p>
+            </div>
+            <div class="core-primitives-pills">
+              <span class="prim-chip">👤 Contact &amp; Account</span>
+              <span class="prim-chip">📊 Pipeline Machine</span>
+              <span class="prim-chip">📝 Activity Ledger</span>
+              <span class="prim-chip">🛡️ Mechanical Attenuation</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SVG Split/Branching Visual Pipeline Vectors (Desktop) -->
+        <div class="extend-svg-branching-wrapper">
+          <svg viewBox="0 0 1000 120" class="extend-branch-svg" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="b2b-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#FDB849" />
+                <stop offset="100%" stop-color="#A084B6" />
+              </linearGradient>
+              <linearGradient id="ecom-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#FDB849" />
+                <stop offset="100%" stop-color="#4E9B8F" />
+              </linearGradient>
+            </defs>
+
+            <!-- Center Source Point: (500, 0) -->
+            <!-- Left Splice to B2B: (500, 0) -> (250, 110) -->
+            <path d="M 500 10 C 500 65, 250 45, 250 110" class="branch-wire branch-wire-b2b" />
+            <!-- Right Splice to E-Commerce: (500, 0) -> (750, 110) -->
+            <path d="M 500 10 C 500 65, 750 45, 750 110" class="branch-wire branch-wire-ecom" />
+
+            <!-- Splicing Badges in SVG -->
+            <g transform="translate(340, 50)" class="splice-badge-group">
+              <rect x="-70" y="-12" width="140" height="24" rx="12" class="svg-splice-pill b2b-splice-pill" />
+              <text x="0" y="4" text-anchor="middle" class="svg-splice-text">+ .extend(dealDeskAgent)</text>
+            </g>
+
+            <g transform="translate(660, 50)" class="splice-badge-group">
+              <rect x="-70" y="-12" width="140" height="24" rx="12" class="svg-splice-pill ecom-splice-pill" />
+              <text x="0" y="4" text-anchor="middle" class="svg-splice-text">+ .extend(inventoryAgent)</text>
+            </g>
+          </svg>
+        </div>
+
+        <!-- Mobile Vertical Branch Connector (Visible <= 900px) -->
+        <div class="extend-mobile-branch-connector">
+          <div class="mobile-branch-line"></div>
+          <div class="mobile-branch-pills">
+            <span class="mobile-splice-pill b2b-mobile-pill">
+              <span class="splice-icon">🏢</span> + .extend(dealDeskAgent)
+            </span>
+            <span class="mobile-splice-pill ecom-mobile-pill">
+              <span class="splice-icon">🛒</span> + .extend(inventoryAgent)
+            </span>
+          </div>
+          <div class="mobile-branch-line"></div>
+        </div>
+
+        <!-- Two Specialized Branches Grid (B2B vs ECOM) -->
+        <div class="extend-branches-grid">
+
+          <!-- ============================================
+               BRANCH 1: B2B ENTERPRISE SAAS CRM
+               ============================================ -->
+          <div class="ext-branch-card b2b-branch-card" id="card-b2b">
+            <div class="branch-card-header">
+              <div class="branch-title-row">
+                <div class="branch-avatar b2b-avatar">🤖</div>
+                <div>
+                  <span class="branch-category-pill pill-purple">Autonomous B2B Deal-Desk</span>
+                  <h3>B2B Deal-Desk Agent Engine</h3>
+                </div>
+              </div>
+              <span class="badge-tag badge-purple">Multi-Seat &bull; Autonomous Deals</span>
+            </div>
+
+            <p class="branch-summary">
+              Equips sales copilot agents to calculate contract ARR, navigate multi-stakeholder discount limits, and route legal escalations.
+            </p>
+
+            <!-- Extension Layer Cards -->
+            <div class="branch-features-stack">
+              <!-- Feature 1: Data Widening -->
+              <div class="feature-item">
+                <div class="feature-head">
+                  <span class="feature-icon">💎</span>
+                  <strong>Agent Tool Widening</strong>
+                </div>
+                <div class="feature-chips-list">
+                  <span class="ext-chip">+ ARR &amp; Contract Bounds</span>
+                  <span class="ext-chip">+ Multi-Seat Calculators</span>
+                </div>
+              </div>
+
+              <!-- Feature 2: Injected Lifecycle States -->
+              <div class="feature-item">
+                <div class="feature-head">
+                  <span class="feature-icon">🔄</span>
+                  <strong>Injected Approval Gates</strong>
+                </div>
+                <div class="lifecycle-track">
+                  <span class="stage-pill stage-base">Lead</span>
+                  <span class="stage-arrow">&rarr;</span>
+                  <span class="stage-pill stage-custom">Security Review</span>
+                  <span class="stage-arrow">&rarr;</span>
+                  <span class="stage-pill stage-custom">Legal Redline</span>
+                  <span class="stage-arrow">&rarr;</span>
+                  <span class="stage-pill stage-base">Closed Won</span>
+                </div>
+              </div>
+
+              <!-- Feature 5: Native Connectors -->
+              <div class="feature-item">
+                <div class="feature-head">
+                  <span class="feature-icon">🔌</span>
+                  <strong>Ecosystem Connectors</strong>
+                </div>
+                <div class="connectors-row">
+                  <span class="connector-badge">Okta SAML/SCIM</span>
+                  <span class="connector-badge">DocuSign Webhook</span>
+                  <span class="connector-badge">Slack Deal Alerts</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============================================
+               BRANCH 2: E-COMMERCE & DTC RETAIL CRM
+               ============================================ -->
+          <div class="ext-branch-card ecom-branch-card" id="card-ecom">
+            <div class="branch-card-header">
+              <div class="branch-title-row">
+                <div class="branch-avatar ecom-avatar">⚡</div>
+                <div>
+                  <span class="branch-category-pill pill-teal">Autonomous Replenishment</span>
+                  <h3>E-Commerce &amp; Inventory Agent</h3>
+                </div>
+              </div>
+              <span class="badge-tag badge-mint">Instant Checkout &bull; Auto-Reorder</span>
+            </div>
+
+            <p class="branch-summary">
+              Powers autonomous agents that monitor stock velocity, compute reorder thresholds, and execute vendor purchases within mechanical spend limits.
+            </p>
+
+            <!-- Extension Layer Cards -->
+            <div class="branch-features-stack">
+              <!-- Feature 1: Data Widening -->
+              <div class="feature-item">
+                <div class="feature-head">
+                  <span class="feature-icon">🛍️</span>
+                  <strong>Agent Tool Widening</strong>
+                </div>
+                <div class="feature-chips-list">
+                  <span class="ext-chip">+ Live SKU Velocity</span>
+                  <span class="ext-chip">+ Reorder Point Trigger</span>
+                </div>
+              </div>
+
+              <!-- Feature 2: Injected Lifecycle States -->
+              <div class="feature-item">
+                <div class="feature-head">
+                  <span class="feature-icon">🔄</span>
+                  <strong>Injected Approval Gates</strong>
+                </div>
+                <div class="lifecycle-track">
+                  <span class="stage-pill stage-base">Monitor Stock</span>
+                  <span class="stage-arrow">&rarr;</span>
+                  <span class="stage-pill stage-custom">Threshold Tripped</span>
+                  <span class="stage-arrow">&rarr;</span>
+                  <span class="stage-pill stage-custom">PO Drafted</span>
+                  <span class="stage-arrow">&rarr;</span>
+                  <span class="stage-pill stage-base">Reorder Executed</span>
+                </div>
+              </div>
+
+              <!-- Feature 5: Native Connectors -->
+              <div class="feature-item">
+                <div class="feature-head">
+                  <span class="feature-icon">🔌</span>
+                  <strong>Ecosystem Connectors</strong>
+                </div>
+                <div class="connectors-row">
+                  <span class="connector-badge">Shopify Webhooks</span>
+                  <span class="connector-badge">Stripe Invoicing</span>
+                  <span class="connector-badge">Klaviyo Alerts</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Agentic MCP & Rex the Replenishment Agent Sandbox -->
+  <section class="section" id="agents">
+    <div class="container">
+      <div class="section-header gsap-reveal">
+        <span class="badge-tag badge-mint">Built-In Guardrails</span>
+        <h2>SPENDING LIMITS &amp; SAFETY GATES</h2>
+        <p class="lead">AI agents should never have blind access to your company funds or sensitive records. embdy enforces hard spending budgets, step-by-step business rules, and required supervisor approvals before actions take effect.</p>
+      </div>
+
+      <div class="sandbox-card gsap-reveal">
+        <!-- Controls -->
+        <div class="sandbox-controls">
+          <div>
+            <span class="badge-tag badge-sun" style="margin-bottom: 0.5rem;">Interactive Simulator</span>
+            <h3>Test Agent Spending Safeguards</h3>
+            <p>Autonomous agent credential scoped to a strict $500/day spend limit.</p>
+          </div>
+
+          <div class="control-group">
+            <label>
+              <span>Transaction Amount (USD)</span>
+              <strong id="rex-amount-display">$180.00</strong>
+            </label>
+            <input type="range" id="rex-order-amount" class="slider-input" min="50" max="800" step="10" value="180" />
+            <small style="color: var(--text-muted);">Hard mechanical limit: $500.00 / transaction</small>
+          </div>
+
+          <div class="control-group" style="margin-top: -0.25rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.875rem; font-weight: 600; color: var(--text-main);">
+              <input type="checkbox" id="rex-dry-run" style="width: 16px; height: 16px; accent-color: var(--color-mint-teal);" />
+              <span>Dry-Run Preflight (Test policy without mutating state)</span>
+            </label>
+          </div>
+
+          <button class="btn btn-primary" id="rex-execute-btn">
+            <span>Dispatch Agent MCP Tool Call</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Terminal Output -->
+        <div class="sandbox-terminal">
+          <div class="terminal-header-dots">
+            <div class="dot dot-red"></div>
+            <div class="dot dot-yellow"></div>
+            <div class="dot dot-green"></div>
+          </div>
+          <pre id="rex-terminal-output" style="line-height: 1.6; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.8125rem;">
+<span class="token-comment">// Adjust transaction spend or check Dry-Run, then dispatch the MCP tool call.</span>
+<span class="token-comment">// Mechanical guards verify policy before any state mutation occurs.</span>
+          </pre>
+          <div style="font-size: 0.75rem; color: #786C82; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.5rem;">
+            🔒 Mechanical attenuation engine &bull; SHA-256 ledger integrity
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Multi-Surface Projection Playground (CRM Pipeline App) -->
+  <section class="section" id="playground">
+    <div class="container">
+      <div class="section-header gsap-reveal">
+        <span class="badge-tag badge-sun">5 Synchronized Surfaces</span>
+        <h2>Built For Autonomous Agents. Supervised By Humans.</h2>
+        <p class="lead">One TypeScript definition automatically powers your AI agent's MCP tools, human supervisory UI schemas, typed APIs, and CLI commands.</p>
+      </div>
+
+      <div class="playground-wrapper gsap-reveal">
+        <!-- Navigation Tabs -->
+        <div class="playground-nav">
+          <div class="tab-buttons">
+            <button class="tab-btn active" data-tab="declaration">01. Declaration</button>
+            <button class="tab-btn" data-tab="mcp">02. Agent MCP Tools</button>
+            <button class="tab-btn" data-tab="uischema">03. Supervisory UI</button>
+            <button class="tab-btn" data-tab="cli">04. Terminal CLI</button>
+            <button class="tab-btn" data-tab="api">05. REST &amp; GraphQL</button>
+          </div>
+
+          <button class="btn btn-secondary btn-sm" id="copy-playground-code">Copy Code</button>
+        </div>
+
+        <!-- Meta Header -->
+        <div class="playground-meta">
+          <div class="meta-info">
+            <h4>
+              <span id="playground-title">01. Declaration</span>
+              <span class="badge-tag badge-sun" id="playground-badge">Single Source of Truth</span>
+            </h4>
+            <p id="playground-desc">Declare entities, FSM lifecycles, and policy guardrails that autonomous AI agents execute safely.</p>
+          </div>
+          <div class="hero-terminal-pill" style="background: rgba(0,0,0,0.4); border-color: rgba(255,255,255,0.15); color: #A3D9C9;">
+            <span id="playground-filename">crm.decl.ts</span>
+          </div>
+        </div>
+
+        <!-- Code View Area -->
+        <div class="code-container">
+          <pre><code id="playground-code"></code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- Quickstart & Final CTA Banner -->
+  <section class="section" id="quickstart">
+    <div class="container">
+      <div class="cta-banner gsap-reveal">
+        <span class="badge-tag badge-terracotta" style="margin-bottom: 1rem;">Ready For Autonomous Operations</span>
+        <h2>Your agents are ready to work. Give them real apps to run.</h2>
+        <p>Stop paying six-figure SaaS subscriptions for human seats. Deploy owned, deterministic business applications your AI agents can execute safely.</p>
+
+        <div class="hero-cta-group" style="justify-content: center;">
+          <div class="hero-terminal-pill" style="background: #FFFDF9; border-color: var(--stroke-main);">
+            <code>pnpm create embdy@latest crm-app</code>
+            <button class="copy-btn" data-copy="pnpm create embdy@latest crm-app">Copy Command</button>
+          </div>
+          <a href="https://github.com/nimrod4278/embdy" target="_blank" class="btn btn-primary btn-lg">View GitHub Repo</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-col">
+          <div class="brand-logo" style="margin-bottom: 1rem;">
+            <svg width="28" height="28" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="2" y="2" width="32" height="32" rx="10" fill="#FDB849" stroke="#2C2230" stroke-width="2.5"/>
+              <path d="M10 12H26M10 18H22M10 24H26" stroke="#2C2230" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+            <span>embdy</span>
+          </div>
+          <p style="font-size: 0.875rem; max-width: 300px;">
+            Build apps for agents. The open-source agent application framework. Open source &amp; MIT licensed.
+          </p>
+        </div>
+
+        <div class="footer-col">
+          <h5>Documentation</h5>
+          <div class="footer-links">
+            <a href="#">Getting Started Guide</a>
+            <a href="#">The 10 Primitives Spec</a>
+            <a href="#">MCP Server Protocol Reference</a>
+            <a href="#">Attenuation &amp; Spend Gates</a>
+          </div>
+        </div>
+
+        <div class="footer-col">
+          <h5>Ecosystem</h5>
+          <div class="footer-links">
+            <a href="#">Agent Modules Registry</a>
+            <a href="#">Claude &amp; Cursor MCP Tools</a>
+            <a href="#">PostgreSQL Driver &amp; Auto-RLS</a>
+            <a href="#">Supervisory UI Components</a>
+          </div>
+        </div>
+
+        <div class="footer-col">
+          <h5>Community</h5>
+          <div class="footer-links">
+            <a href="https://github.com/nimrod4278/embdy" target="_blank">GitHub Repository</a>
+            <a href="#">Discord Community</a>
+            <a href="#">Agent App Templates</a>
+            <a href="#">Contributing Guide</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <span>&copy; 2026 embdy project. All rights reserved. Open source under the MIT License.</span>
+        <span>Crafted with Rhymezlikedimez visual aesthetics &amp; GSAP 3.</span>
+      </div>
+    </div>
+  </footer>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

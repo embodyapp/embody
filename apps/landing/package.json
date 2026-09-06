@@ -1,0 +1,19 @@
+{
+  "name": "@app/landing",
+  "version": "4.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Interactive landing page for embdy headless business framework in Rhymezlikedimez visual style.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "gsap": "^3.12.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^6.2.0"
+  }
+}

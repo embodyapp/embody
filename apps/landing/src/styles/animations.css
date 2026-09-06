@@ -1,0 +1,38 @@
+/* ============================================================
+   FILM GRAIN & HALFTONE TEXTURES
+   ============================================================ */
+.grain-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.03;
+  transform: translateZ(0);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+.halftone-bg {
+  background-image: radial-gradient(var(--stroke-subtle) 1.2px, transparent 1.2px);
+  background-size: 16px 16px;
+}
+
+/* ============================================================
+   ESSENTIAL INTERACTIVE KEYFRAMES ONLY
+   ============================================================ */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ============================================================
+   RENDER PERFORMANCE: CONTENT VISIBILITY FOR BELOW-THE-FOLD
+   ============================================================ */
+.section:not(.hero-section),
+.footer {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}
+

@@ -1,0 +1,59 @@
+:root {
+  /* Canvas & Paper */
+  --bg-canvas: #FDF8F2;
+  --bg-canvas-subtle: #F7EFE3;
+  --bg-card: #FFFDF9;
+  --bg-card-alt: #FAF3E8;
+  --bg-dark: #2C2230;
+  --bg-dark-surface: #382D3E;
+
+  /* Golden Hour Palette (Rhymezlikedimez) */
+  --color-sun-yellow: #FDB849;
+  --color-sunset-orange: #F27A3D;
+  --color-terracotta: #D66248;
+  --color-sky-blue: #7BB8D4;
+  --color-twilight-purple: #A084B6;
+  --color-deep-purple: #56486E;
+  --color-palm-teal: #4E9B8F;
+  --color-mint: #A3D9C9;
+  --color-sand: #EADBC8;
+
+  /* Typography Colors - High Contrast for Readability */
+  --text-main: #231928;
+  --text-muted: #433849;
+  --text-light: #5F5366;
+  --text-inverse: #FDF8F2;
+  --text-inverse-muted: #DDD4E2;
+
+  /* Ligne Claire Strokes & Outlines */
+  --stroke-main: #2C2230;
+  --stroke-width: 2px;
+  --stroke-subtle: rgba(44, 34, 48, 0.15);
+  --stroke-glow: rgba(242, 122, 61, 0.4);
+
+  /* Shadows - Rhymezlikedimez warm physical hard-offset & diffused */
+  --shadow-hard: 4px 4px 0px var(--stroke-main);
+  --shadow-hard-lg: 6px 6px 0px var(--stroke-main);
+  --shadow-hard-sm: 2px 2px 0px var(--stroke-main);
+  --shadow-warm-glow: 0 16px 36px rgba(242, 122, 61, 0.12), 0 4px 12px rgba(86, 72, 110, 0.08);
+  --shadow-float: 0 20px 40px rgba(44, 34, 48, 0.12);
+
+  /* Border Radii */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+  --radius-xl: 32px;
+  --radius-pill: 9999px;
+
+  /* Transitions & Springs */
+  --ease-spring: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-fast: 0.15s var(--ease-spring);
+  --transition-normal: 0.3s var(--ease-spring);
+  --transition-slow: 0.6s var(--ease-spring);
+
+  /* Fonts */
+  --font-display: 'Outfit', 'Fraunces', -apple-system, sans-serif;
+  --font-body: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
