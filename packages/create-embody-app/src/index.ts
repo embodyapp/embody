@@ -34,13 +34,13 @@ function template(name: string): Readonly<Record<string, string>> {
             build: "tsc -p tsconfig.json",
             typecheck: "tsc -p tsconfig.json --noEmit",
             test: "vitest run",
-            start: "node dist/index.js",
+            prestart: "pnpm build",
+            start: "node dist/src/index.js",
           },
           dependencies: {
             "@embody/cli": "^0.0.0",
             "@embody/core": "^0.0.0",
             "@embody/host": "^0.0.0",
-            "@embody/storage": "^0.0.0",
           },
           devDependencies: {
             "@embody/testing": "^0.0.0",
@@ -62,14 +62,15 @@ function template(name: string): Readonly<Record<string, string>> {
             strict: true,
             outDir: "dist",
             declaration: true,
+            rootDir: ".",
           },
           include: ["src/**/*.ts", "embody.config.ts"],
         },
         null,
         2,
       ) + "\n",
-    "embody.config.ts": `import { definePlugin, z } from "@embody/core";\n\nexport default {\n  appId: "${name}",\n  plugins: [definePlugin({\n    id: "app",\n    version: "0.1.0",\n    actions: { ping: { input: z.object({}), handler: () => ({ ok: true }) } },\n  })],\n};\n`,
-    "src/index.ts": `import config from "../embody.config.js";\nimport { startDevServer } from "@embody/cli";\n\nconst server = await startDevServer(config);\nconsole.log(server.url);\nprocess.once("SIGTERM", () => void server.close());\n`,
+    "embody.config.ts": `import { definePlugin, z } from "@embody/core";\nimport { defineApp } from "@embody/host";\n\nexport default defineApp({\n  appId: "${name}",\n  version: "0.1.0",\n  plugins: [definePlugin({\n    id: "app",\n    version: "0.1.0",\n    actions: { ping: { input: z.object({}), handler: () => ({ ok: true }) } },\n  })],\n});\n`,
+    "src/index.ts": `import config from "../embody.config.js";\nimport { createAppHost } from "@embody/host";\n\nconst runtime = await createAppHost(config);\nawait runtime.start();\nconsole.log(runtime.url);\nconst close = () => void runtime.stop();\nprocess.once("SIGINT", close);\nprocess.once("SIGTERM", close);\n`,
     "src/plugin.ts": `export { default } from "../embody.config.js";\n`,
     "src/plugin.test.ts": `import { expect, it } from "vitest";\nimport { createTestHarness } from "@embody/testing";\nimport config from "../embody.config.js";\n\nit("runs the starter action", async () => {\n  const harness = await createTestHarness({ plugins: config.plugins });\n  try { expect(await harness.call("app.ping", {})).toEqual({ ok: true }); } finally { await harness.close(); }\n});\n`,
     "README.md": `# ${name}\n\nRun \`pnpm install\`, \`pnpm test\`, then \`pnpm dev\`. The dev host is loopback-only.\n`,
@@ -77,7 +78,7 @@ function template(name: string): Readonly<Record<string, string>> {
     ".gitignore": "node_modules\ndist\n.embody\n.env\n",
     ".dockerignore": "node_modules\ndist\n.git\n.env\n",
     Dockerfile:
-      'FROM node:24-alpine\nWORKDIR /app\nCOPY . .\nRUN corepack enable && pnpm install --frozen-lockfile && pnpm build\nEXPOSE 8080\nHEALTHCHECK CMD node -e "fetch(\'http://127.0.0.1:8080/health\').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"\nCMD ["node", "dist/index.js"]\n',
+      'FROM node:24-alpine\nWORKDIR /app\nCOPY . .\nRUN corepack enable && pnpm install --frozen-lockfile && pnpm build\nEXPOSE 8080\nHEALTHCHECK CMD node -e "fetch(\'http://127.0.0.1:8080/health\').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"\nCMD ["node", "dist/src/index.js"]\n',
   };
 }
 

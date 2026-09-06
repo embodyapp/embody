@@ -201,8 +201,141 @@ export type CheckedPluginDefinition<TPlugin> = TPlugin extends {
     }
   : unknown;
 
+export type TypedEntityContext<TEntities extends Readonly<Record<string, EntityDefinition>>> = Omit<
+  KernelContext,
+  "entities"
+> & {
+  readonly entities: {
+    readonly [TName in keyof TEntities]: TEntities[TName] extends EntityDefinition<infer TSchema>
+      ? EntityStoreAccessor<z.output<TSchema>>
+      : never;
+  };
+};
+
+export type TypedEntityData<TDefinition> =
+  TDefinition extends EntityDefinition<infer TSchema> ? z.output<TSchema> : never;
+
+export interface PluginHookRegistration {
+  readonly key: string;
+  readonly handler: HookHandler;
+}
+
+export interface PluginDefinitionHelpers<
+  TEntities extends Readonly<Record<string, EntityDefinition>>,
+> {
+  action<TInput extends z.ZodType, TOutput extends z.ZodType>(
+    this: void,
+    definition: {
+      readonly description?: string;
+      readonly input: TInput;
+      readonly output: TOutput;
+      readonly handler: (
+        input: z.output<TInput>,
+        ctx: TypedEntityContext<TEntities>,
+      ) => Promise<z.output<TOutput>> | z.output<TOutput>;
+    },
+  ): {
+    readonly description?: string;
+    readonly input: TInput;
+    readonly output: TOutput;
+    readonly handler: (
+      input: z.output<TInput>,
+      ctx: TypedEntityContext<TEntities>,
+    ) => Promise<z.output<TOutput>> | z.output<TOutput>;
+  };
+  action<TInput extends z.ZodType>(
+    this: void,
+    definition: {
+      readonly description?: string;
+      readonly input: TInput;
+      readonly handler: (input: z.output<TInput>, ctx: TypedEntityContext<TEntities>) => unknown;
+    },
+  ): {
+    readonly description?: string;
+    readonly input: TInput;
+    readonly handler: (input: z.output<TInput>, ctx: TypedEntityContext<TEntities>) => unknown;
+  };
+  beforeUpdate<TEntity extends keyof TEntities & string>(
+    this: void,
+    entity: TEntity,
+    handler: (
+      payload: {
+        readonly current: EntityRecord<TypedEntityData<TEntities[TEntity]>>;
+        readonly patch: Partial<TypedEntityData<TEntities[TEntity]>>;
+      },
+      ctx: TypedEntityContext<TEntities>,
+    ) => Promise<void> | void,
+  ): PluginHookRegistration;
+  afterUpdate<TEntity extends keyof TEntities & string>(
+    this: void,
+    entity: TEntity,
+    handler: (
+      payload: {
+        readonly current: EntityRecord<TypedEntityData<TEntities[TEntity]>>;
+        readonly updated: EntityRecord<TypedEntityData<TEntities[TEntity]>>;
+      },
+      ctx: TypedEntityContext<TEntities>,
+    ) => Promise<void> | void,
+  ): PluginHookRegistration;
+}
+
+export interface PluginExtension {
+  readonly actions?: Readonly<Record<string, unknown>>;
+  readonly hooks?: readonly PluginHookRegistration[];
+}
+
+export type TypedPluginBase<
+  TId extends string,
+  TEntities extends Readonly<Record<string, EntityDefinition>>,
+> = Omit<EmbodyPlugin, "id" | "entities" | "actions" | "hooks"> & {
+  readonly id: TId;
+  readonly entities: TEntities;
+};
+
+/**
+ * Defines a plugin. The two-argument form provides typed action contexts and lifecycle hooks without
+ * requiring callers to duplicate schema parsing or cast entity stores and hook payloads.
+ */
+export function definePlugin<
+  const TId extends string,
+  const TEntities extends Readonly<Record<string, EntityDefinition>>,
+  const TExtension extends PluginExtension,
+>(
+  plugin: TypedPluginBase<TId, TEntities>,
+  extend: (helpers: PluginDefinitionHelpers<TEntities>) => TExtension,
+): EmbodyPlugin & TypedPluginBase<TId, TEntities> & Omit<TExtension, "hooks">;
 export function definePlugin<const TPlugin extends EmbodyPlugin>(
   plugin: TPlugin & CheckedPluginDefinition<TPlugin>,
-): TPlugin {
-  return plugin;
+): TPlugin;
+export function definePlugin(
+  plugin: EmbodyPlugin,
+  extend?: (
+    helpers: PluginDefinitionHelpers<Readonly<Record<string, EntityDefinition>>>,
+  ) => PluginExtension,
+): EmbodyPlugin {
+  if (extend === undefined) return plugin;
+  const hook = (
+    phase: "beforeUpdate" | "afterUpdate",
+    entity: string,
+    handler: HookHandler<never>,
+  ): PluginHookRegistration => ({
+    key: `${plugin.id}.${entity}.${phase}`,
+    handler: handler as HookHandler,
+  });
+  const extension = extend({
+    action: ((definition: unknown) => definition) as PluginDefinitionHelpers<
+      Readonly<Record<string, EntityDefinition>>
+    >["action"],
+    beforeUpdate: (entity, handler) => hook("beforeUpdate", entity, handler),
+    afterUpdate: (entity, handler) => hook("afterUpdate", entity, handler),
+  });
+  return {
+    ...plugin,
+    ...(extension.actions === undefined
+      ? {}
+      : { actions: extension.actions as Readonly<Record<string, ActionDefinition>> }),
+    ...(extension.hooks === undefined
+      ? {}
+      : { hooks: Object.fromEntries(extension.hooks.map(({ key, handler }) => [key, handler])) }),
+  };
 }

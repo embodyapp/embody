@@ -1,4 +1,6 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
   BadRequestError,
@@ -6,12 +8,16 @@ import {
   UnauthenticatedError,
   UnavailableError,
   executionRequestSchema,
+  Kernel,
   stableStringify,
   toErrorEnvelope,
+  z,
+  type EmbodyPlugin,
+  type Principal,
 } from "@embody/core";
-import type { EventEnvelope, Kernel } from "@embody/core";
-import type { AppAuthVerifier } from "@embody/auth";
-import type { StorageConnection } from "@embody/storage";
+import type { EventEnvelope } from "@embody/core";
+import { gatewayJwtVerifier, localDevVerifier, type AppAuthVerifier } from "@embody/auth";
+import { PostgresStorage, SqliteStorage, type StorageConnection } from "@embody/storage";
 import { parseDeliveryRequest, signDelivery } from "./events.js";
 
 export {
@@ -330,5 +336,167 @@ export function createHost(options: HostOptions): EmbodyHost {
       accepting = false;
       await app.close();
     },
+  };
+}
+
+export interface AppDefinition {
+  readonly appId: string;
+  readonly version: string;
+  readonly plugins: readonly EmbodyPlugin[];
+}
+
+/** Preserves literal app configuration while checking the public host contract. */
+export function defineApp<const TApp extends AppDefinition>(app: TApp): TApp {
+  return app;
+}
+
+const appEnvironmentSchema = z.object({
+  NODE_ENV: z.enum(["development", "production"]).default("development"),
+  PORT: z.coerce.number().int().min(0).max(65535).default(8080),
+  DATABASE_FILE: z.string().min(1).default(".embody/app.sqlite"),
+  DATABASE_URL: z.url().optional(),
+  GATEWAY_URL: z.url().optional(),
+  PUBLIC_URL: z.url().optional(),
+  GATEWAY_REGISTRATION_SECRET: z.string().min(16).optional(),
+  GATEWAY_JWT_ISSUER: z.string().min(1).optional(),
+  GATEWAY_JWT_SECRET: z.string().min(32).optional(),
+});
+
+export type AppEnvironment = z.output<typeof appEnvironmentSchema>;
+
+export interface AppHostRuntimeOptions {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly storage?: StorageConnection;
+  readonly verifier?: AppAuthVerifier;
+  readonly developmentPrincipal?: Principal;
+  readonly host?: string;
+}
+
+export interface AppHostRuntime {
+  readonly app: FastifyInstance;
+  readonly kernel: Kernel;
+  readonly environment: AppEnvironment;
+  readonly url: string | undefined;
+  start(): Promise<string>;
+  stop(): Promise<void>;
+}
+
+/** Validates the conventional app environment and fails closed in production. */
+export function parseAppEnvironment(input: NodeJS.ProcessEnv = process.env): AppEnvironment {
+  const parsed = appEnvironmentSchema.safeParse(input);
+  if (!parsed.success) throw new Error(`Invalid Embody app environment: ${parsed.error.message}`);
+  const env = parsed.data;
+  if (env.NODE_ENV === "production") {
+    if (!env.DATABASE_URL) throw new Error("Production requires DATABASE_URL (PostgreSQL)");
+    if (!env.GATEWAY_URL || !env.PUBLIC_URL || !env.GATEWAY_REGISTRATION_SECRET)
+      throw new Error(
+        "Production requires GATEWAY_URL, PUBLIC_URL, and GATEWAY_REGISTRATION_SECRET",
+      );
+    if (!env.GATEWAY_JWT_ISSUER || !env.GATEWAY_JWT_SECRET)
+      throw new Error("Production requires GATEWAY_JWT_ISSUER and GATEWAY_JWT_SECRET");
+  }
+  return env;
+}
+
+/**
+ * Assembles storage, kernel, authentication, HTTP hosting, gateway registration, and cleanup using
+ * one conventional interface. Explicit adapters can be injected for tests and custom deployments.
+ */
+export async function createAppHost(
+  definition: AppDefinition,
+  options: AppHostRuntimeOptions = {},
+): Promise<AppHostRuntime> {
+  const environment = parseAppEnvironment(options.env);
+  let storage = options.storage;
+  if (storage === undefined && environment.DATABASE_URL)
+    storage = new PostgresStorage({ connectionString: environment.DATABASE_URL });
+  if (storage === undefined) {
+    const filename =
+      environment.DATABASE_FILE === ":memory:"
+        ? environment.DATABASE_FILE
+        : resolve(environment.DATABASE_FILE);
+    if (filename !== ":memory:") await mkdir(dirname(filename), { recursive: true });
+    storage = new SqliteStorage({ filename });
+  }
+  const kernel = new Kernel({ plugins: definition.plugins, storage });
+  await kernel.boot();
+  let verifier = options.verifier;
+  if (verifier === undefined && environment.NODE_ENV === "development") {
+    verifier = localDevVerifier({
+      enabled: true,
+      environment: "development",
+      principal: options.developmentPrincipal ?? {
+        orgId: "local",
+        actorId: "local-developer",
+        actorType: "human",
+        roles: ["developer"],
+        scopes: definition.plugins.map((plugin) => `${plugin.id}:*`),
+      },
+    });
+  }
+  if (verifier === undefined) {
+    const { GATEWAY_JWT_ISSUER: issuer, GATEWAY_JWT_SECRET: secret } = environment;
+    if (!issuer || !secret) throw new Error("Missing production gateway JWT configuration");
+    verifier = gatewayJwtVerifier({
+      issuer,
+      audience: definition.appId,
+      key: new TextEncoder().encode(secret),
+      algorithms: ["HS256"],
+    });
+  }
+  const host = createHost({
+    kernel,
+    verifier,
+    appId: definition.appId,
+    version: definition.version,
+    environment: environment.NODE_ENV,
+  });
+  const registration =
+    environment.GATEWAY_URL && environment.PUBLIC_URL && environment.GATEWAY_REGISTRATION_SECRET
+      ? createRegistrationClient({
+          gatewayUrl: environment.GATEWAY_URL,
+          appId: definition.appId,
+          version: definition.version,
+          endpoint: environment.PUBLIC_URL,
+          healthCheckUrl: new URL("/health", environment.PUBLIC_URL).toString(),
+          manifest: kernel.manifest,
+          secret: environment.GATEWAY_REGISTRATION_SECRET,
+        })
+      : undefined;
+  let address: string | undefined;
+  let stopped = false;
+  const stop = async (): Promise<void> => {
+    if (stopped) return;
+    stopped = true;
+    registration?.stop();
+    try {
+      await host.stop();
+    } finally {
+      await kernel.stop();
+    }
+  };
+  return {
+    app: host.app,
+    kernel,
+    environment,
+    get url() {
+      return address;
+    },
+    async start(): Promise<string> {
+      if (address !== undefined) return address;
+      try {
+        await host.start();
+        address = await host.app.listen({
+          port: environment.PORT,
+          host: options.host ?? (environment.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
+        });
+        await registration?.start();
+        return address;
+      } catch (error) {
+        await stop();
+        throw error;
+      }
+    },
+    stop,
   };
 }

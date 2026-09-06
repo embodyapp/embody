@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Kernel } from "@embody/core";
-import { createHost, createRegistrationClient, signDelivery } from "../src/index.js";
+import { definePlugin, z, type Kernel } from "@embody/core";
+import {
+  createAppHost,
+  createHost,
+  createRegistrationClient,
+  defineApp,
+  parseAppEnvironment,
+  signDelivery,
+} from "../src/index.js";
 
 const principal = {
   orgId: "org-1",
@@ -204,6 +211,37 @@ describe("remote host", () => {
       }),
     );
   });
+  it("assembles and cleans up a conventional development app host", async () => {
+    const definition = defineApp({
+      appId: "hello",
+      version: "1.0.0",
+      plugins: [
+        definePlugin({
+          id: "hello",
+          version: "1.0.0",
+          actions: { ping: { input: z.object({}), handler: () => ({ ok: true }) } },
+        }),
+      ],
+    });
+    const runtime = await createAppHost(definition, {
+      env: { NODE_ENV: "development", PORT: "0", DATABASE_FILE: ":memory:" },
+    });
+    try {
+      const address = await runtime.start();
+      expect(address).toMatch(/^http:\/\/127\.0\.0\.1:/);
+      const health = await runtime.app.inject("/health");
+      expect(health.json()).toMatchObject({ appId: "hello", ready: true });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it("rejects incomplete conventional production configuration", () => {
+    expect(() => parseAppEnvironment({ NODE_ENV: "production" })).toThrow(
+      "Production requires DATABASE_URL",
+    );
+  });
+
   it("reports readiness and rejects local development auth in production", async () => {
     const { host } = makeHost();
     const health = await host.app.inject("/health");

@@ -19,7 +19,11 @@ it("generates the documented safe starter layout", async () => {
   });
   expect(app.files).toContain("embody.config.ts");
   expect(await readFile(join(app.directory, "Dockerfile"), "utf8")).toContain("HEALTHCHECK");
-  expect(await readFile(join(app.directory, "package.json"), "utf8")).not.toContain("secret");
+  expect(await readFile(join(app.directory, "embody.config.ts"), "utf8")).toContain("defineApp");
+  expect(await readFile(join(app.directory, "src/index.ts"), "utf8")).toContain("createAppHost");
+  const packageJson = await readFile(join(app.directory, "package.json"), "utf8");
+  expect(packageJson).not.toContain("secret");
+  expect(packageJson).toContain('"prestart": "pnpm build"');
 });
 
 it("rejects traversal and preserves nonempty destinations", async () => {

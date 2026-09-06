@@ -142,6 +142,9 @@ export class ConflictError extends EmbodyError {
     constructor(message?: string);
 }
 
+// @public
+export function definePlugin<const TId extends string, const TEntities extends Readonly<Record<string, EntityDefinition>>, const TExtension extends PluginExtension>(plugin: TypedPluginBase<TId, TEntities>, extend: (helpers: PluginDefinitionHelpers<TEntities>) => TExtension): EmbodyPlugin & TypedPluginBase<TId, TEntities> & Omit<TExtension, "hooks">;
+
 // @public (undocumented)
 export function definePlugin<const TPlugin extends EmbodyPlugin>(plugin: TPlugin & CheckedPluginDefinition<TPlugin>): TPlugin;
 
@@ -207,6 +210,14 @@ export interface EmbodyPlugin<TConfig = unknown, TEntities extends Readonly<Reco
     readonly version: string;
     // (undocumented)
     readonly workflows?: Readonly<Record<string, WorkflowDefinition>>;
+}
+
+// @public (undocumented)
+export interface EntityBulkUpdate<TData> {
+    // (undocumented)
+    readonly data: Partial<TData>;
+    // (undocumented)
+    readonly id: string;
 }
 
 // @public (undocumented)
@@ -296,10 +307,12 @@ export interface EntityStoreAccessor<TData = Record<string, unknown>> {
     delete(id: string): Promise<EntityRecord<TData>>;
     // (undocumented)
     get(id: string): Promise<EntityRecord<TData>>;
+    getMany(ids: readonly string[]): Promise<readonly EntityRecord<TData>[]>;
     // (undocumented)
     list(options?: EntityListOptions<TData>): Promise<readonly EntityRecord<TData>[]>;
     // (undocumented)
     update(id: string, data: Partial<TData>): Promise<EntityRecord<TData>>;
+    updateMany(updates: readonly EntityBulkUpdate<TData>[]): Promise<readonly EntityRecord<TData>[]>;
 }
 
 // @public (undocumented)
@@ -628,6 +641,58 @@ export class NotFoundError extends EmbodyError {
 export function parseTarget(target: string): readonly string[];
 
 // @public (undocumented)
+export interface PluginDefinitionHelpers<TEntities extends Readonly<Record<string, EntityDefinition>>> {
+    // (undocumented)
+    action<TInput extends z.ZodType, TOutput extends z.ZodType>(this: void, definition: {
+        readonly description?: string;
+        readonly input: TInput;
+        readonly output: TOutput;
+        readonly handler: (input: z.output<TInput>, ctx: TypedEntityContext<TEntities>) => Promise<z.output<TOutput>> | z.output<TOutput>;
+    }): {
+        readonly description?: string;
+        readonly input: TInput;
+        readonly output: TOutput;
+        readonly handler: (input: z.output<TInput>, ctx: TypedEntityContext<TEntities>) => Promise<z.output<TOutput>> | z.output<TOutput>;
+    };
+    // (undocumented)
+    action<TInput extends z.ZodType>(this: void, definition: {
+        readonly description?: string;
+        readonly input: TInput;
+        readonly handler: (input: z.output<TInput>, ctx: TypedEntityContext<TEntities>) => unknown;
+    }): {
+        readonly description?: string;
+        readonly input: TInput;
+        readonly handler: (input: z.output<TInput>, ctx: TypedEntityContext<TEntities>) => unknown;
+    };
+    // (undocumented)
+    afterUpdate<TEntity extends keyof TEntities & string>(this: void, entity: TEntity, handler: (payload: {
+        readonly current: EntityRecord<TypedEntityData<TEntities[TEntity]>>;
+        readonly updated: EntityRecord<TypedEntityData<TEntities[TEntity]>>;
+    }, ctx: TypedEntityContext<TEntities>) => Promise<void> | void): PluginHookRegistration;
+    // (undocumented)
+    beforeUpdate<TEntity extends keyof TEntities & string>(this: void, entity: TEntity, handler: (payload: {
+        readonly current: EntityRecord<TypedEntityData<TEntities[TEntity]>>;
+        readonly patch: Partial<TypedEntityData<TEntities[TEntity]>>;
+    }, ctx: TypedEntityContext<TEntities>) => Promise<void> | void): PluginHookRegistration;
+}
+
+// @public (undocumented)
+export interface PluginExtension {
+    // (undocumented)
+    readonly actions?: Readonly<Record<string, unknown>>;
+    // (undocumented)
+    readonly hooks?: readonly PluginHookRegistration[];
+}
+
+// @public (undocumented)
+export interface PluginHookRegistration {
+    // (undocumented)
+    readonly handler: HookHandler;
+    // (undocumented)
+    readonly key: string;
+}
+
+// @public (undocumented)
 export interface Principal {
     // (undocumented)
     readonly actorId: string;
@@ -757,6 +822,22 @@ export function targetToMcpName(target: string, options: {
 export function toErrorEnvelope(error: unknown, requestId: string, environment?: "development" | "production"): {
     readonly status: number;
     readonly body: ErrorEnvelope;
+};
+
+// @public (undocumented)
+export type TypedEntityContext<TEntities extends Readonly<Record<string, EntityDefinition>>> = Omit<KernelContext, "entities"> & {
+    readonly entities: {
+        readonly [TName in keyof TEntities]: TEntities[TName] extends EntityDefinition<infer TSchema> ? EntityStoreAccessor<z.output<TSchema>> : never;
+    };
+};
+
+// @public (undocumented)
+export type TypedEntityData<TDefinition> = TDefinition extends EntityDefinition<infer TSchema> ? z.output<TSchema> : never;
+
+// @public (undocumented)
+export type TypedPluginBase<TId extends string, TEntities extends Readonly<Record<string, EntityDefinition>>> = Omit<EmbodyPlugin, "id" | "entities" | "actions" | "hooks"> & {
+    readonly id: TId;
+    readonly entities: TEntities;
 };
 
 // @public (undocumented)

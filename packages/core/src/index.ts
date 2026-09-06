@@ -22,7 +22,13 @@ export {
   type KernelContext,
   type KernelServices,
   type Principal,
+  type PluginDefinitionHelpers,
+  type PluginExtension,
+  type PluginHookRegistration,
   type ProgressUpdate,
+  type TypedEntityContext,
+  type TypedEntityData,
+  type TypedPluginBase,
   type WorkflowDefinition,
 } from "./contracts.js";
 export {

@@ -32,6 +32,42 @@ describe("definePlugin", () => {
     >();
   });
 
+  it("infers action input, entity stores, and lifecycle payloads in the typed form", () => {
+    const typed = definePlugin(
+      {
+        id: "notes",
+        version: "1.0.0",
+        entities: { note: { schema: z.object({ body: z.string(), archived: z.boolean() }) } },
+      },
+      (define) => ({
+        actions: {
+          archive: define.action({
+            input: z.object({ id: z.uuid() }),
+            handler: async ({ id }, context) => {
+              expectTypeOf(id).toEqualTypeOf<string>();
+              const note = await context.entities.note.get(id);
+              expectTypeOf(note.data.body).toEqualTypeOf<string>();
+              expectTypeOf(context.entities.note.getMany([id])).toEqualTypeOf<
+                Promise<readonly (typeof note)[]>
+              >();
+              await context.entities.note.updateMany([{ id, data: { archived: true } }]);
+              return context.entities.note.update(id, { archived: true });
+            },
+          }),
+        },
+        hooks: [
+          define.beforeUpdate("note", ({ current, patch }) => {
+            expectTypeOf(current.data.body).toEqualTypeOf<string>();
+            expectTypeOf(patch.archived).toEqualTypeOf<boolean | undefined>();
+          }),
+        ],
+      }),
+    );
+
+    expect(Object.keys(typed.actions ?? {})).toEqual(["archive"]);
+    expect(Object.keys(typed.hooks ?? {})).toEqual(["notes.note.beforeUpdate"]);
+  });
+
   it("rejects handler input types that disagree with their schema", () => {
     definePlugin({
       id: "typed",
