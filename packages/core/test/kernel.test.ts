@@ -93,12 +93,17 @@ describe("kernel lifecycle", () => {
     await kernel.stop();
     expect(db.close).toHaveBeenCalledOnce();
   });
-  it("rejects workflows until the deferred workflow contract is approved", async () => {
+  it("rejects invalid workflow graphs during boot", async () => {
     const kernel = new Kernel({
       storage: storage(),
-      plugins: [{ ...plugin("flow"), workflows: { work: { input: z.object({}), steps: {} } } }],
+      plugins: [
+        {
+          ...plugin("flow"),
+          workflows: { work: { version: "1.0.0", input: z.object({}), steps: {} } },
+        },
+      ],
     });
-    await expect(kernel.boot()).rejects.toThrow("UNSUPPORTED_WORKFLOW");
+    await expect(kernel.boot()).rejects.toThrow("has no steps");
   });
   it("stops components in reverse order and is idempotent", async () => {
     const stopped: string[] = [];

@@ -44,6 +44,25 @@ const entityManifestSchema = z
       .optional(),
   })
   .strict();
+const workflowManifestSchema = z
+  .object({
+    description: z.string().max(2_000).optional(),
+    version: safeString,
+    inputSchema: jsonSchema,
+    outputSchema: jsonSchema.optional(),
+    steps: z
+      .array(z.object({ name: safeString, dependsOn: z.array(safeString) }).strict())
+      .max(1_000),
+    controls: z
+      .object({
+        start: targetSchema,
+        status: targetSchema,
+        cancel: targetSchema,
+        retry: targetSchema,
+      })
+      .strict(),
+  })
+  .strict();
 const actionManifestSchema = z
   .object({
     description: z.string().max(2_000).optional(),
@@ -59,6 +78,7 @@ export const appManifestSchema = z
     plugins: z.array(z.object({ id: identifier, version: safeString }).strict()).max(500),
     entities: z.record(z.string(), entityManifestSchema),
     actions: z.record(z.string(), actionManifestSchema),
+    workflows: z.record(z.string(), workflowManifestSchema).default({}),
     eventSubscriptions: z.array(targetSchema).max(10_000),
   })
   .strict();

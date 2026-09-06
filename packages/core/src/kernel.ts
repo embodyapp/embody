@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import type {
   ActionDefinition,
   EmbodyPlugin,
@@ -9,8 +11,10 @@ import type {
   ProgressUpdate,
   DomainEvent,
   EventHandler,
+  WorkflowStepContext,
 } from "./contracts.js";
 import {
+  ConflictError,
   DependencyError,
   DuplicateRegistrationError,
   ForbiddenError,
@@ -29,6 +33,15 @@ import {
 import { compileManifest, type AppManifest } from "./manifest.js";
 import { formatTarget } from "./target.js";
 import { progressUpdateSchema } from "./protocol.js";
+import {
+  compileWorkflows,
+  safeWorkflowValue,
+  stepDefinition,
+  workflowInputHash,
+  type CompiledWorkflow,
+  type WorkflowSnapshot,
+  type WorkflowStepRecord,
+} from "./workflows.js";
 
 export type KernelState = "created" | "booting" | "ready" | "stopping" | "stopped" | "failed";
 export type BootPhase =
@@ -154,6 +167,7 @@ export class Kernel {
     { readonly id: string; readonly handler: EventHandler }[]
   >();
   private readonly entities = new Map<string, CompiledEntity>();
+  private readonly workflows = new Map<string, CompiledWorkflow>();
   private _manifest: AppManifest | undefined;
 
   public constructor(private readonly options: KernelOptions) {}
@@ -164,6 +178,9 @@ export class Kernel {
   }
   public get plugins(): readonly EmbodyPlugin[] {
     return this.sorted;
+  }
+  public get workflowTargets(): readonly string[] {
+    return [...this.workflows.keys()].sort();
   }
   public get actionTargets(): readonly string[] {
     return [...this.actions.keys()].sort();
@@ -248,6 +265,78 @@ export class Kernel {
       });
     }
   }
+  /** Executes one already-claimed durable step. The worker owns persistence transitions. */
+  public async executeWorkflowStep(
+    step: WorkflowStepRecord,
+    snapshot: WorkflowSnapshot,
+    tx: EntityTransaction,
+  ): Promise<unknown> {
+    const workflow = this.workflows.get(snapshot.definition);
+    if (workflow === undefined || workflow.definition.version !== snapshot.definitionVersion)
+      throw new DependencyError(
+        `Workflow definition ${snapshot.definition}@${snapshot.definitionVersion} must be retained`,
+      );
+    const principal = snapshot.principal;
+    this.assertPrincipal(principal);
+    const permission = `${workflow.target}.${step.name}`;
+    if (!this.scopeAllows(principal.scopes, permission))
+      throw new ForbiddenError("Workflow actor permission was revoked");
+    const definition = stepDefinition(workflow, step.name);
+    const base = this.executionContext(principal, tx, { principal });
+    const outputs = Object.fromEntries(
+      snapshot.steps
+        .filter((item) => item.output !== undefined)
+        .map((item) => [item.name, item.output]),
+    );
+    const context = Object.freeze({
+      ...base,
+      workflowId: snapshot.id,
+      input: freeze(snapshot.input),
+      outputs: freeze(outputs),
+      attempt: step.attempt,
+    }) as WorkflowStepContext;
+    if (step.status === "compensating") {
+      if (definition.compensate === undefined) return undefined;
+      await definition.compensate(step.output, context);
+      return undefined;
+    }
+    const run = Promise.resolve(definition.handler(context));
+    let result: unknown;
+    if (definition.timeoutMs === undefined) result = await run;
+    else {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        result = await Promise.race([
+          run,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new UnavailableError("Workflow step timed out")),
+              definition.timeoutMs,
+            );
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    }
+    const parsed = definition.output?.safeParse(result);
+    if (parsed !== undefined && !parsed.success)
+      throw new InternalError("Workflow step returned invalid output");
+    const value = parsed?.data ?? result;
+    if (step.name === workflow.resultStep && workflow.definition.output !== undefined) {
+      const final = workflow.definition.output.safeParse(value);
+      if (!final.success) throw new InternalError("Workflow returned invalid output");
+      return safeWorkflowValue(
+        workflow.definition.redact?.(final.data, "output") ?? final.data,
+        "Workflow output",
+      );
+    }
+    return safeWorkflowValue(
+      workflow.definition.redact?.(value, "output") ?? value,
+      "Workflow step output",
+    );
+  }
+
   /** Delivers an already-persisted event to this app's matching handlers in registration order. */
   public async handleEvent(event: DomainEvent, tx: EntityTransaction): Promise<void> {
     if (this.state !== "ready") throw new DependencyError("Kernel is not ready");
@@ -304,10 +393,8 @@ export class Kernel {
     try {
       this.phase("resolve");
       this.sorted = sortPlugins(this.options.plugins);
-      if (this.sorted.some((plugin) => Object.keys(plugin.workflows ?? {}).length > 0))
-        throw new DependencyError(
-          "UNSUPPORTED_WORKFLOW: durable workflows are not available in MVP",
-        );
+      for (const workflow of compileWorkflows(this.sorted))
+        this.workflows.set(workflow.target, workflow);
       this.phase("schema");
       for (const plugin of this.sorted)
         for (const [name, definition] of Object.entries(plugin.entities ?? {})) {
@@ -371,12 +458,102 @@ export class Kernel {
       }
       for (const [name, action] of Object.entries(plugin.actions ?? {}))
         this.registerAction(formatTarget([plugin.id, name]), action);
+      for (const [name] of Object.entries(plugin.workflows ?? {}))
+        this.registerWorkflowActions(formatTarget([plugin.id, name]));
       for (const [name, handler] of Object.entries(plugin.events ?? {})) {
         const handlers = this.eventHandlers.get(name) ?? [];
         handlers.push({ id: `${plugin.id}.${name}`, handler });
         this.eventHandlers.set(name, handlers);
       }
     }
+  }
+  private registerWorkflowActions(target: string): void {
+    const workflow = this.workflows.get(target)!;
+    const id = z.uuid();
+    const repository = (tx: EntityTransaction) => {
+      if (tx.workflows === undefined)
+        throw new DependencyError("Storage does not support workflows");
+      return tx.workflows;
+    };
+    this.registerAction(`${target}.start`, {
+      input: z.object({
+        input: workflow.definition.input,
+        idempotencyKey: z.string().min(1).max(200),
+      }),
+      handler: async (request, ctx) => {
+        const requestValue = request as {
+          readonly input: unknown;
+          readonly idempotencyKey: string;
+        };
+        const tx = (ctx as KernelContext & { readonly transaction?: EntityTransaction })
+          .transaction;
+        if (!tx) throw new DependencyError("Workflow transaction unavailable");
+        const now = (this.options.now?.() ?? new Date()).toISOString();
+        const input = safeWorkflowValue(
+          workflow.definition.redact?.(requestValue.input, "input") ?? requestValue.input,
+          "Workflow input",
+        );
+        try {
+          const started = await repository(tx).start({
+            id: randomUUID(),
+            orgId: ctx.orgId,
+            definition: target,
+            definitionVersion: workflow.definition.version,
+            idempotencyKey: requestValue.idempotencyKey,
+            inputHash: workflowInputHash(requestValue.input),
+            input,
+            principal: ctx.principal,
+            now,
+            steps: workflow.order.map((name) => {
+              const definition = stepDefinition(workflow, name);
+              return {
+                id: randomUUID(),
+                name,
+                dependencies: definition.dependsOn ?? [],
+                scheduledAt: new Date(
+                  new Date(now).getTime() + (definition.delayMs ?? 0),
+                ).toISOString(),
+                compensatable: definition.compensate !== undefined,
+              };
+            }),
+          });
+          if (started.created)
+            await ctx.events.publish(`${target}.started`, { workflowId: started.instance.id });
+          return repository(tx).get(started.instance.id);
+        } catch (error) {
+          if (error instanceof Error && error.message === "WORKFLOW_IDEMPOTENCY_CONFLICT")
+            throw new ConflictError("Idempotency key was used with different workflow input");
+          throw error;
+        }
+      },
+    });
+    const control =
+      (operation: "get" | "cancel" | "retry") =>
+      async (request: { id: string }, ctx: KernelContext) => {
+        const tx = (ctx as KernelContext & { readonly transaction?: EntityTransaction })
+          .transaction;
+        if (!tx) throw new DependencyError("Workflow transaction unavailable");
+        const repo = repository(tx);
+        const now = (this.options.now?.() ?? new Date()).toISOString();
+        const value =
+          operation === "get"
+            ? await repo.get(request.id)
+            : operation === "cancel"
+              ? await repo.cancel(request.id, now)
+              : await repo.retry(request.id, now);
+        if (value === null) throw new NotFoundError("Workflow was not found");
+        await ctx.events.publish(
+          `${target}.${operation === "get" ? "statused" : operation + "led"}`,
+          { workflowId: request.id },
+        );
+        return value;
+      };
+    this.registerAction(`${target}.status`, { input: z.object({ id }), handler: control("get") });
+    this.registerAction(`${target}.cancel`, {
+      input: z.object({ id }),
+      handler: control("cancel"),
+    });
+    this.registerAction(`${target}.retry`, { input: z.object({ id }), handler: control("retry") });
   }
   private registerAction(target: string, action: ActionDefinition): void {
     if (this.actions.has(target))
@@ -418,6 +595,7 @@ export class Kernel {
       ...(execution.traceparent === undefined ? {} : { traceparent: execution.traceparent }),
       ...(execution.signal === undefined ? {} : { signal: execution.signal }),
       entities,
+      transaction: tx,
       services: {
         get: <T>(key: string) =>
           this.registry.get<T>(

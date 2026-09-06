@@ -11,7 +11,8 @@ import {
   type Principal,
   type ProgressUpdate,
 } from "@embody/core";
-import { OutboxWorker, type OutboxWorkerOptions } from "@embody/host";
+import { OutboxWorker, WorkflowWorker, type OutboxWorkerOptions } from "@embody/host";
+import type { WorkflowSnapshot } from "@embody/core";
 import { SqliteStorage, type OutboxEvent } from "@embody/storage";
 
 export interface TestHarnessActor {
@@ -120,6 +121,9 @@ export interface TestHarness<TPlugins extends readonly EmbodyPlugin[] = readonly
   /** Captures an expected hook veto without depending on a test framework. */
   veto(operation: () => Promise<unknown>): Promise<HookVetoError>;
   tickOutbox(): Promise<void>;
+  /** Claims and runs currently eligible workflow steps without sleeping. */
+  tickWorkflows(): Promise<void>;
+  workflow(id: string): Promise<WorkflowSnapshot | null>;
   outbox(): Promise<readonly OutboxEvent[]>;
   /** Event-oriented outbox query, optionally filtered by canonical event name. */
   events(eventName?: string): Promise<readonly OutboxEvent[]>;
@@ -148,6 +152,7 @@ class Harness<TPlugins extends readonly EmbodyPlugin[]> implements TestHarness<T
     public readonly principal: Principal,
     private readonly plugins: TPlugins,
     private readonly worker: OutboxWorker,
+    private readonly workflowWorker: WorkflowWorker,
     private readonly storage: SqliteStorage,
     private readonly directory: string,
     private readonly capturedProgress: CapturedProgress[],
@@ -188,6 +193,7 @@ class Harness<TPlugins extends readonly EmbodyPlugin[]> implements TestHarness<T
       principal,
       this.plugins,
       this.worker,
+      this.workflowWorker,
       this.storage,
       this.directory,
       this.capturedProgress,
@@ -214,6 +220,15 @@ class Harness<TPlugins extends readonly EmbodyPlugin[]> implements TestHarness<T
   }
   public tickOutbox(): Promise<void> {
     return this.worker.tick();
+  }
+  public tickWorkflows(): Promise<void> {
+    return this.workflowWorker.tick();
+  }
+  public workflow(id: string): Promise<WorkflowSnapshot | null> {
+    return this.storage.transaction(
+      this.principal.orgId,
+      (tx) => tx.workflows.get(id) as Promise<WorkflowSnapshot | null>,
+    );
   }
   public async outbox(): Promise<readonly OutboxEvent[]> {
     return this.storage.transaction("system", (tx) => tx.outbox.list());
@@ -302,10 +317,12 @@ export async function createTestHarness<const TPlugins extends readonly EmbodyPl
   });
   let closed = false;
   let worker: OutboxWorker | undefined;
+  let workflowWorker: WorkflowWorker | undefined;
   const close = async (): Promise<void> => {
     if (closed) return;
     closed = true;
     try {
+      await workflowWorker?.stop(0);
       await worker?.stop(0);
       await kernel.stop();
     } finally {
@@ -315,6 +332,11 @@ export async function createTestHarness<const TPlugins extends readonly EmbodyPl
   try {
     await kernel.boot();
     worker = new OutboxWorker({ storage, kernel, ...options.worker });
+    workflowWorker = new WorkflowWorker({
+      storage,
+      kernel,
+      ...(options.now === undefined ? {} : { clock: { now: options.now } }),
+    });
     const progress: CapturedProgress[] = [];
     const audits: ExecutionAuditEvent[] = [];
     let sequence = 0;
@@ -323,6 +345,7 @@ export async function createTestHarness<const TPlugins extends readonly EmbodyPl
       defaultPrincipal(options),
       options.plugins,
       worker,
+      workflowWorker,
       storage,
       directory,
       progress,

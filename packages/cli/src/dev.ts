@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Kernel, type EmbodyPlugin, type Principal } from "@embody/core";
 import { localDevVerifier } from "@embody/auth";
-import { createHost, type EmbodyHost } from "@embody/host";
+import { createHost, WorkflowWorker, type EmbodyHost } from "@embody/host";
 import { SqliteStorage } from "@embody/storage";
 
 export interface EmbodyDevConfig {
@@ -44,6 +44,7 @@ export async function startDevServer(config: EmbodyDevConfig): Promise<DevServer
   const storage = new SqliteStorage({ filename });
   const kernel = new Kernel({ plugins: config.plugins, storage });
   await kernel.boot();
+  const workflowWorker = new WorkflowWorker({ storage, kernel });
   const host = createHost({
     kernel,
     verifier: localDevVerifier({ enabled: true, environment: "development", principal }),
@@ -52,7 +53,13 @@ export async function startDevServer(config: EmbodyDevConfig): Promise<DevServer
     environment: "development",
   });
   host.app.get("/__inspector", () => ({
-    endpoints: ["/__inspector/manifest", "/__inspector/execute", "/__inspector/outbox"],
+    endpoints: [
+      "/__inspector/manifest",
+      "/__inspector/execute",
+      "/__inspector/outbox",
+      "/__inspector/workflows/:id",
+      "/__inspector/workflows/tick",
+    ],
   }));
   host.app.get("/__inspector/manifest", () => kernel.manifest);
   host.app.get("/__inspector/outbox", async () => {
@@ -66,6 +73,30 @@ export async function startDevServer(config: EmbodyDevConfig): Promise<DevServer
       ...(lastError === undefined ? {} : { lastError }),
     }));
   });
+  host.app.get("/__inspector/workflows/:id", async (request) => {
+    const { id } = request.params as { id: string };
+    const snapshot = await storage.transaction(principal.orgId, (tx) => tx.workflows.get(id));
+    if (snapshot === null) return { found: false };
+    return {
+      ...snapshot,
+      input: "[REDACTED]",
+      principal: { ...snapshot.principal, metadata: undefined },
+      steps: snapshot.steps.map((step) => ({
+        id: step.id,
+        name: step.name,
+        status: step.status,
+        dependencies: step.dependencies,
+        attempt: step.attempt,
+        scheduledAt: step.scheduledAt,
+        ...(step.error === undefined ? {} : { error: step.error }),
+        ...(step.claimedAt === undefined ? {} : { claimedAt: step.claimedAt }),
+      })),
+    };
+  });
+  host.app.post("/__inspector/workflows/tick", async () => {
+    await workflowWorker.tick();
+    return { ticked: true };
+  });
   host.app.post("/__inspector/execute", async (request) => {
     const body = request.body as { target?: unknown; input?: unknown };
     if (typeof body?.target !== "string") throw new Error("target is required");
@@ -73,7 +104,16 @@ export async function startDevServer(config: EmbodyDevConfig): Promise<DevServer
   });
   await host.start();
   const address = await host.app.listen({ port: config.port ?? 8080, host: "127.0.0.1" });
-  return { host, url: address, targets: kernel.actionTargets, close: () => host.stop() };
+  return {
+    host,
+    url: address,
+    targets: kernel.actionTargets,
+    close: async () => {
+      await workflowWorker.stop(0);
+      await host.stop();
+      await kernel.stop();
+    },
+  };
 }
 
 /** Restarts the local host after a config edit; a failed reload leaves a visible error and watches on. */

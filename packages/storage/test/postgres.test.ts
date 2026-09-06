@@ -153,6 +153,53 @@ describePostgres("PostgreSQL storage conformance", () => {
     }
   });
 
+  it("persists and exclusively claims durable workflow DAG steps", async () => {
+    const db = storage!;
+    const orgId = `workflow-${randomUUID()}`;
+    const instanceId = randomUUID();
+    await db.transaction(orgId, (tx) =>
+      tx.workflows.start({
+        id: instanceId,
+        orgId,
+        definition: "orders.fulfil",
+        definitionVersion: "1.0.0",
+        idempotencyKey: "one",
+        inputHash: "hash",
+        input: { orderId: "one" },
+        principal: {
+          orgId,
+          actorId: "tester",
+          actorType: "human",
+          roles: [],
+          scopes: ["orders:*"],
+        },
+        now: new Date().toISOString(),
+        steps: [
+          {
+            id: randomUUID(),
+            name: "reserve",
+            dependencies: [],
+            scheduledAt: new Date().toISOString(),
+            compensatable: true,
+          },
+        ],
+      }),
+    );
+    const other = new PostgresStorage({ connectionString });
+    try {
+      const [first, second] = await Promise.all([
+        db.transaction(orgId, (tx) => tx.workflows.claimBatch({ workerId: "one", limit: 10 })),
+        other.transaction(orgId, (tx) => tx.workflows.claimBatch({ workerId: "two", limit: 10 })),
+      ]);
+      expect(first.length + second.length).toBe(1);
+      expect(
+        (await db.transaction(orgId, (tx) => tx.workflows.get(instanceId)))?.steps[0]?.attempt,
+      ).toBe(1);
+    } finally {
+      await other.close();
+    }
+  });
+
   it("lets concurrent delivery workers claim disjoint destinations", async () => {
     const db = storage!;
     const orgId = `delivery-${randomUUID()}`;

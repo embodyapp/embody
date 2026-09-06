@@ -161,11 +161,113 @@ export interface InboxRepository {
   fail(eventId: string, handlerId: string, error: string): Promise<void>;
 }
 
+export type WorkflowStatus =
+  | "pending"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "compensating"
+  | "compensated";
+export type WorkflowStepStatus =
+  | "blocked"
+  | "pending"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "compensating"
+  | "compensated"
+  | "compensation_failed";
+export interface StoredPrincipal {
+  readonly orgId: string;
+  readonly actorId: string;
+  readonly actorType: "agent" | "human" | "system";
+  readonly roles: readonly string[];
+  readonly scopes: readonly string[];
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+export interface WorkflowInstance {
+  readonly id: string;
+  readonly orgId: string;
+  readonly definition: string;
+  readonly definitionVersion: string;
+  readonly idempotencyKey: string;
+  readonly inputHash: string;
+  readonly input: unknown;
+  readonly principal: StoredPrincipal;
+  readonly status: WorkflowStatus;
+  readonly output?: unknown;
+  readonly error?: string;
+  readonly cancelRequested: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly optimisticVersion: number;
+}
+export interface WorkflowStep {
+  readonly id: string;
+  readonly instanceId: string;
+  readonly orgId: string;
+  readonly name: string;
+  readonly status: WorkflowStepStatus;
+  readonly dependencies: readonly string[];
+  readonly attempt: number;
+  readonly scheduledAt: string;
+  readonly compensatable: boolean;
+  readonly output?: unknown;
+  readonly error?: string;
+  readonly claimedAt?: string;
+  readonly claimedBy?: string;
+}
+export interface WorkflowSnapshot extends WorkflowInstance {
+  readonly steps: readonly WorkflowStep[];
+}
+export interface WorkflowRepository {
+  start(input: {
+    readonly id: string;
+    readonly orgId: string;
+    readonly definition: string;
+    readonly definitionVersion: string;
+    readonly idempotencyKey: string;
+    readonly inputHash: string;
+    readonly input: unknown;
+    readonly principal: StoredPrincipal;
+    readonly now: string;
+    readonly steps: readonly {
+      readonly id: string;
+      readonly name: string;
+      readonly dependencies: readonly string[];
+      readonly scheduledAt: string;
+      readonly compensatable: boolean;
+    }[];
+  }): Promise<{ readonly instance: WorkflowInstance; readonly created: boolean }>;
+  get(id: string): Promise<WorkflowSnapshot | null>;
+  cancel(id: string, now: string): Promise<WorkflowSnapshot | null>;
+  retry(id: string, now: string): Promise<WorkflowSnapshot | null>;
+  claimBatch(options: ClaimOutboxOptions): Promise<readonly WorkflowStep[]>;
+  completeStep(input: {
+    readonly id: string;
+    readonly output: unknown;
+    readonly now: string;
+    readonly resultStep: boolean;
+  }): Promise<void>;
+  failStep(input: {
+    readonly id: string;
+    readonly error: string;
+    readonly retryAt?: string;
+    readonly terminal: boolean;
+    readonly now: string;
+  }): Promise<void>;
+}
+
 export interface TransactionRepositories {
   readonly entities: EntityRepository;
   readonly outbox: OutboxRepository;
   readonly inbox: InboxRepository;
   readonly eventDeliveries: EventDeliveryRepository;
+  readonly workflows: WorkflowRepository;
 }
 
 export interface StorageTransaction extends TransactionRepositories {
@@ -344,6 +446,40 @@ export const STORAGE_MIGRATIONS: readonly SchemaMigration[] = [
       ALTER TABLE embody_outbox ADD COLUMN causation_id TEXT;
       ALTER TABLE embody_outbox ADD COLUMN producer_plugin_id TEXT;
       ALTER TABLE embody_outbox ADD COLUMN schema_version TEXT;
+    `.trim(),
+  },
+  {
+    version: 4,
+    description: "durable workflow instances and steps",
+    sqlite: `
+      CREATE TABLE embody_workflow_instances (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, definition TEXT NOT NULL,
+        definition_version TEXT NOT NULL, idempotency_key TEXT NOT NULL, input_hash TEXT NOT NULL, input TEXT NOT NULL,
+        principal TEXT NOT NULL, status TEXT NOT NULL, output TEXT, error TEXT, cancel_requested INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, optimistic_version INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(org_id, definition, idempotency_key));
+      CREATE INDEX idx_workflow_instances_tenant ON embody_workflow_instances(org_id, id);
+      CREATE TABLE embody_workflow_steps (id TEXT PRIMARY KEY, instance_id TEXT NOT NULL REFERENCES embody_workflow_instances(id) ON DELETE CASCADE,
+        org_id TEXT NOT NULL, name TEXT NOT NULL, position INTEGER NOT NULL, status TEXT NOT NULL, dependencies TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
+        scheduled_at TEXT NOT NULL, compensatable INTEGER NOT NULL DEFAULT 0, output TEXT, error TEXT, claimed_at TEXT, claimed_by TEXT, completed_at TEXT,
+        UNIQUE(instance_id, name));
+      CREATE INDEX idx_workflow_steps_claim ON embody_workflow_steps(status, scheduled_at);
+    `.trim(),
+    postgres: `
+      CREATE TABLE embody_workflow_instances (id UUID PRIMARY KEY, org_id TEXT NOT NULL, definition TEXT NOT NULL,
+        definition_version TEXT NOT NULL, idempotency_key TEXT NOT NULL, input_hash TEXT NOT NULL, input JSONB NOT NULL,
+        principal JSONB NOT NULL, status TEXT NOT NULL, output JSONB, error TEXT, cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL, optimistic_version INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(org_id, definition, idempotency_key));
+      CREATE INDEX idx_workflow_instances_tenant ON embody_workflow_instances(org_id, id);
+      ALTER TABLE embody_workflow_instances ENABLE ROW LEVEL SECURITY;
+      CREATE POLICY embody_workflow_instances_tenant_isolation ON embody_workflow_instances USING (org_id = current_setting('app.current_org', true)) WITH CHECK (org_id = current_setting('app.current_org', true));
+      CREATE TABLE embody_workflow_steps (id UUID PRIMARY KEY, instance_id UUID NOT NULL REFERENCES embody_workflow_instances(id) ON DELETE CASCADE,
+        org_id TEXT NOT NULL, name TEXT NOT NULL, position INTEGER NOT NULL, status TEXT NOT NULL, dependencies JSONB NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
+        scheduled_at TIMESTAMPTZ NOT NULL, compensatable BOOLEAN NOT NULL DEFAULT FALSE, output JSONB, error TEXT, claimed_at TIMESTAMPTZ, claimed_by TEXT, completed_at TIMESTAMPTZ,
+        UNIQUE(instance_id, name));
+      CREATE INDEX idx_workflow_steps_claim ON embody_workflow_steps(status, scheduled_at);
+      ALTER TABLE embody_workflow_steps ENABLE ROW LEVEL SECURITY;
+      CREATE POLICY embody_workflow_steps_tenant_isolation ON embody_workflow_steps USING (org_id = current_setting('app.current_org', true)) WITH CHECK (org_id = current_setting('app.current_org', true));
     `.trim(),
   },
 ];

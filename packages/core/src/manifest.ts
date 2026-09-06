@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { EmbodyPlugin, EntityDefinition } from "./contracts.js";
+import type { EmbodyPlugin, EntityDefinition, WorkflowDefinition } from "./contracts.js";
+import { compileWorkflow } from "./workflows.js";
 import { DuplicateRegistrationError } from "./errors.js";
 import { formatTarget } from "./target.js";
 
@@ -19,16 +20,81 @@ export interface ActionManifest {
   readonly generated: boolean;
 }
 
+export interface WorkflowManifest {
+  readonly description?: string;
+  readonly version: string;
+  readonly inputSchema: JsonSchema;
+  readonly outputSchema?: JsonSchema;
+  readonly steps: readonly { readonly name: string; readonly dependsOn: readonly string[] }[];
+  readonly controls: Readonly<Record<"start" | "status" | "cancel" | "retry", string>>;
+}
+
 export interface AppManifest {
   readonly protocolVersion: 1;
   readonly plugins: readonly { readonly id: string; readonly version: string }[];
   readonly entities: Readonly<Record<string, EntityManifest>>;
   readonly actions: Readonly<Record<string, ActionManifest>>;
+  readonly workflows?: Readonly<Record<string, WorkflowManifest>>;
   readonly eventSubscriptions: readonly string[];
 }
 
 function jsonSchema(schema: z.ZodType): JsonSchema {
   return z.toJSONSchema(schema, { target: "draft-7", reused: "inline" });
+}
+
+const workflowId = z.uuid();
+const workflowStatusSchema = z.object({
+  id: workflowId,
+  definition: z.string(),
+  definitionVersion: z.string(),
+  status: z.string(),
+  output: z.unknown().optional(),
+  error: z.string().optional(),
+  steps: z.array(
+    z.object({
+      name: z.string(),
+      status: z.string(),
+      attempt: z.number(),
+      scheduledAt: z.string(),
+      output: z.unknown().optional(),
+      error: z.string().optional(),
+    }),
+  ),
+});
+function workflowActions(
+  pluginId: string,
+  name: string,
+  definition: WorkflowDefinition,
+): Record<string, ActionManifest> {
+  const prefix = formatTarget([pluginId, name]);
+  return {
+    [`${prefix}.start`]: {
+      description: `Start ${definition.description ?? name}`,
+      inputSchema: jsonSchema(
+        z.object({ input: definition.input, idempotencyKey: z.string().min(1).max(200) }),
+      ),
+      outputSchema: jsonSchema(workflowStatusSchema),
+      generated: true,
+    },
+    [`${prefix}.status`]: {
+      description: `Get ${definition.description ?? name} status`,
+      inputSchema: jsonSchema(z.object({ id: workflowId })),
+      outputSchema: jsonSchema(workflowStatusSchema),
+      generated: true,
+    },
+    [`${prefix}.cancel`]: {
+      description: `Cancel ${definition.description ?? name}`,
+      inputSchema: jsonSchema(z.object({ id: workflowId })),
+      outputSchema: jsonSchema(workflowStatusSchema),
+      generated: true,
+    },
+    [`${prefix}.retry`]: {
+      description: `Retry ${definition.description ?? name}`,
+      inputSchema: jsonSchema(z.object({ id: workflowId })),
+      outputSchema: jsonSchema(workflowStatusSchema),
+      generated: true,
+    },
+  };
 }
 
 function generatedActions(
@@ -72,6 +138,7 @@ function generatedActions(
 export function compileManifest(plugins: readonly EmbodyPlugin[]): AppManifest {
   const entities: Record<string, EntityManifest> = {};
   const actions: Record<string, ActionManifest> = {};
+  const workflows: Record<string, WorkflowManifest> = {};
   const subscriptions = new Set<string>();
   const pluginIds = new Set<string>();
 
@@ -95,6 +162,27 @@ export function compileManifest(plugins: readonly EmbodyPlugin[]): AppManifest {
         registerAction(actions, actionTarget, action);
       }
     }
+    for (const [name, definition] of Object.entries(plugin.workflows ?? {})) {
+      const compiled = compileWorkflow(plugin.id, name, definition);
+      workflows[compiled.target] = {
+        ...(definition.description === undefined ? {} : { description: definition.description }),
+        version: definition.version,
+        inputSchema: jsonSchema(definition.input),
+        ...(definition.output === undefined ? {} : { outputSchema: jsonSchema(definition.output) }),
+        steps: compiled.order.map((stepName) => ({
+          name: stepName,
+          dependsOn: [...(definition.steps[stepName]!.dependsOn ?? [])].sort(),
+        })),
+        controls: {
+          start: `${compiled.target}.start`,
+          status: `${compiled.target}.status`,
+          cancel: `${compiled.target}.cancel`,
+          retry: `${compiled.target}.retry`,
+        },
+      };
+      for (const [target, action] of Object.entries(workflowActions(plugin.id, name, definition)))
+        registerAction(actions, target, action);
+    }
     for (const [name, definition] of Object.entries(plugin.actions ?? {})) {
       const target = formatTarget([plugin.id, name]);
       registerAction(actions, target, {
@@ -115,6 +203,7 @@ export function compileManifest(plugins: readonly EmbodyPlugin[]): AppManifest {
       .sort((a, b) => a.id.localeCompare(b.id)),
     entities,
     actions,
+    workflows,
     eventSubscriptions: [...subscriptions].sort(),
   }) as AppManifest;
 }

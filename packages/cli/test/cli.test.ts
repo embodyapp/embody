@@ -106,7 +106,13 @@ it("serves development-only inspector JSON through the production execution pipe
   });
   try {
     expect((await server.host.app.inject("/__inspector")).json()).toEqual({
-      endpoints: ["/__inspector/manifest", "/__inspector/execute", "/__inspector/outbox"],
+      endpoints: [
+        "/__inspector/manifest",
+        "/__inspector/execute",
+        "/__inspector/outbox",
+        "/__inspector/workflows/:id",
+        "/__inspector/workflows/tick",
+      ],
     });
     const result = await server.host.app.inject({
       method: "POST",

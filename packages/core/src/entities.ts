@@ -10,6 +10,7 @@ import type {
 } from "./contracts.js";
 import { NotFoundError, ValidationError } from "./errors.js";
 import { formatTarget } from "./target.js";
+import type { WorkflowRepositoryPort } from "./workflows.js";
 
 /** The portion of a storage transaction used by contextual entity stores. */
 export interface EntityLifecycle {
@@ -67,6 +68,7 @@ export interface EntityTransaction {
       },
     ): Promise<unknown>;
   };
+  readonly workflows?: WorkflowRepositoryPort;
   readonly inbox?: {
     reserve(eventId: string, handlerId: string): Promise<{ readonly state: string }>;
     complete(eventId: string, handlerId: string): Promise<void>;

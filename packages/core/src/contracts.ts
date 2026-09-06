@@ -143,15 +143,112 @@ export type EventHandler<TPayload = unknown> = (
   ctx: KernelContext,
 ) => Promise<void> | void;
 
+export type WorkflowStatus =
+  | "pending"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "compensating"
+  | "compensated";
+export type WorkflowStepStatus =
+  | "blocked"
+  | "pending"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "compensating"
+  | "compensated"
+  | "compensation_failed";
+
+export interface WorkflowRetryPolicy {
+  /** Total attempts, including the first. */
+  readonly maxAttempts: number;
+  readonly backoffMs?: number;
+}
+
+export interface WorkflowStepContext<
+  TInput = unknown,
+  TOutputs extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>,
+> extends KernelContext {
+  readonly workflowId: string;
+  readonly input: Readonly<TInput>;
+  readonly outputs: Readonly<TOutputs>;
+  readonly attempt: number;
+}
+
+export type WorkflowStepHandler<
+  TInput,
+  TOutputs extends Readonly<Record<string, unknown>>,
+  TOutput,
+> = {
+  bivarianceHack(context: WorkflowStepContext<TInput, TOutputs>): Promise<TOutput> | TOutput;
+}["bivarianceHack"];
+export type WorkflowCompensationHandler<
+  TInput,
+  TOutputs extends Readonly<Record<string, unknown>>,
+  TOutput,
+> = {
+  bivarianceHack(
+    output: TOutput,
+    context: WorkflowStepContext<TInput, TOutputs>,
+  ): Promise<void> | void;
+}["bivarianceHack"];
+
+export interface WorkflowStepDefinition<
+  TInput = unknown,
+  TOutputs extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>,
+  TOutput = unknown,
+> {
+  readonly description?: string;
+  readonly dependsOn?: readonly string[];
+  readonly output?: z.ZodType<TOutput>;
+  readonly retry?: WorkflowRetryPolicy;
+  readonly timeoutMs?: number;
+  /** A persisted delay before the step becomes claimable. */
+  readonly delayMs?: number;
+  readonly handler: WorkflowStepHandler<TInput, TOutputs, TOutput>;
+  readonly compensate?: WorkflowCompensationHandler<TInput, TOutputs, TOutput>;
+}
+
 export interface WorkflowDefinition<
   TInput extends z.ZodType = z.ZodType,
   TOutput extends z.ZodType | undefined = z.ZodType | undefined,
+  TSteps extends Readonly<Record<string, WorkflowStepDefinition>> = Readonly<
+    Record<string, WorkflowStepDefinition>
+  >,
 > {
   readonly description?: string;
+  /** Stable workflow version. In-flight instances remain pinned to it. */
+  readonly version: string;
   readonly input: TInput;
   readonly output?: TOutput;
-  readonly steps: Readonly<Record<string, unknown>>;
+  readonly steps: TSteps;
+  /** Name of the step whose output is the workflow result. Defaults to the sole sink step. */
+  readonly resultStep?: keyof TSteps & string;
+  /** Stored JSON is limited and secrets must be redacted by this policy before persistence. */
+  readonly redact?: (value: unknown, kind: "input" | "output") => unknown;
 }
+
+/** Preserves a workflow definition while contextually typing step input from its input schema. */
+export function defineWorkflow<const TInput extends z.ZodType>(input: TInput) {
+  return <
+    const TSteps extends Readonly<Record<string, WorkflowStepDefinition<ActionInput<TInput>>>>,
+  >(definition: {
+    readonly description?: string;
+    readonly version: string;
+    readonly output?: z.ZodType;
+    readonly steps: TSteps;
+    readonly resultStep?: keyof TSteps & string;
+    readonly redact?: (value: unknown, kind: "input" | "output") => unknown;
+  }): typeof definition & { readonly input: TInput } => ({ ...definition, input });
+}
+
+/** Marks a workflow failure as terminal even when attempts remain. */
+export class NonRetryableWorkflowError extends Error {}
 
 export interface EmbodyPlugin<
   TConfig = unknown,

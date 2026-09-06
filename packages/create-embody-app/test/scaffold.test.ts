@@ -21,9 +21,19 @@ it("generates the documented safe starter layout", async () => {
   expect(await readFile(join(app.directory, "Dockerfile"), "utf8")).toContain("HEALTHCHECK");
   expect(await readFile(join(app.directory, "embody.config.ts"), "utf8")).toContain("defineApp");
   expect(await readFile(join(app.directory, "src/index.ts"), "utf8")).toContain("createAppHost");
-  const packageJson = await readFile(join(app.directory, "package.json"), "utf8");
-  expect(packageJson).not.toContain("secret");
-  expect(packageJson).toContain('"prestart": "pnpm build"');
+  const packageJson = JSON.parse(
+    await readFile(join(app.directory, "package.json"), "utf8"),
+  ) as Record<string, unknown>;
+  expect(packageJson).not.toHaveProperty("secret");
+  expect(packageJson).toMatchObject({
+    private: true,
+    license: "UNLICENSED",
+    scripts: { prestart: "pnpm build" },
+  });
+  expect(await readFile(join(app.directory, "README.md"), "utf8")).toContain(
+    "belongs to its creator",
+  );
+  expect(app.files).not.toContain("LICENSE");
 });
 
 it("rejects traversal and preserves nonempty destinations", async () => {

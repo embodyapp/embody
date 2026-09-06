@@ -13,6 +13,11 @@ import type {
   InboxReservation,
   OutboxEvent,
   OutboxStatus,
+  WorkflowInstance,
+  StoredPrincipal,
+  WorkflowSnapshot,
+  WorkflowStep,
+  WorkflowRepository,
   StorageConnection,
   StorageTransaction,
 } from "./index.js";
@@ -100,6 +105,51 @@ function delivery(value: unknown): EventDelivery {
     ...(claimedAt === undefined ? {} : { claimedAt }),
     ...(claimedBy === undefined ? {} : { claimedBy }),
     ...(lastError === undefined ? {} : { lastError }),
+  };
+}
+function workflowInstance(value: unknown): WorkflowInstance {
+  const row = asRow(value);
+  const time = (name: string) =>
+    normalizeTimestamp(row[name] instanceof Date ? row[name] : String(row[name]));
+  return {
+    id: String(row["id"]),
+    orgId: String(row["org_id"]),
+    definition: String(row["definition"]),
+    definitionVersion: String(row["definition_version"]),
+    idempotencyKey: String(row["idempotency_key"]),
+    inputHash: String(row["input_hash"]),
+    input: row["input"],
+    principal: row["principal"] as StoredPrincipal,
+    status: String(row["status"]) as WorkflowInstance["status"],
+    ...(row["output"] == null ? {} : { output: row["output"] }),
+    ...(typeof row["error"] === "string" ? { error: row["error"] } : {}),
+    cancelRequested: Boolean(row["cancel_requested"]),
+    createdAt: time("created_at"),
+    updatedAt: time("updated_at"),
+    optimisticVersion: Number(row["optimistic_version"]),
+  };
+}
+function workflowStep(value: unknown): WorkflowStep {
+  const row = asRow(value);
+  const optionalTime = (name: string) =>
+    row[name] instanceof Date || typeof row[name] === "string"
+      ? normalizeTimestamp(row[name])
+      : undefined;
+  const claimedAt = optionalTime("claimed_at");
+  return {
+    id: String(row["id"]),
+    instanceId: String(row["instance_id"]),
+    orgId: String(row["org_id"]),
+    name: String(row["name"]),
+    status: String(row["status"]) as WorkflowStep["status"],
+    dependencies: row["dependencies"] as string[],
+    attempt: Number(row["attempt"]),
+    scheduledAt: normalizeTimestamp(row["scheduled_at"] as Date | string),
+    compensatable: Boolean(row["compensatable"]),
+    ...(row["output"] == null ? {} : { output: row["output"] }),
+    ...(typeof row["error"] === "string" ? { error: row["error"] } : {}),
+    ...(claimedAt ? { claimedAt } : {}),
+    ...(typeof row["claimed_by"] === "string" ? { claimedBy: row["claimed_by"] } : {}),
   };
 }
 function field(fieldName: string): string {
@@ -293,6 +343,202 @@ class PostgresTransaction implements StorageTransaction {
       return result.rows.map(delivery);
     },
   };
+  /* pg exposes query rows as any; every row crossing the public boundary is validated by asRow. */
+  /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+  public readonly workflows = {
+    start: async (input: Parameters<WorkflowRepository["start"]>[0]) => {
+      const prior = await this.client.query(
+        "SELECT * FROM embody_workflow_instances WHERE org_id=$1 AND definition=$2 AND idempotency_key=$3",
+        [input.orgId, input.definition, input.idempotencyKey],
+      );
+      if (prior.rows[0]) {
+        const instance = workflowInstance(prior.rows[0]);
+        if (instance.inputHash !== input.inputHash)
+          throw new Error("WORKFLOW_IDEMPOTENCY_CONFLICT");
+        return { instance, created: false };
+      }
+      const inserted = await this.client.query(
+        "INSERT INTO embody_workflow_instances (id,org_id,definition,definition_version,idempotency_key,input_hash,input,principal,status,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,'pending',$9,$9) RETURNING *",
+        [
+          input.id,
+          input.orgId,
+          input.definition,
+          input.definitionVersion,
+          input.idempotencyKey,
+          input.inputHash,
+          JSON.stringify(input.input),
+          JSON.stringify(input.principal),
+          input.now,
+        ],
+      );
+      for (const [position, step] of input.steps.entries())
+        await this.client.query(
+          "INSERT INTO embody_workflow_steps (id,instance_id,org_id,name,position,status,dependencies,scheduled_at,compensatable) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)",
+          [
+            step.id,
+            input.id,
+            input.orgId,
+            step.name,
+            position,
+            step.dependencies.length === 0 ? "pending" : "blocked",
+            JSON.stringify(step.dependencies),
+            step.scheduledAt,
+            step.compensatable,
+          ],
+        );
+      return { instance: workflowInstance(inserted.rows[0]), created: true };
+    },
+    get: async (id: string): Promise<WorkflowSnapshot | null> => this.workflowSnapshot(id),
+    cancel: async (id: string, now: string): Promise<WorkflowSnapshot | null> => {
+      const current = await this.workflowSnapshot(id);
+      if (!current) return null;
+      if (["completed", "failed", "cancelled", "compensated"].includes(current.status))
+        return current;
+      await this.client.query(
+        "UPDATE embody_workflow_instances SET cancel_requested=TRUE,status=CASE WHEN EXISTS(SELECT 1 FROM embody_workflow_steps WHERE instance_id=$1 AND status='completed' AND compensatable) THEN 'compensating' ELSE 'cancelled' END,updated_at=$2,optimistic_version=optimistic_version+1 WHERE id=$1",
+        [id, now],
+      );
+      await this.client.query(
+        "UPDATE embody_workflow_steps SET status='cancelled',claimed_at=NULL,claimed_by=NULL WHERE instance_id=$1 AND status IN ('pending','blocked','waiting')",
+        [id],
+      );
+      await this.client.query(
+        "UPDATE embody_workflow_steps SET status='compensating',scheduled_at=$2 WHERE instance_id=$1 AND status='completed' AND compensatable",
+        [id, now],
+      );
+      return this.workflowSnapshot(id);
+    },
+    retry: async (id: string, now: string): Promise<WorkflowSnapshot | null> => {
+      const current = await this.workflowSnapshot(id);
+      if (!current) return null;
+      if (current.status !== "failed") throw new Error("WORKFLOW_NOT_RETRYABLE");
+      await this.client.query(
+        "UPDATE embody_workflow_instances SET status='running',error=NULL,cancel_requested=FALSE,updated_at=$2,optimistic_version=optimistic_version+1 WHERE id=$1",
+        [id, now],
+      );
+      await this.client.query(
+        "UPDATE embody_workflow_steps SET status='pending',error=NULL,scheduled_at=$2 WHERE instance_id=$1 AND status='failed'",
+        [id, now],
+      );
+      return this.workflowSnapshot(id);
+    },
+    claimBatch: async (options: ClaimOutboxOptions): Promise<readonly WorkflowStep[]> => {
+      this.assertClaimOptions(options);
+      const now = timestamp(options.now),
+        expired = new Date(new Date(now).getTime() - (options.leaseMs ?? 30000)).toISOString();
+      const result = await this.client.query(
+        `WITH candidates AS (SELECT s.id FROM embody_workflow_steps s JOIN embody_workflow_instances i ON i.id=s.instance_id WHERE ((i.cancel_requested=FALSE AND (((s.status IN ('pending','waiting')) AND s.scheduled_at<=$1) OR (s.status='running' AND s.claimed_at<=$2)) AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(s.dependencies) AS d(value) LEFT JOIN embody_workflow_steps p ON p.instance_id=s.instance_id AND p.name=d.value WHERE p.status IS NULL OR p.status!='completed')) OR (s.status='compensating' AND s.scheduled_at<=$1 AND NOT EXISTS (SELECT 1 FROM embody_workflow_steps later WHERE later.instance_id=s.instance_id AND later.status='compensating' AND later.position>s.position))) ORDER BY s.scheduled_at,s.id LIMIT $3 FOR UPDATE OF s SKIP LOCKED) UPDATE embody_workflow_steps s SET status=CASE WHEN s.status='compensating' THEN 'compensating' ELSE 'running' END,claimed_at=$1,claimed_by=$4,attempt=s.attempt+1 FROM candidates WHERE s.id=candidates.id RETURNING s.*`,
+        [now, expired, options.limit, options.workerId],
+      );
+      for (const value of result.rows) {
+        const row = asRow(value);
+        await this.client.query(
+          "UPDATE embody_workflow_instances SET status=CASE WHEN status='pending' THEN 'running' ELSE status END,updated_at=$1 WHERE id=$2",
+          [now, row["instance_id"]],
+        );
+      }
+      return result.rows.map(workflowStep);
+    },
+    completeStep: async (input: {
+      readonly id: string;
+      readonly output: unknown;
+      readonly now: string;
+      readonly resultStep: boolean;
+    }) => {
+      const found = await this.client.query("SELECT * FROM embody_workflow_steps WHERE id=$1", [
+        input.id,
+      ]);
+      const row = found.rows[0];
+      if (!row) return;
+      const parent = await this.client.query(
+        "SELECT cancel_requested FROM embody_workflow_instances WHERE id=$1",
+        [row.instance_id],
+      );
+      if (parent.rows[0]?.cancel_requested === true && row.status !== "compensating") {
+        await this.client.query(
+          "UPDATE embody_workflow_steps SET status=$2,output=$3::jsonb,claimed_at=NULL,claimed_by=NULL WHERE id=$1",
+          [
+            input.id,
+            row.compensatable ? "compensating" : "cancelled",
+            JSON.stringify(input.output),
+          ],
+        );
+        await this.client.query(
+          "UPDATE embody_workflow_instances SET status=$2,updated_at=$3 WHERE id=$1",
+          [row.instance_id, row.compensatable ? "compensating" : "cancelled", input.now],
+        );
+        return;
+      }
+      if (row.status === "compensating") {
+        await this.client.query(
+          "UPDATE embody_workflow_steps SET status='compensated',claimed_at=NULL,claimed_by=NULL,completed_at=$2 WHERE id=$1",
+          [input.id, input.now],
+        );
+        const remains = await this.client.query(
+          "SELECT 1 FROM embody_workflow_steps WHERE instance_id=$1 AND status='compensating'",
+          [row.instance_id],
+        );
+        if (remains.rowCount === 0)
+          await this.client.query(
+            "UPDATE embody_workflow_instances SET status='compensated',updated_at=$2,optimistic_version=optimistic_version+1 WHERE id=$1",
+            [row.instance_id, input.now],
+          );
+        return;
+      }
+      await this.client.query(
+        "UPDATE embody_workflow_steps SET status='completed',output=$2::jsonb,error=NULL,claimed_at=NULL,claimed_by=NULL,completed_at=$3 WHERE id=$1",
+        [input.id, JSON.stringify(input.output), input.now],
+      );
+      await this.client.query(
+        "UPDATE embody_workflow_steps s SET status='pending' WHERE s.instance_id=$1 AND s.status='blocked' AND EXISTS (SELECT 1 FROM embody_workflow_instances i WHERE i.id=s.instance_id AND i.cancel_requested=FALSE) AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(s.dependencies) AS d(value) LEFT JOIN embody_workflow_steps p ON p.instance_id=s.instance_id AND p.name=d.value WHERE p.status IS NULL OR p.status!='completed')",
+        [row.instance_id],
+      );
+      if (input.resultStep)
+        await this.client.query(
+          "UPDATE embody_workflow_instances SET status='completed',output=$2::jsonb,updated_at=$3,optimistic_version=optimistic_version+1 WHERE id=$1",
+          [row.instance_id, JSON.stringify(input.output), input.now],
+        );
+      else
+        await this.client.query(
+          "UPDATE embody_workflow_instances SET updated_at=$2,optimistic_version=optimistic_version+1 WHERE id=$1",
+          [row.instance_id, input.now],
+        );
+    },
+    failStep: async (input: {
+      readonly id: string;
+      readonly error: string;
+      readonly retryAt?: string;
+      readonly terminal: boolean;
+      readonly now: string;
+    }) => {
+      const found = await this.client.query("SELECT * FROM embody_workflow_steps WHERE id=$1", [
+        input.id,
+      ]);
+      const row = found.rows[0];
+      if (!row) return;
+      if (row.status === "compensating") {
+        await this.client.query(
+          "UPDATE embody_workflow_steps SET status='compensation_failed',error=$2,claimed_at=NULL,claimed_by=NULL WHERE id=$1",
+          [input.id, input.error],
+        );
+        await this.client.query(
+          "UPDATE embody_workflow_instances SET status='failed',error='Compensation failed',updated_at=$2,optimistic_version=optimistic_version+1 WHERE id=$1",
+          [row.instance_id, input.now],
+        );
+        return;
+      }
+      await this.client.query(
+        "UPDATE embody_workflow_steps SET status=$2,error=$3,scheduled_at=$4,claimed_at=NULL,claimed_by=NULL WHERE id=$1",
+        [input.id, input.terminal ? "failed" : "waiting", input.error, input.retryAt ?? input.now],
+      );
+      await this.client.query(
+        "UPDATE embody_workflow_instances SET status=$2,error=$3,updated_at=$4,optimistic_version=optimistic_version+1 WHERE id=$1",
+        [row.instance_id, input.terminal ? "failed" : "waiting", input.error, input.now],
+      );
+    },
+  };
+
+  /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
   public readonly inbox = {
     reserve: async (eventId: string, handlerId: string): Promise<InboxReservation> => {
       const now = timestamp();
@@ -337,6 +583,18 @@ class PostgresTransaction implements StorageTransaction {
     public readonly orgId: string,
     private readonly client: Client,
   ) {}
+  private async workflowSnapshot(id: string): Promise<WorkflowSnapshot | null> {
+    const instance = await this.client.query(
+      "SELECT * FROM embody_workflow_instances WHERE id=$1 AND org_id=$2",
+      [id, this.orgId],
+    );
+    if (!instance.rows[0]) return null;
+    const steps = await this.client.query(
+      "SELECT * FROM embody_workflow_steps WHERE instance_id=$1 ORDER BY name",
+      [id],
+    );
+    return { ...workflowInstance(instance.rows[0]), steps: steps.rows.map(workflowStep) };
+  }
   private assertClaimOptions(options: ClaimOutboxOptions): void {
     if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)
       throw new RangeError("Invalid claim limit");

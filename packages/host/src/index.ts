@@ -18,6 +18,7 @@ import {
 import type { EventEnvelope } from "@embody/core";
 import { gatewayJwtVerifier, localDevVerifier, type AppAuthVerifier } from "@embody/auth";
 import { PostgresStorage, SqliteStorage, type StorageConnection } from "@embody/storage";
+import { WorkflowWorker } from "./workflows.js";
 import {
   DeliveryWorker,
   DirectEventTransport,
@@ -27,6 +28,7 @@ import {
   signDelivery,
 } from "./events.js";
 
+export { WorkflowWorker, type WorkflowWorkerOptions } from "./workflows.js";
 export {
   DeliveryWorker,
   DirectEventTransport,
@@ -175,6 +177,13 @@ export function createHost(options: HostOptions): EmbodyHost {
   let accepting = false;
   let active = 0;
   const maximum = options.concurrency ?? 100;
+  app.addHook("onSend", async (_request, reply, payload) => {
+    reply.header("x-content-type-options", "nosniff");
+    reply.header("x-frame-options", "DENY");
+    reply.header("referrer-policy", "no-referrer");
+    reply.header("content-security-policy", "default-src 'none'; frame-ancestors 'none'");
+    return payload;
+  });
   app.addHook("onRequest", async (request, reply) => {
     const requestId =
       typeof request.headers["x-request-id"] === "string"
@@ -369,6 +378,7 @@ const appEnvironmentSchema = z.object({
   GATEWAY_JWT_SECRET: z.string().min(32).optional(),
   EMBODY_EVENT_SECRET: z.string().min(16).optional(),
   EMBODY_EVENT_DESTINATIONS: z.string().min(2).optional(),
+  TRUST_INSECURE_HTTP: z.enum(["true", "false"]).default("false"),
 });
 
 export type AppEnvironment = z.output<typeof appEnvironmentSchema>;
@@ -386,8 +396,9 @@ export interface AppHostRuntime {
   readonly kernel: Kernel;
   readonly environment: AppEnvironment;
   readonly url: string | undefined;
-  /** Deterministic worker hook for tests and operational drains. */
+  /** Deterministic worker hooks for tests and operational drains. */
   tickEvents(): Promise<void>;
+  tickWorkflows(): Promise<void>;
   start(): Promise<string>;
   stop(): Promise<void>;
 }
@@ -400,6 +411,13 @@ export function parseAppEnvironment(input: NodeJS.ProcessEnv = process.env): App
   if (env.EMBODY_EVENT_DESTINATIONS && !env.EMBODY_EVENT_SECRET)
     throw new Error("EMBODY_EVENT_DESTINATIONS requires EMBODY_EVENT_SECRET");
   if (env.NODE_ENV === "production") {
+    const secrets = [
+      env.GATEWAY_REGISTRATION_SECRET,
+      env.GATEWAY_JWT_SECRET,
+      env.EMBODY_EVENT_SECRET,
+    ].filter((value): value is string => value !== undefined);
+    if (secrets.some((value) => /^(change-?me|secret|password|development|default)/i.test(value)))
+      throw new Error("Production rejects default or development secrets");
     if (!env.DATABASE_URL) throw new Error("Production requires DATABASE_URL (PostgreSQL)");
     if (!env.GATEWAY_URL || !env.PUBLIC_URL || !env.GATEWAY_REGISTRATION_SECRET)
       throw new Error(
@@ -407,6 +425,11 @@ export function parseAppEnvironment(input: NodeJS.ProcessEnv = process.env): App
       );
     if (!env.GATEWAY_JWT_ISSUER || !env.GATEWAY_JWT_SECRET)
       throw new Error("Production requires GATEWAY_JWT_ISSUER and GATEWAY_JWT_SECRET");
+    if (
+      env.TRUST_INSECURE_HTTP !== "true" &&
+      [env.GATEWAY_URL, env.PUBLIC_URL].some((value) => value?.startsWith("http:"))
+    )
+      throw new Error("Production remote endpoints require HTTPS unless TRUST_INSECURE_HTTP=true");
   }
   return env;
 }
@@ -522,6 +545,7 @@ export async function createAppHost(
       ? { eventDelivery: { storage, secret: environment.EMBODY_EVENT_SECRET } }
       : {}),
   });
+  const workflowWorker = new WorkflowWorker({ storage, kernel });
   const outboxWorker = new OutboxWorker({
     storage,
     kernel,
@@ -550,6 +574,7 @@ export async function createAppHost(
     if (stopped) return;
     stopped = true;
     registration?.stop();
+    await workflowWorker.stop();
     await outboxWorker.stop();
     await deliveryWorker?.stop();
     try {
@@ -569,6 +594,9 @@ export async function createAppHost(
       await outboxWorker.tick();
       await deliveryWorker?.tick();
     },
+    async tickWorkflows(): Promise<void> {
+      await workflowWorker.tick();
+    },
     async start(): Promise<string> {
       if (address !== undefined) return address;
       try {
@@ -578,6 +606,7 @@ export async function createAppHost(
           host: options.host ?? (environment.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
         });
         await registration?.start();
+        await workflowWorker.start();
         await outboxWorker.start();
         await deliveryWorker?.start();
         return address;

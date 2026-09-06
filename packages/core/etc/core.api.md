@@ -57,6 +57,8 @@ export interface AppManifest {
     }[];
     // (undocumented)
     readonly protocolVersion: 1;
+    // (undocumented)
+    readonly workflows?: Readonly<Record<string, WorkflowManifest>>;
 }
 
 // @public (undocumented)
@@ -84,6 +86,22 @@ export const appManifestSchema: z.ZodObject<{
         outputSchema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         generated: z.ZodBoolean;
     }, z.core.$strict>>;
+    workflows: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodObject<{
+        description: z.ZodOptional<z.ZodString>;
+        version: z.ZodString;
+        inputSchema: z.ZodRecord<z.ZodString, z.ZodUnknown>;
+        outputSchema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        steps: z.ZodArray<z.ZodObject<{
+            name: z.ZodString;
+            dependsOn: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>>;
+        controls: z.ZodObject<{
+            start: z.ZodString;
+            status: z.ZodString;
+            cancel: z.ZodString;
+            retry: z.ZodString;
+        }, z.core.$strict>;
+    }, z.core.$strict>>>;
     eventSubscriptions: z.ZodArray<z.ZodString>;
 }, z.core.$strict>;
 
@@ -132,10 +150,32 @@ export interface CompiledEntity<TData extends Record<string, unknown> = Record<s
 }
 
 // @public (undocumented)
+export interface CompiledWorkflow {
+    // (undocumented)
+    readonly definition: WorkflowDefinition;
+    // (undocumented)
+    readonly name: string;
+    // (undocumented)
+    readonly order: readonly string[];
+    // (undocumented)
+    readonly pluginId: string;
+    // (undocumented)
+    readonly resultStep: string;
+    // (undocumented)
+    readonly target: string;
+}
+
+// @public (undocumented)
 export function compileEntity<TData extends Record<string, unknown>>(pluginId: string, entityType: string, definition: EntityDefinition<z.ZodObject>): CompiledEntity<TData>;
 
 // @public (undocumented)
 export function compileManifest(plugins: readonly EmbodyPlugin[]): AppManifest;
+
+// @public (undocumented)
+export function compileWorkflow(pluginId: string, name: string, definition: WorkflowDefinition): CompiledWorkflow;
+
+// @public (undocumented)
+export function compileWorkflows(plugins: readonly EmbodyPlugin[]): readonly CompiledWorkflow[];
 
 // @public (undocumented)
 export class ConflictError extends EmbodyError {
@@ -147,6 +187,18 @@ export function definePlugin<const TId extends string, const TEntities extends R
 
 // @public (undocumented)
 export function definePlugin<const TPlugin extends EmbodyPlugin>(plugin: TPlugin & CheckedPluginDefinition<TPlugin>): TPlugin;
+
+// @public
+export function defineWorkflow<const TInput extends z.ZodType>(input: TInput): <const TSteps extends Readonly<Record<string, WorkflowStepDefinition<ActionInput<TInput>>>>>(definition: {
+    readonly description?: string;
+    readonly version: string;
+    readonly output?: z.ZodType;
+    readonly steps: TSteps;
+    readonly resultStep?: keyof TSteps & string;
+    readonly redact?: (value: unknown, kind: "input" | "output") => unknown;
+}) => typeof definition & {
+    readonly input: TInput;
+};
 
 // @public (undocumented)
 export class DependencyError extends EmbodyError {
@@ -360,6 +412,8 @@ export interface EntityTransaction {
             readonly schemaVersion?: string;
         }): Promise<unknown>;
     };
+    // (undocumented)
+    readonly workflows?: WorkflowRepositoryPort;
 }
 
 // @public (undocumented)
@@ -546,6 +600,7 @@ export class Kernel {
     // (undocumented)
     boot(): Promise<void>;
     execute(target: string, input: unknown, options: ExecutionOptions | Principal): Promise<unknown>;
+    executeWorkflowStep(step: WorkflowStepRecord, snapshot: WorkflowSnapshot, tx: EntityTransaction): Promise<unknown>;
     handleEvent(event: DomainEvent, tx: EntityTransaction): Promise<void>;
     // (undocumented)
     get manifest(): AppManifest;
@@ -557,6 +612,8 @@ export class Kernel {
     state: KernelState;
     // (undocumented)
     stop(): Promise<void>;
+    // (undocumented)
+    get workflowTargets(): readonly string[];
 }
 
 // @public (undocumented)
@@ -630,6 +687,10 @@ export interface KernelStorage {
     ensureSchema(): Promise<void>;
     // (undocumented)
     transaction?<T>(orgId: string, callback: (tx: EntityTransaction) => Promise<T>): Promise<T>;
+}
+
+// @public
+export class NonRetryableWorkflowError extends Error {
 }
 
 // @public (undocumented)
@@ -802,9 +863,28 @@ export const registrationRequestSchema: z.ZodObject<{
             outputSchema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             generated: z.ZodBoolean;
         }, z.core.$strict>>;
+        workflows: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodObject<{
+            description: z.ZodOptional<z.ZodString>;
+            version: z.ZodString;
+            inputSchema: z.ZodRecord<z.ZodString, z.ZodUnknown>;
+            outputSchema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+            steps: z.ZodArray<z.ZodObject<{
+                name: z.ZodString;
+                dependsOn: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>>;
+            controls: z.ZodObject<{
+                start: z.ZodString;
+                status: z.ZodString;
+                cancel: z.ZodString;
+                retry: z.ZodString;
+            }, z.core.$strict>;
+        }, z.core.$strict>>>;
         eventSubscriptions: z.ZodArray<z.ZodString>;
     }, z.core.$strict>;
 }, z.core.$strict>;
+
+// @public (undocumented)
+export function safeWorkflowValue(value: unknown, label: string): unknown;
 
 // @public (undocumented)
 export function sortPlugins(plugins: readonly EmbodyPlugin[]): readonly EmbodyPlugin[];
@@ -864,16 +944,222 @@ export interface ValidationIssue {
 }
 
 // @public (undocumented)
-export interface WorkflowDefinition<TInput extends z.ZodType = z.ZodType, TOutput extends z.ZodType | undefined = z.ZodType | undefined> {
+export const WORKFLOW_VALUE_LIMIT: number;
+
+// @public (undocumented)
+export type WorkflowCompensationHandler<TInput, TOutputs extends Readonly<Record<string, unknown>>, TOutput> = {
+    bivarianceHack(output: TOutput, context: WorkflowStepContext<TInput, TOutputs>): Promise<void> | void;
+}["bivarianceHack"];
+
+// @public (undocumented)
+export interface WorkflowDefinition<TInput extends z.ZodType = z.ZodType, TOutput extends z.ZodType | undefined = z.ZodType | undefined, TSteps extends Readonly<Record<string, WorkflowStepDefinition>> = Readonly<Record<string, WorkflowStepDefinition>>> {
     // (undocumented)
     readonly description?: string;
     // (undocumented)
     readonly input: TInput;
     // (undocumented)
     readonly output?: TOutput;
+    readonly redact?: (value: unknown, kind: "input" | "output") => unknown;
+    readonly resultStep?: keyof TSteps & string;
     // (undocumented)
-    readonly steps: Readonly<Record<string, unknown>>;
+    readonly steps: TSteps;
+    readonly version: string;
 }
+
+// @public (undocumented)
+export function workflowInputHash(value: unknown): string;
+
+// @public (undocumented)
+export interface WorkflowInstanceRecord {
+    // (undocumented)
+    readonly cancelRequested: boolean;
+    // (undocumented)
+    readonly createdAt: string;
+    // (undocumented)
+    readonly definition: string;
+    // (undocumented)
+    readonly definitionVersion: string;
+    // (undocumented)
+    readonly error?: string;
+    // (undocumented)
+    readonly id: string;
+    // (undocumented)
+    readonly idempotencyKey: string;
+    // (undocumented)
+    readonly input: unknown;
+    // (undocumented)
+    readonly inputHash: string;
+    // (undocumented)
+    readonly optimisticVersion: number;
+    // (undocumented)
+    readonly orgId: string;
+    // (undocumented)
+    readonly output?: unknown;
+    // (undocumented)
+    readonly principal: Principal;
+    // (undocumented)
+    readonly status: string;
+    // (undocumented)
+    readonly updatedAt: string;
+}
+
+// @public (undocumented)
+export interface WorkflowManifest {
+    // (undocumented)
+    readonly controls: Readonly<Record<"start" | "status" | "cancel" | "retry", string>>;
+    // (undocumented)
+    readonly description?: string;
+    // (undocumented)
+    readonly inputSchema: JsonSchema;
+    // (undocumented)
+    readonly outputSchema?: JsonSchema;
+    // (undocumented)
+    readonly steps: readonly {
+        readonly name: string;
+        readonly dependsOn: readonly string[];
+    }[];
+    // (undocumented)
+    readonly version: string;
+}
+
+// @public (undocumented)
+export interface WorkflowRepositoryPort {
+    // (undocumented)
+    cancel(id: string, now: string): Promise<WorkflowSnapshot | null>;
+    // (undocumented)
+    claimBatch(options: {
+        readonly limit: number;
+        readonly workerId: string;
+        readonly now: string;
+        readonly leaseMs?: number;
+    }): Promise<readonly WorkflowStepRecord[]>;
+    // (undocumented)
+    completeStep(input: {
+        readonly id: string;
+        readonly output: unknown;
+        readonly now: string;
+        readonly resultStep: boolean;
+    }): Promise<void>;
+    // (undocumented)
+    failStep(input: {
+        readonly id: string;
+        readonly error: string;
+        readonly retryAt?: string;
+        readonly terminal: boolean;
+        readonly now: string;
+    }): Promise<void>;
+    // (undocumented)
+    get(id: string): Promise<WorkflowSnapshot | null>;
+    // (undocumented)
+    retry(id: string, now: string): Promise<WorkflowSnapshot | null>;
+    // (undocumented)
+    start(input: {
+        readonly id: string;
+        readonly orgId: string;
+        readonly definition: string;
+        readonly definitionVersion: string;
+        readonly idempotencyKey: string;
+        readonly inputHash: string;
+        readonly input: unknown;
+        readonly principal: Principal;
+        readonly now: string;
+        readonly steps: readonly {
+            readonly id: string;
+            readonly name: string;
+            readonly dependencies: readonly string[];
+            readonly scheduledAt: string;
+            readonly compensatable: boolean;
+        }[];
+    }): Promise<{
+        readonly instance: WorkflowInstanceRecord;
+        readonly created: boolean;
+    }>;
+}
+
+// @public (undocumented)
+export interface WorkflowRetryPolicy {
+    // (undocumented)
+    readonly backoffMs?: number;
+    readonly maxAttempts: number;
+}
+
+// @public (undocumented)
+export interface WorkflowSnapshot extends WorkflowInstanceRecord {
+    // (undocumented)
+    readonly steps: readonly WorkflowStepRecord[];
+}
+
+// @public (undocumented)
+export type WorkflowStatus = "pending" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "compensating" | "compensated";
+
+// @public (undocumented)
+export interface WorkflowStepContext<TInput = unknown, TOutputs extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>> extends KernelContext {
+    // (undocumented)
+    readonly attempt: number;
+    // (undocumented)
+    readonly input: Readonly<TInput>;
+    // (undocumented)
+    readonly outputs: Readonly<TOutputs>;
+    // (undocumented)
+    readonly workflowId: string;
+}
+
+// @public (undocumented)
+export interface WorkflowStepDefinition<TInput = unknown, TOutputs extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>, TOutput = unknown> {
+    // (undocumented)
+    readonly compensate?: WorkflowCompensationHandler<TInput, TOutputs, TOutput>;
+    readonly delayMs?: number;
+    // (undocumented)
+    readonly dependsOn?: readonly string[];
+    // (undocumented)
+    readonly description?: string;
+    // (undocumented)
+    readonly handler: WorkflowStepHandler<TInput, TOutputs, TOutput>;
+    // (undocumented)
+    readonly output?: z.ZodType<TOutput>;
+    // (undocumented)
+    readonly retry?: WorkflowRetryPolicy;
+    // (undocumented)
+    readonly timeoutMs?: number;
+}
+
+// @public (undocumented)
+export type WorkflowStepHandler<TInput, TOutputs extends Readonly<Record<string, unknown>>, TOutput> = {
+    bivarianceHack(context: WorkflowStepContext<TInput, TOutputs>): Promise<TOutput> | TOutput;
+}["bivarianceHack"];
+
+// @public (undocumented)
+export interface WorkflowStepRecord {
+    // (undocumented)
+    readonly attempt: number;
+    // (undocumented)
+    readonly claimedAt?: string;
+    // (undocumented)
+    readonly claimedBy?: string;
+    // (undocumented)
+    readonly compensatable: boolean;
+    // (undocumented)
+    readonly dependencies: readonly string[];
+    // (undocumented)
+    readonly error?: string;
+    // (undocumented)
+    readonly id: string;
+    // (undocumented)
+    readonly instanceId: string;
+    // (undocumented)
+    readonly name: string;
+    // (undocumented)
+    readonly orgId: string;
+    // (undocumented)
+    readonly output?: unknown;
+    // (undocumented)
+    readonly scheduledAt: string;
+    // (undocumented)
+    readonly status: string;
+}
+
+// @public (undocumented)
+export type WorkflowStepStatus = "blocked" | "pending" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "compensating" | "compensated" | "compensation_failed";
 
 export { z }
 

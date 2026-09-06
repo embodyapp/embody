@@ -1,6 +1,7 @@
 export { z } from "zod";
 export {
   definePlugin,
+  defineWorkflow,
   type ActionDefinition,
   type ActionHandler,
   type ActionInput,
@@ -29,7 +30,15 @@ export {
   type TypedEntityContext,
   type TypedEntityData,
   type TypedPluginBase,
+  type WorkflowCompensationHandler,
   type WorkflowDefinition,
+  type WorkflowRetryPolicy,
+  type WorkflowStepHandler,
+  type WorkflowStatus,
+  type WorkflowStepContext,
+  type WorkflowStepDefinition,
+  type WorkflowStepStatus,
+  NonRetryableWorkflowError,
 } from "./contracts.js";
 export {
   BadRequestError,
@@ -64,6 +73,7 @@ export {
   type AppManifest,
   type EntityManifest,
   type JsonSchema,
+  type WorkflowManifest,
 } from "./manifest.js";
 export {
   PROTOCOL_VERSION,
@@ -84,6 +94,18 @@ export {
   type PrincipalClaims,
   type RegistrationRequest,
 } from "./protocol.js";
+export {
+  compileWorkflow,
+  compileWorkflows,
+  safeWorkflowValue,
+  workflowInputHash,
+  WORKFLOW_VALUE_LIMIT,
+  type CompiledWorkflow,
+  type WorkflowInstanceRecord,
+  type WorkflowRepositoryPort,
+  type WorkflowSnapshot,
+  type WorkflowStepRecord,
+} from "./workflows.js";
 export { assertUniqueMappedTargets, formatTarget, parseTarget, targetToMcpName } from "./target.js";
 export {
   Kernel,

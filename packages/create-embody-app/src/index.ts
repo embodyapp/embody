@@ -27,6 +27,7 @@ function template(name: string): Readonly<Record<string, string>> {
           name,
           private: true,
           version: "0.1.0",
+          license: "UNLICENSED",
           type: "module",
           engines: { node: "^22.0.0 || ^24.0.0" },
           scripts: {
@@ -73,7 +74,7 @@ function template(name: string): Readonly<Record<string, string>> {
     "src/index.ts": `import config from "../embody.config.js";\nimport { createAppHost } from "@embody/host";\n\nconst runtime = await createAppHost(config);\nawait runtime.start();\nconsole.log(runtime.url);\nconst close = () => void runtime.stop();\nprocess.once("SIGINT", close);\nprocess.once("SIGTERM", close);\n`,
     "src/plugin.ts": `export { default } from "../embody.config.js";\n`,
     "src/plugin.test.ts": `import { expect, it } from "vitest";\nimport { createTestHarness } from "@embody/testing";\nimport config from "../embody.config.js";\n\nit("runs the starter action", async () => {\n  const harness = await createTestHarness({ plugins: config.plugins });\n  try { expect(await harness.call("app.ping", {})).toEqual({ ok: true }); } finally { await harness.close(); }\n});\n`,
-    "README.md": `# ${name}\n\nRun \`pnpm install\`, \`pnpm test\`, then \`pnpm dev\`. The dev host is loopback-only.\n`,
+    "README.md": `# ${name}\n\nRun \`pnpm install\`, \`pnpm test\`, then \`pnpm dev\`. The dev host is loopback-only.\n\nDurable workflows can be added with \`defineWorkflow(inputSchema)({ version, steps })\`; start them through the generated \`<plugin>.<workflow>.start\` action and use idempotent external side effects.\n\nThis generated application belongs to its creator and is UNLICENSED by default. Choose and add your own license before distributing it.\n`,
     ".env.example": "# Add deployment credentials here; never commit .env\n",
     ".gitignore": "node_modules\ndist\n.embody\n.env\n",
     ".dockerignore": "node_modules\ndist\n.git\n.env\n",
