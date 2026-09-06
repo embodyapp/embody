@@ -1,7 +1,16 @@
 # Gateway application
 
-`@embody/gateway` provides the Phase 7 control plane. Configure `GatewayRegistry` with per-app registration credentials and endpoint policy, then pass it to `createGateway` with an `AuthChain` and `GatewayTokenOptions`.
+This is the deployable Phase 10 control-plane process. It is intentionally configured
+entirely by environment variables: registration credentials and the API/signing keys
+must be supplied by a secret manager (the compose smoke stack uses an ignored `.env`
+file). It registers Kanban and Email independently and exposes catalog, CLI-compatible
+HTTP execution, and MCP routes from `@embody/gateway`.
 
-Registration endpoints are available at both `/register` and `/api/registry/register` (with matching heartbeat paths); execution is `POST /api/execute/:appId/:target`.
+Build and run with `pnpm --filter @embody/app-gateway build` and
+`pnpm --filter @embody/app-gateway start`.
 
-`gatewayEventTransport(registry, secret)` is an `EventTransport` adapter for the existing durable outbox/delivery workers. It uses the immutable registry subscription directory and includes unhealthy destinations in fan-out snapshots, so deliveries retry after recovery. Durability is supplied by the configured gateway `StorageConnection` and `DeliveryWorker`; it is intentionally opt-in.
+Registration is available at `/register` and `/api/registry/register` (with matching
+heartbeat routes); execution is under `/api/execute`, discovery under `/api/catalog`,
+and MCP under `/mcp`. The process supports a second, Kanban-only test identity when
+`E2E_SECOND_API_KEY` is present, solely so the distributed suite can prove tenant and
+scope isolation.

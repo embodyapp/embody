@@ -18,7 +18,14 @@ import {
 import type { EventEnvelope } from "@embody/core";
 import { gatewayJwtVerifier, localDevVerifier, type AppAuthVerifier } from "@embody/auth";
 import { PostgresStorage, SqliteStorage, type StorageConnection } from "@embody/storage";
-import { parseDeliveryRequest, signDelivery } from "./events.js";
+import {
+  DeliveryWorker,
+  DirectEventTransport,
+  OutboxWorker,
+  StaticEventDirectory,
+  parseDeliveryRequest,
+  signDelivery,
+} from "./events.js";
 
 export {
   DeliveryWorker,
@@ -360,6 +367,8 @@ const appEnvironmentSchema = z.object({
   GATEWAY_REGISTRATION_SECRET: z.string().min(16).optional(),
   GATEWAY_JWT_ISSUER: z.string().min(1).optional(),
   GATEWAY_JWT_SECRET: z.string().min(32).optional(),
+  EMBODY_EVENT_SECRET: z.string().min(16).optional(),
+  EMBODY_EVENT_DESTINATIONS: z.string().min(2).optional(),
 });
 
 export type AppEnvironment = z.output<typeof appEnvironmentSchema>;
@@ -377,6 +386,8 @@ export interface AppHostRuntime {
   readonly kernel: Kernel;
   readonly environment: AppEnvironment;
   readonly url: string | undefined;
+  /** Deterministic worker hook for tests and operational drains. */
+  tickEvents(): Promise<void>;
   start(): Promise<string>;
   stop(): Promise<void>;
 }
@@ -386,6 +397,8 @@ export function parseAppEnvironment(input: NodeJS.ProcessEnv = process.env): App
   const parsed = appEnvironmentSchema.safeParse(input);
   if (!parsed.success) throw new Error(`Invalid Embody app environment: ${parsed.error.message}`);
   const env = parsed.data;
+  if (env.EMBODY_EVENT_DESTINATIONS && !env.EMBODY_EVENT_SECRET)
+    throw new Error("EMBODY_EVENT_DESTINATIONS requires EMBODY_EVENT_SECRET");
   if (env.NODE_ENV === "production") {
     if (!env.DATABASE_URL) throw new Error("Production requires DATABASE_URL (PostgreSQL)");
     if (!env.GATEWAY_URL || !env.PUBLIC_URL || !env.GATEWAY_REGISTRATION_SECRET)
@@ -398,9 +411,57 @@ export function parseAppEnvironment(input: NodeJS.ProcessEnv = process.env): App
   return env;
 }
 
+function parseEventDestinations(
+  serialized: string | undefined,
+): Readonly<Record<string, readonly { appId: string; endpoint: string }[]>> {
+  if (serialized === undefined) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized);
+  } catch {
+    throw new Error("EMBODY_EVENT_DESTINATIONS must be valid JSON");
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new Error("EMBODY_EVENT_DESTINATIONS must be an object");
+  const result: Record<string, { appId: string; endpoint: string }[]> = {};
+  for (const [eventName, destinations] of Object.entries(value)) {
+    if (!eventName.includes(".") || !Array.isArray(destinations))
+      throw new Error("EMBODY_EVENT_DESTINATIONS contains an invalid event mapping");
+    const appIds = new Set<string>();
+    result[eventName] = destinations.map((destination) => {
+      if (
+        destination === null ||
+        typeof destination !== "object" ||
+        Array.isArray(destination) ||
+        typeof (destination as Record<string, unknown>)["appId"] !== "string" ||
+        typeof (destination as Record<string, unknown>)["endpoint"] !== "string"
+      )
+        throw new Error("EMBODY_EVENT_DESTINATIONS contains an invalid destination");
+      const appId = (destination as { appId: string }).appId;
+      const endpoint = (destination as { endpoint: string }).endpoint;
+      if (!/^[a-z][a-z0-9-]{0,62}$/.test(appId) || appIds.has(appId))
+        throw new Error("Event destination app IDs must be valid and unique");
+      appIds.add(appId);
+      const url = new URL(endpoint);
+      if (
+        !/^https?:$/.test(url.protocol) ||
+        url.username ||
+        url.password ||
+        (url.pathname !== "/" && url.pathname !== "") ||
+        url.search ||
+        url.hash
+      )
+        throw new Error("Event destination endpoint must be an HTTP(S) origin");
+      return { appId, endpoint: url.origin };
+    });
+  }
+  return result;
+}
+
 /**
- * Assembles storage, kernel, authentication, HTTP hosting, gateway registration, and cleanup using
- * one conventional interface. Explicit adapters can be injected for tests and custom deployments.
+ * Assembles storage, kernel, authentication, HTTP hosting, gateway registration, event workers,
+ * and cleanup using one conventional interface. Explicit adapters can be injected for tests and
+ * custom deployments.
  */
 export async function createAppHost(
   definition: AppDefinition,
@@ -444,13 +505,33 @@ export async function createAppHost(
       algorithms: ["HS256"],
     });
   }
+  const eventDestinations = parseEventDestinations(environment.EMBODY_EVENT_DESTINATIONS);
+  const eventTransport = environment.EMBODY_EVENT_SECRET
+    ? new DirectEventTransport({
+        directory: new StaticEventDirectory(eventDestinations),
+        secret: environment.EMBODY_EVENT_SECRET,
+      })
+    : undefined;
   const host = createHost({
     kernel,
     verifier,
     appId: definition.appId,
     version: definition.version,
     environment: environment.NODE_ENV,
+    ...(environment.EMBODY_EVENT_SECRET
+      ? { eventDelivery: { storage, secret: environment.EMBODY_EVENT_SECRET } }
+      : {}),
   });
+  const outboxWorker = new OutboxWorker({
+    storage,
+    kernel,
+    producerAppId: definition.appId,
+    ...(eventTransport ? { transport: eventTransport } : {}),
+    maxAttempts: 5,
+  });
+  const deliveryWorker = eventTransport
+    ? new DeliveryWorker({ storage, transport: eventTransport, maxAttempts: 5 })
+    : undefined;
   const registration =
     environment.GATEWAY_URL && environment.PUBLIC_URL && environment.GATEWAY_REGISTRATION_SECRET
       ? createRegistrationClient({
@@ -469,6 +550,8 @@ export async function createAppHost(
     if (stopped) return;
     stopped = true;
     registration?.stop();
+    await outboxWorker.stop();
+    await deliveryWorker?.stop();
     try {
       await host.stop();
     } finally {
@@ -482,6 +565,10 @@ export async function createAppHost(
     get url() {
       return address;
     },
+    async tickEvents(): Promise<void> {
+      await outboxWorker.tick();
+      await deliveryWorker?.tick();
+    },
     async start(): Promise<string> {
       if (address !== undefined) return address;
       try {
@@ -491,6 +578,8 @@ export async function createAppHost(
           host: options.host ?? (environment.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
         });
         await registration?.start();
+        await outboxWorker.start();
+        await deliveryWorker?.start();
         return address;
       } catch (error) {
         await stop();

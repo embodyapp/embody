@@ -442,7 +442,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         "x-request-id": requestId,
         "x-gateway-auth": `Bearer ${await issueGatewayToken(principal, entry.appId, requestId, options.token)}`,
       },
-      body: JSON.stringify({ target: entry.target, input }),
+      body: JSON.stringify({ protocolVersion: 1, target: entry.target, input }),
     });
     if (!response.ok || !response.body) {
       yield { type: "error", message: "Tool execution failed" };
@@ -531,7 +531,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         "x-request-id": requestId,
         "x-gateway-auth": `Bearer ${await issueGatewayToken(principal, appId, requestId, options.token)}`,
       },
-      body: JSON.stringify({ target, input: request.body }),
+      body: JSON.stringify({ protocolVersion: 1, target, input: request.body }),
     });
     if (!response.ok || !response.body) {
       reply.status(response.status);
@@ -596,7 +596,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
           "x-request-id": requestId,
           "x-gateway-auth": `Bearer ${await issueGatewayToken(principal, appId, requestId, options.token)}`,
         },
-        body: JSON.stringify({ target, input: request.body }),
+        body: JSON.stringify({ protocolVersion: 1, target, input: request.body }),
       });
       const body = await response.json();
       reply.status(response.status);

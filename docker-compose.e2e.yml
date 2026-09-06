@@ -1,0 +1,112 @@
+# Distributed reference-app smoke topology. Supply every secret through the shell or .env;
+# none of these values has a repository default.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+    volumes:
+      - ./test/e2e/init-databases.sh:/docker-entrypoint-initdb.d/10-app-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  gateway:
+    image: embody-e2e-apps
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+    command: node apps/gateway/dist/src/index.js
+    environment:
+      NODE_ENV: production
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:?set GATEWAY_API_KEY}
+      GATEWAY_JWT_SECRET: ${GATEWAY_JWT_SECRET:?set GATEWAY_JWT_SECRET}
+      KANBAN_REGISTRATION_SECRET: ${KANBAN_REGISTRATION_SECRET:?set KANBAN_REGISTRATION_SECRET}
+      EMAIL_REGISTRATION_SECRET: ${EMAIL_REGISTRATION_SECRET:?set EMAIL_REGISTRATION_SECRET}
+      E2E_ORG_ID: ${E2E_ORG_ID:?set E2E_ORG_ID}
+      GATEWAY_JWT_ISSUER: ${GATEWAY_JWT_ISSUER:?set GATEWAY_JWT_ISSUER}
+      GATEWAY_REGISTRY_TTL_MS: 3000
+      E2E_SECOND_API_KEY: ${E2E_SECOND_API_KEY:?set E2E_SECOND_API_KEY}
+    ports: ["${GATEWAY_PORT:?set GATEWAY_PORT}:4000"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/health').then(r=>r.ok||process.exit(1)).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  kanban:
+    image: embody-e2e-apps
+    pull_policy: never
+    command: node examples/kanban/dist/src/index.js
+    environment:
+      NODE_ENV: production
+      PORT: 8081
+      DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/kanban
+      GATEWAY_URL: http://gateway:4000
+      PUBLIC_URL: http://kanban:8081
+      EMBODY_EVENT_SECRET: ${EVENT_DELIVERY_SECRET:?set EVENT_DELIVERY_SECRET}
+      EMBODY_EVENT_DESTINATIONS: '{"kanban.card.ready_for_review":[{"appId":"email","endpoint":"http://email:8082"}]}'
+      GATEWAY_REGISTRATION_SECRET: ${KANBAN_REGISTRATION_SECRET:?set KANBAN_REGISTRATION_SECRET}
+      GATEWAY_JWT_ISSUER: ${GATEWAY_JWT_ISSUER:?set GATEWAY_JWT_ISSUER}
+      GATEWAY_JWT_SECRET: ${GATEWAY_JWT_SECRET:?set GATEWAY_JWT_SECRET}
+    ports: ["${KANBAN_PORT:?set KANBAN_PORT}:8081"]
+    depends_on:
+      { postgres: { condition: service_healthy }, gateway: { condition: service_healthy } }
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8081/health').then(r=>r.ok||process.exit(1)).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  email:
+    image: embody-e2e-apps
+    pull_policy: never
+    command: node examples/email/dist/src/index.js
+    environment:
+      NODE_ENV: production
+      PORT: 8082
+      DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/email
+      GATEWAY_URL: http://gateway:4000
+      PUBLIC_URL: http://email:8082
+      EMBODY_EVENT_SECRET: ${EVENT_DELIVERY_SECRET:?set EVENT_DELIVERY_SECRET}
+      MAILER_RECORD_FILE: /var/lib/embody/mail/messages.json
+      MAILER_CRASH_AFTER_FIRST_WRITE: "true"
+      GATEWAY_REGISTRATION_SECRET: ${EMAIL_REGISTRATION_SECRET:?set EMAIL_REGISTRATION_SECRET}
+      GATEWAY_JWT_ISSUER: ${GATEWAY_JWT_ISSUER:?set GATEWAY_JWT_ISSUER}
+      GATEWAY_JWT_SECRET: ${GATEWAY_JWT_SECRET:?set GATEWAY_JWT_SECRET}
+    restart: on-failure
+    ports: ["${EMAIL_PORT:?set EMAIL_PORT}:8082"]
+    depends_on:
+      { postgres: { condition: service_healthy }, gateway: { condition: service_healthy } }
+    volumes:
+      - mail-records:/var/lib/embody/mail
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8082/health').then(r=>r.ok||process.exit(1)).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+volumes:
+  mail-records:

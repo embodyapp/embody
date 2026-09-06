@@ -1,0 +1,13 @@
+{
+  "name": "@embody/distributed-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test:e2e": "node journey.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "jose": "^6.1.3"
+  }
+}

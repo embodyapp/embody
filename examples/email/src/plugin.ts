@@ -1,3 +1,5 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { DependencyError, definePlugin, HookVetoError, z } from "@embody/core";
 
 export interface MailMessage {
@@ -22,6 +24,45 @@ export class RecordingMailer implements Mailer {
       this.messages.push(message);
     }
     return Promise.resolve();
+  }
+}
+
+/** Explicit durable adapter for local/distributed tests; not a production mail provider. */
+export class JsonFileMailer implements Mailer {
+  private pending = Promise.resolve();
+  public constructor(
+    private readonly filename: string,
+    private readonly crashAfterFirstWrite = false,
+  ) {}
+
+  public send(message: MailMessage): Promise<void> {
+    const operation = this.pending.then(async () => {
+      await mkdir(dirname(this.filename), { recursive: true });
+      let messages: MailMessage[] = [];
+      try {
+        const parsed: unknown = JSON.parse(await readFile(this.filename, "utf8"));
+        if (!Array.isArray(parsed)) throw new Error("Mailer record file must contain an array");
+        messages = parsed as MailMessage[];
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      if (messages.some((item) => item.idempotencyKey === message.idempotencyKey)) return;
+      const temporary = `${this.filename}.${process.pid}.tmp`;
+      await writeFile(temporary, JSON.stringify([...messages, message]), { mode: 0o600 });
+      await rename(temporary, this.filename);
+      if (this.crashAfterFirstWrite) {
+        const marker = `${this.filename}.crash-injected`;
+        try {
+          await readFile(marker);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          await writeFile(marker, "injected", { mode: 0o600 });
+          process.exit(86);
+        }
+      }
+    });
+    this.pending = operation.catch(() => undefined);
+    return operation;
   }
 }
 

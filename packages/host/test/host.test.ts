@@ -236,6 +236,71 @@ describe("remote host", () => {
     }
   });
 
+  it("runs configured durable event routing between conventional hosts", async () => {
+    let deliveries = 0;
+    const subscriber = defineApp({
+      appId: "email",
+      version: "1.0.0",
+      plugins: [
+        definePlugin({
+          id: "email",
+          version: "1.0.0",
+          events: { "kanban.ready": () => void deliveries++ },
+        }),
+      ],
+    });
+    const receiver = await createAppHost(subscriber, {
+      env: {
+        NODE_ENV: "development",
+        PORT: "0",
+        DATABASE_FILE: ":memory:",
+        EMBODY_EVENT_SECRET: "event-secret-1234",
+      },
+    });
+    const receiverUrl = await receiver.start();
+    const publisher = await createAppHost(
+      defineApp({
+        appId: "kanban",
+        version: "1.0.0",
+        plugins: [
+          definePlugin({ id: "kanban", version: "1.0.0", entities: {} }, (define) => ({
+            actions: {
+              publish: define.action({
+                input: z.object({ cardId: z.string() }),
+                handler: async (input, context) => {
+                  await context.events.publish("kanban.ready", { cardId: input.cardId });
+                  return { published: true };
+                },
+              }),
+            },
+          })),
+        ],
+      }),
+      {
+        env: {
+          NODE_ENV: "development",
+          PORT: "0",
+          DATABASE_FILE: ":memory:",
+          EMBODY_EVENT_SECRET: "event-secret-1234",
+          EMBODY_EVENT_DESTINATIONS: JSON.stringify({
+            "kanban.ready": [{ appId: "email", endpoint: receiverUrl }],
+          }),
+        },
+      },
+    );
+    try {
+      await publisher.start();
+      await publisher.kernel.execute("kanban.publish", { cardId: "card-1" }, { principal });
+      await publisher.tickEvents();
+      expect(deliveries).toBe(1);
+      await publisher.tickEvents();
+      expect(deliveries).toBe(1);
+    } finally {
+      await publisher.stop();
+      await receiver.stop();
+    }
+  });
+
   it("rejects incomplete conventional production configuration", () => {
     expect(() => parseAppEnvironment({ NODE_ENV: "production" })).toThrow(
       "Production requires DATABASE_URL",

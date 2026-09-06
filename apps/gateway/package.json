@@ -1,0 +1,20 @@
+{
+  "name": "@embody/app-gateway",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "start": "node dist/src/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@embody/gateway": "workspace:*",
+    "@embody/core": "workspace:*",
+    "fastify": "^5.12.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1"
+  }
+}

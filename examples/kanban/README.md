@@ -28,7 +28,7 @@ GATEWAY_JWT_SECRET='a-32-byte-or-longer-signing-secret' \
 pnpm --filter @embody/example-kanban start
 ```
 
-The app registers its compiled manifest and sends heartbeats when gateway settings are present. Use a distinct, rotated registration secret per application, a TLS gateway URL, and a private signing key supplied by secret management. Never commit these values.
+The app registers its compiled manifest and sends heartbeats when gateway settings are present. Cross-app delivery is enabled with `EMBODY_EVENT_SECRET` and a validated `EMBODY_EVENT_DESTINATIONS` JSON map; the distributed test routes `kanban.card.ready_for_review` to Email. Use distinct, rotated registration credentials, TLS endpoints, and signing keys supplied by secret management. Never commit these values.
 
 After gateway registration, discovery/execution are available through the framework surfaces:
 

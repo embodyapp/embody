@@ -1,8 +1,20 @@
 import { createAppHost } from "@embody/host";
 import app from "../embody.config.js";
+import { createEmailPlugin, JsonFileMailer } from "./plugin.js";
 
 export async function startEmail(env: NodeJS.ProcessEnv = process.env) {
-  const runtime = await createAppHost(app, { env });
+  const recordFile = env["MAILER_RECORD_FILE"];
+  const definition = recordFile
+    ? {
+        ...app,
+        plugins: [
+          createEmailPlugin(
+            new JsonFileMailer(recordFile, env["MAILER_CRASH_AFTER_FIRST_WRITE"] === "true"),
+          ),
+        ],
+      }
+    : app;
+  const runtime = await createAppHost(definition, { env });
   await runtime.start();
   return runtime;
 }

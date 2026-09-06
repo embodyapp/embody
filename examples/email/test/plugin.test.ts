@@ -1,8 +1,12 @@
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createTestHarness } from "@embody/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { kanbanPlugin } from "@embody/example-kanban/plugin";
 import {
   createEmailPlugin,
+  JsonFileMailer,
   RecordingMailer,
   type MailMessage,
   type Mailer,
@@ -27,6 +31,23 @@ async function harness(mailer: Mailer, roles: readonly string[] = []) {
 }
 
 describe("Email reference plugin", () => {
+  it("durably deduplicates file-adapter sends across adapter restarts", async () => {
+    const filename = join(tmpdir(), `embody-mail-${crypto.randomUUID()}.json`);
+    const message = {
+      to: "lead@example.com",
+      subject: "Review",
+      body: "Ready",
+      idempotencyKey: "event-1",
+    };
+    try {
+      await new JsonFileMailer(filename).send(message);
+      await new JsonFileMailer(filename).send(message);
+      expect(JSON.parse(await readFile(filename, "utf8"))).toEqual([message]);
+    } finally {
+      await rm(filename, { force: true });
+    }
+  });
+
   it("sends a validated batch and reports each tenth and final recipient", async () => {
     const mailer = new RecordingMailer();
     const h = await harness(mailer);

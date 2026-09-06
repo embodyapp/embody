@@ -48,7 +48,7 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P9-04 | Typed testing harness clients | DONE | pi | P9-01,P4-02 | Schema-inferred action/entity clients, dynamic escape hatch, cancellation, immutable agent/human views, and structured veto/progress/event queries; compile-time and runtime parity tests pass. |
 | P10-01 | Kanban reference app | DONE | pi | P9-03 | Public-package Kanban workspace app: card schema/index metadata, atomic bulkMove, agent PR guardrail, review event, conventional SQLite/PostgreSQL app host, dev seed, README, and domain/host contract tests. Typed plugin builder and conventional `defineApp`/`createAppHost` runtime included; workspace lint, typecheck, tests, build, API report, and format checks passed. |
 | P10-02 | Email reference app | DONE | pi | P10-01 | Cancellable validated sendBatch with exact progress and >500 guardrail; explicit Mailer abstraction, recording/idempotent adapter, Kanban event subscription, failure/dead-letter coverage, host config and docs. |
-| P10-03 | Distributed reference E2E suite | NOT_STARTED | — | P10-02,P7-03,P8-03 | |
+| P10-03 | Distributed reference E2E suite | IN_REVIEW | pi | P10-02,P7-03,P8-03 | Compose topology and release-blocking CLI/MCP/HTTP journey implemented with generated secrets, PostgreSQL isolation, three crash points, TTL recovery, and tenant/scope/audience checks. Production-mode local distributed smoke passed; full Compose run is pending review because the local Docker daemon timed out pulling `node:22-bookworm-slim`. |
 | P11-01 | Approve durable workflow contract | NOT_STARTED | — | D-02,P10-03 | Baseline semantics approved by ADR 0003; finalize executable contract in P11-01 |
 | P11-02 | Workflow persistence and engine | NOT_STARTED | — | P11-01 | |
 | P11-03 | Workflow surfaces and tooling | NOT_STARTED | — | P11-02 | |
@@ -67,10 +67,10 @@ This file is intentionally simple so small agents can coordinate without a proje
 | Install | `pnpm install --frozen-lockfile --offline` | Passed | 2026-09-06/pi |
 | Lint | `pnpm lint` | Passed | 2026-09-06/pi (P4/P9/P10) |
 | Type check | `pnpm typecheck` | Passed | 2026-09-06/pi (P4/P9/P10) |
-| Unit/integration | `pnpm test` | Passed: 102 tests; 7 PostgreSQL tests skipped unless separately enabled | 2026-09-06/pi (P4/P9/P10) |
+| Unit/integration | `pnpm test` | Passed: 105 tests; 7 PostgreSQL tests skipped unless separately enabled | 2026-09-06/pi (P10-03) |
 | PostgreSQL integration | `set -a && source .env && set +a && pnpm --filter @embody/storage test:postgres` | Passed: 6 PostgreSQL 16 tests, including bulk lifecycle/event rollback and two-worker claims | 2026-09-06/pi (P4-03) |
-| End-to-end | `pnpm test:e2e` | Passed; no suites until later phases | 2026-09-01/pi |
-| Build | `pnpm build` | Passed for all packages and examples | 2026-09-06/pi (P4/P9/P10) |
+| End-to-end | `pnpm test:e2e` | Compose suite implemented; local run blocked pulling Node base image, while equivalent production-mode PostgreSQL process smoke passed | 2026-09-06/pi (P10-03) |
+| Build | `pnpm build` | Passed for all packages, apps, and examples | 2026-09-06/pi (P10-03) |
 
 ## Activity log
 
@@ -99,3 +99,4 @@ Append concise entries; do not rewrite history.
 - 2026-09-06 `pi`: added Phase 13 as the final public-release gate and selected Apache-2.0 for all first-party repository material. Planned license/notice metadata, generated-app ownership boundaries, shipped-artifact SBOM/attribution auditing, and CI compliance gates.
 - 2026-09-06 `pi`: superseded the Apache-2.0 decision after monetization review. Phase 13 now specifies an n8n-inspired source-available dual-license model, commercial-use boundaries, chain-of-title/CLA and trademark work, artifact compliance, entitlements, pricing validation, contracting, billing, privacy, support, and commercial launch gates.
 - 2026-09-06 `pi`: completed P4-03, P9-04, and P10-02. Added transactional ordered bulk stores with SQLite/PostgreSQL rollback proof, typed harness clients and structured actor/observation helpers, and the Email reference app with cancellable guarded batches, progress, idempotent event mail, explicit adapter failure, and dead-letter tests. Fixed PostgreSQL timestamp precision preservation uncovered by optimistic bulk updates. `pnpm verify` and six real PostgreSQL tests passed.
+- 2026-09-06 `pi`: implemented P10-03 for review: deployable gateway, built-artifact Compose topology, conventional host event workers, durable test mail adapter, generated test credentials/ports, and a nine-step CLI/MCP/HTTP journey with pre-commit publisher termination, post-fan-out publisher restart, post-side-effect receiver crash, TTL recovery, and isolation checks. Fixed gateway forwarding to include the required protocol version. A production-mode multi-process PostgreSQL smoke and affected tests/typechecks/builds passed; the full Compose run could not complete locally because pulling the Node base image timed out.
