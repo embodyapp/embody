@@ -68,7 +68,7 @@ In development, Embody synchronizes tables and indexes automatically. In product
 **Yes.** Any agent framework that can make HTTP requests or speak the Model Context Protocol (MCP) can connect to Embody. See the **[Custom Agent SDKs Guide](../agent-integrations/04-custom-agents-sdk.md)** for Python and LangChain examples.
 
 ### Is Embody open source?
-**Yes.** Embody is open-source software licensed under the permissive **MIT License**.
+No. Embody plans to use source-available community terms with separate commercial rights for managed Embody hosting and official support. The approved terms have not yet been published, so the repository must not be described as open source or MIT-licensed. See the [commercial preparation record](../commercial/README.md).
 
 ---
 

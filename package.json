@@ -12,12 +12,16 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . && node scripts/check-package-boundaries.mjs",
+    "license:check": "node scripts/check-license-readiness.mjs",
+    "security:audit": "pnpm audit --audit-level high",
+    "sbom": "node scripts/generate-sbom.mjs",
+    "release:artifacts": "pnpm build && node scripts/check-release-artifacts.mjs",
     "api-report": "pnpm --filter @embody/core api-report",
     "test": "pnpm -r --if-present test",
     "test:postgres": "pnpm -r --if-present test:postgres",
     "test:e2e": "pnpm -r --if-present test:e2e",
     "typecheck": "pnpm -r --if-present typecheck",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm api-report && pnpm format:check"
+    "verify": "pnpm lint && pnpm license:check && pnpm typecheck && pnpm test && pnpm build && pnpm api-report && pnpm format:check"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",

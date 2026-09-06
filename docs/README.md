@@ -65,6 +65,7 @@ Master the architecture of Embody:
 - **[Events & Outbox](./guides/05-events-and-outbox.md)**: The Transactional Outbox pattern, reliable at-least-once delivery, and SSE streaming.
 - **[Authentication & Identity](./guides/06-authentication-and-principals.md)**: Principals, actor types (`agent` vs `human` vs `system`), and tokens.
 - **[Gateway & Control Plane](./guides/07-gateway-and-control-plane.md)**: Aggregated MCP endpoints and centralized routing.
+- **[Durable Workflows](./guides/08-durable-workflows.md)**: Versioned DAGs, retries, cancellation, compensation, and deterministic tests.
 
 ### 🤖 [Agent Integrations](./agent-integrations/01-model-context-protocol.md)
 Connect your AI agents seamlessly:
@@ -88,6 +89,9 @@ Learn by building production-grade examples:
 Ship with confidence:
 - **[Deployment & Operations](./production/01-deployment.md)**: Dockerfile, PostgreSQL pooling, health checks, and graceful shutdown.
 - **[Troubleshooting & FAQ](./production/02-troubleshooting-faq.md)**: Debugging common errors, HookVetoError, and answers to common questions.
+- **[Security](./production/03-security.md)** and **[operations runbook](./production/04-operations-runbook.md)**.
+- **[Compatibility/upgrades](./production/05-compatibility-and-upgrades.md)** and **[performance baseline](./production/06-performance-baseline.md)**.
+- **[Release evidence checklist](./RELEASE-CHECKLIST.md)**.
 
 ---
 

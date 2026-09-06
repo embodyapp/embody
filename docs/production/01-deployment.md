@@ -97,28 +97,15 @@ GET /health
 
 ### Response
 ```json
-{
-  "status": "healthy",
-  "uptimeSeconds": 86420,
-  "appId": "ops",
-  "version": "1.0.0",
-  "database": {
-    "dialect": "postgres",
-    "connected": true
-  }
-}
+{ "appId": "ops", "version": "1.0.0", "live": true, "ready": true }
 ```
 
-If the database connection is severed, `/health` returns `503 Service Unavailable`, allowing load balancers and orchestrators to automatically route traffic away from unhealthy nodes.
+Readiness reflects host admission and kernel state. It is not currently a database probe; monitor PostgreSQL separately and use the outage procedure in the operations runbook.
 
 ---
 
 ## 🔄 Graceful Shutdown
 
-When an instance receives a `SIGTERM` or `SIGINT` signal (e.g. during a rolling deployment):
-1. Stops accepting new HTTP / MCP connections.
-2. Allows in-flight actions to complete up to `requestTimeoutMs` (default: 30 seconds).
-3. Closes database connection pools and flushes pending outbox events.
-4. Exits with status `0`.
+The process entrypoint must handle `SIGTERM`/`SIGINT` and await `AppHostRuntime.stop()`. Shutdown drops readiness, stops registration and new worker claims, waits for active work up to worker deadlines, closes Fastify, then closes storage. Pending committed outbox/workflow rows remain durable for another worker; shutdown does not promise to empty the queue.
 
 Next: **[Troubleshooting & FAQ →](./02-troubleshooting-faq.md)**
