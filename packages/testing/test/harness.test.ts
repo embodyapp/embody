@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { definePlugin, z, type KernelContext } from "@embody/core";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import { definePlugin, HookVetoError, z, type KernelContext } from "@embody/core";
 import { createTestHarness } from "../src/index.js";
 
 const pluginSource = {
@@ -15,14 +15,21 @@ const pluginSource = {
     },
     publish: {
       input: z.object({ value: z.string() }),
+      output: z.object({ value: z.string() }),
       handler: async (input: { value: string }, ctx: KernelContext) => {
         await ctx.events.publish("kanban.card.created", input);
         ctx.progress({ percent: 50, message: input.value });
         return input;
       },
     },
+    veto: {
+      input: z.object({}),
+      handler: () => {
+        throw new HookVetoError("blocked by test guardrail");
+      },
+    },
   },
-};
+} as const;
 const plugin = definePlugin(pluginSource);
 
 describe("createTestHarness", () => {
@@ -61,6 +68,38 @@ describe("createTestHarness", () => {
       expect((await harness.outbox())[0]?.status).toBe("pending");
       await harness.tickOutbox();
       expect((await harness.events())[0]?.status).toBe("completed");
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("provides typed clients, actor conveniences, and structured observations", async () => {
+    const harness = await createTestHarness({ plugins: [plugin] as const, tenantId: "org-a" });
+    try {
+      expectTypeOf(harness.client.kanban.publish).parameter(0).toEqualTypeOf<{ value: string }>();
+      expectTypeOf(harness.client.kanban.publish).returns.toEqualTypeOf<
+        Promise<{ value: string }>
+      >();
+      expect(await harness.client.kanban.publish({ value: "typed" })).toEqual({ value: "typed" });
+      const card = await harness.client.kanban.card.create({ data: { title: "typed card" } });
+      expectTypeOf(card.data.title).toEqualTypeOf<string>();
+      expect(await harness.client.kanban.card.get({ id: card.id })).toEqual(card);
+      expect(await harness.events("kanban.card.created")).toHaveLength(2);
+      expect(harness.progress().map(({ update }) => update.message)).toContain("typed");
+      expect(await harness.veto(() => harness.client.kanban.veto({}))).toMatchObject({
+        code: "HOOK_VETO",
+        message: "blocked by test guardrail",
+      });
+      expect(harness.asHuman("alice").principal).toMatchObject({
+        orgId: "org-a",
+        actorId: "alice",
+        actorType: "human",
+      });
+      expect(harness.asAgent("bot", { orgId: "org-b" }).principal).toMatchObject({
+        orgId: "org-b",
+        actorId: "bot",
+        actorType: "agent",
+      });
     } finally {
       await harness.close();
     }
