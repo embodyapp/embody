@@ -347,6 +347,19 @@ pnpm verify
 
 ---
 
+## 📚 Comprehensive Documentation
+
+For complete, multi-page user documentation with guides, tutorials, and agent setup instructions, visit the **[Embody Documentation Hub](./docs/README.md)**:
+
+- 🚀 **[Getting Started](./docs/getting-started/01-introduction.md)**: [5-Minute Quickstart](./docs/getting-started/02-quickstart.md) • [Core Concepts](./docs/getting-started/03-core-concepts.md) • [Project Layout](./docs/getting-started/04-project-structure.md)
+- 📖 **[Developer Guides](./docs/guides/01-defining-plugins.md)**: [Plugins & Microkernel](./docs/guides/01-defining-plugins.md) • [Entities & Storage](./docs/guides/02-entities-and-storage.md) • [Actions & Progress](./docs/guides/03-actions-and-handlers.md) • [Mechanical Safety Guardrails](./docs/guides/04-mechanical-safety-guardrails.md) • [Outbox & Events](./docs/guides/05-events-and-outbox.md) • [Auth & Identity](./docs/guides/06-authentication-and-principals.md) • [Gateway](./docs/guides/07-gateway-and-control-plane.md)
+- 🤖 **[Agent Integrations](./docs/agent-integrations/01-model-context-protocol.md)**: [Model Context Protocol (MCP)](./docs/agent-integrations/01-model-context-protocol.md) • [Claude Desktop](./docs/agent-integrations/02-claude-desktop.md) • [Cursor & Cline](./docs/agent-integrations/03-cursor-and-cline.md) • [Python & LangChain](./docs/agent-integrations/04-custom-agents-sdk.md)
+- 🛠️ **[Developer Tools](./docs/developer-tools/01-cli-reference.md)**: [CLI Reference Manual](./docs/developer-tools/01-cli-reference.md) • [Web Inspector](./docs/developer-tools/02-dev-inspector.md) • [Testing Guide](./docs/developer-tools/03-testing-guide.md)
+- 🎓 **[Step-by-Step Tutorials](./docs/tutorials/01-kanban-board.md)**: [AI Kanban Board](./docs/tutorials/01-kanban-board.md) • [Email Campaign Automation](./docs/tutorials/02-email-automation.md)
+- 🚢 **[Production Operations](./docs/production/01-deployment.md)**: [Docker & PostgreSQL Deployment](./docs/production/01-deployment.md) • [Troubleshooting & FAQ](./docs/production/02-troubleshooting-faq.md)
+
+---
+
 ## 📖 Detailed Specifications
 
 For in-depth architectural documents, lifecycle diagrams, and technical deep dives, check out the [`docs/specs/`](./docs/specs/) directory:
