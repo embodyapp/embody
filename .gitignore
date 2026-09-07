@@ -10,3 +10,4 @@ temp/
 firebase.json
 .firebaserc
 .firebase/
+.claude/

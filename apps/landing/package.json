@@ -11,7 +11,8 @@
     "deploy": "pnpm build && npx firebase-tools deploy --only hosting:embdy"
   },
   "dependencies": {
-    "gsap": "^3.12.5"
+    "gsap": "^3.12.5",
+    "posthog-js": "^1.427.2"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

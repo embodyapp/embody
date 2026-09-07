@@ -3,6 +3,7 @@ import './styles/reset.css';
 import './styles/typography.css';
 import './styles/components.css';
 import './styles/animations.css';
+import posthog, { posthogEnabled } from './posthog';
 
 import gsap from 'gsap';
 import { CODE_SAMPLES } from './data/code-samples';
@@ -253,6 +254,13 @@ function setupAgentSandbox() {
     const amount = Number(amountSlider.value);
     const isDryRun = dryRunCheck?.checked ?? false;
 
+    if (posthogEnabled) {
+      posthog.capture('sandbox_run', {
+        execution_mode: isDryRun ? 'dry_run' : 'live',
+        amount_range: amount > 500 ? 'over_budget' : 'within_budget',
+      });
+    }
+
     outputEl.innerHTML = `<span class="token-comment">// Rex dispatched MCP tool call: crm_advance_stage...</span>\n`;
 
     setTimeout(() => {
@@ -289,6 +297,11 @@ function setupCopyButtons() {
     btn.addEventListener('click', () => {
       const textToCopy = btn.getAttribute('data-copy') || '';
       if (textToCopy) {
+        if (posthogEnabled) {
+          posthog.capture('code_sample_copied', {
+            copy_target: btn.getAttribute('id') || 'documentation_snippet',
+          });
+        }
         navigator.clipboard.writeText(textToCopy);
         const originalText = btn.textContent;
         btn.textContent = 'Copied! ✨';
@@ -305,6 +318,12 @@ function setupCopyButtons() {
     copyPlaygroundBtn.addEventListener('click', () => {
       const sample = CODE_SAMPLES.find(s => s.id === activeSampleId);
       if (sample) {
+        if (posthogEnabled) {
+          posthog.capture('code_sample_copied', {
+            copy_target: 'playground',
+            sample_id: sample.id,
+          });
+        }
         navigator.clipboard.writeText(sample.code);
         copyPlaygroundBtn.textContent = 'Copied! ✨';
         setTimeout(() => {
@@ -519,6 +538,9 @@ function setupLoFiPlayer() {
     }
 
     const isPlaying = lofiInstance.toggle();
+    if (posthogEnabled) {
+      posthog.capture('lofi_player_toggled', { is_playing: isPlaying });
+    }
     if (isPlaying) {
       vinylDisc.classList.add('vinyl-spinning');
       if (vinylStatus) vinylStatus.textContent = 'Playing Lo-Fi Beats & Cracking Vinyl 🎶';
@@ -556,6 +578,10 @@ function setupExtendabilityShowcase() {
   toggleBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       const mode = btn.getAttribute('data-ext-mode') || 'all';
+
+      if (posthogEnabled) {
+        posthog.capture('extendability_mode_selected', { mode });
+      }
 
       // Update active toggle button
       toggleBtns.forEach(b => b.classList.toggle('active', b === btn));
@@ -610,6 +636,9 @@ function setupBetaSignupForms() {
 
   // Check if previously signed up in this browser
   const savedEmail = localStorage.getItem('embdy_beta_email');
+  if (savedEmail && posthogEnabled) {
+    posthog.identify(savedEmail, { email: savedEmail });
+  }
 
   forms.forEach(form => {
     const emailInput = form.querySelector<HTMLInputElement>('.beta-email-input');
@@ -630,6 +659,9 @@ function setupBetaSignupForms() {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
       if (!email || !emailRegex.test(email)) {
+        if (posthogEnabled) {
+          posthog.capture('beta_signup_validation_failed');
+        }
         feedbackEl.className = 'form-feedback is-error';
         feedbackEl.innerHTML = `<span>⚠️ Please enter a valid email address.</span>`;
         emailInput.focus();
@@ -681,6 +713,10 @@ function setupBetaSignupForms() {
         setTimeout(() => hiddenForm.remove(), 1000);
 
         // Success state
+        if (posthogEnabled) {
+          posthog.identify(email, { email });
+          posthog.capture('beta_signup_submitted', { email });
+        }
         localStorage.setItem('embdy_beta_email', email);
         submitBtn.innerText = 'Joined! ✓';
         feedbackEl.className = 'form-feedback is-success';
@@ -720,6 +756,9 @@ function setupBetaSignupForms() {
   document.querySelectorAll('.btn-nav-beta').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
+      if (posthogEnabled) {
+        posthog.capture('beta_signup_cta_clicked', { placement: 'navigation' });
+      }
       const heroInput = document.querySelector<HTMLInputElement>('#hero-beta-form .beta-email-input');
       if (heroInput) {
         heroInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -738,7 +777,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const tabId = btn.getAttribute('data-tab');
-      if (tabId) updatePlayground(tabId);
+      if (tabId) {
+        if (posthogEnabled) {
+          posthog.capture('code_sample_selected', { sample_id: tabId });
+        }
+        updatePlayground(tabId);
+      }
     });
   });
 
