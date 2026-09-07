@@ -587,6 +587,148 @@ function setupExtendabilityShowcase() {
   });
 }
 
+// Beta Signup Form Integration with Google Forms
+const GOOGLE_FORM_CONFIG = {
+  formId: '1FAIpQLSf6z6c00hg3DbjIX1AVQ0bUBLNtGyoybqAWX06Q_f6tR5svJA',
+  emailEntryId: 'entry.1271661547',
+};
+
+function setupBetaSignupForms() {
+  const forms = document.querySelectorAll<HTMLFormElement>('.beta-signup-form');
+  if (!forms.length) return;
+
+  // Create hidden iframe for bulletproof background form submission
+  let hiddenIframe = document.getElementById('gform-hidden-iframe') as HTMLIFrameElement | null;
+  if (!hiddenIframe) {
+    hiddenIframe = document.createElement('iframe');
+    hiddenIframe.id = 'gform-hidden-iframe';
+    hiddenIframe.name = 'gform-hidden-iframe';
+    hiddenIframe.style.display = 'none';
+    hiddenIframe.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(hiddenIframe);
+  }
+
+  // Check if previously signed up in this browser
+  const savedEmail = localStorage.getItem('embdy_beta_email');
+
+  forms.forEach(form => {
+    const emailInput = form.querySelector<HTMLInputElement>('.beta-email-input');
+    const submitBtn = form.querySelector<HTMLButtonElement>('.btn-cta');
+    const feedbackEl = form.querySelector<HTMLDivElement>('.form-feedback');
+
+    if (savedEmail && feedbackEl && emailInput) {
+      emailInput.value = savedEmail;
+      feedbackEl.className = 'form-feedback is-success';
+      feedbackEl.innerHTML = `<span>✓ You're on the beta access list! We'll notify you soon.</span>`;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!emailInput || !submitBtn || !feedbackEl) return;
+
+      const email = emailInput.value.trim();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+      if (!email || !emailRegex.test(email)) {
+        feedbackEl.className = 'form-feedback is-error';
+        feedbackEl.innerHTML = `<span>⚠️ Please enter a valid email address.</span>`;
+        emailInput.focus();
+        return;
+      }
+
+      // Read form ID and entry ID from data attributes with config fallback
+      const formId = form.getAttribute('data-form-id') || GOOGLE_FORM_CONFIG.formId;
+      const rawEntryId = form.getAttribute('data-entry-id') || '1271661547';
+      const entryId = rawEntryId.startsWith('entry.') ? rawEntryId : `entry.${rawEntryId}`;
+      const actionUrl = `https://docs.google.com/forms/d/e/${formId}/formResponse`;
+
+      // Loading state
+      const originalBtnText = submitBtn.innerText;
+      submitBtn.disabled = true;
+      submitBtn.innerText = 'Submitting...';
+      emailInput.disabled = true;
+      feedbackEl.className = 'form-feedback';
+      feedbackEl.textContent = '';
+
+      try {
+        // Method 1: Dual dispatch using fetch with mode: 'no-cors'
+        const formData = new FormData();
+        formData.append(entryId, email);
+
+        fetch(actionUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          body: formData,
+        }).catch(() => {
+          // fetch no-cors errors are ignored
+        });
+
+        // Method 2: Dynamic hidden form submitted into hidden iframe to ensure delivery
+        const hiddenForm = document.createElement('form');
+        hiddenForm.action = actionUrl;
+        hiddenForm.method = 'POST';
+        hiddenForm.target = 'gform-hidden-iframe';
+        hiddenForm.style.display = 'none';
+
+        const hiddenInput = document.createElement('input');
+        hiddenInput.type = 'hidden';
+        hiddenInput.name = entryId;
+        hiddenInput.value = email;
+        hiddenForm.appendChild(hiddenInput);
+
+        document.body.appendChild(hiddenForm);
+        hiddenForm.submit();
+        setTimeout(() => hiddenForm.remove(), 1000);
+
+        // Success state
+        localStorage.setItem('embdy_beta_email', email);
+        submitBtn.innerText = 'Joined! ✓';
+        feedbackEl.className = 'form-feedback is-success';
+        feedbackEl.innerHTML = `<span>🎉 You're on the list! We'll invite you to the private beta shortly.</span>`;
+
+        // Update other signup forms on the page
+        forms.forEach(otherForm => {
+          if (otherForm !== form) {
+            const otherFeedback = otherForm.querySelector<HTMLDivElement>('.form-feedback');
+            const otherInput = otherForm.querySelector<HTMLInputElement>('.beta-email-input');
+            const otherBtn = otherForm.querySelector<HTMLButtonElement>('.btn-cta');
+            if (otherFeedback) {
+              otherFeedback.className = 'form-feedback is-success';
+              otherFeedback.innerHTML = `<span>✓ You're on the list (${escapeHtml(email)})!</span>`;
+            }
+            if (otherInput) {
+              otherInput.value = email;
+              otherInput.disabled = true;
+            }
+            if (otherBtn) {
+              otherBtn.disabled = true;
+              otherBtn.innerText = 'Joined! ✓';
+            }
+          }
+        });
+      } catch (err) {
+        submitBtn.disabled = false;
+        submitBtn.innerText = originalBtnText;
+        emailInput.disabled = false;
+        feedbackEl.className = 'form-feedback is-error';
+        feedbackEl.innerHTML = `<span>Something went wrong. Please try again or visit our GitHub.</span>`;
+      }
+    });
+  });
+
+  // Smooth scroll and focus on email input when clicking nav beta button
+  document.querySelectorAll('.btn-nav-beta').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const heroInput = document.querySelector<HTMLInputElement>('#hero-beta-form .beta-email-input');
+      if (heroInput) {
+        heroInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => heroInput.focus(), 500);
+      }
+    });
+  });
+}
+
 // Document Ready
 document.addEventListener('DOMContentLoaded', () => {
   renderArchitectureDiagram();
@@ -606,4 +748,5 @@ document.addEventListener('DOMContentLoaded', () => {
   setupLoFiPlayer();
   initHeroCanvasAnimations();
   initHeroEntrance();
+  setupBetaSignupForms();
 });

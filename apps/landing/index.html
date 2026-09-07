@@ -42,7 +42,7 @@
           </svg>
           <span>Star</span>
         </a>
-        <a href="#quickstart" class="btn btn-primary btn-sm">Get Started</a>
+        <a href="#beta-signup" class="btn btn-primary btn-sm btn-nav-beta">Join Beta</a>
       </div>
     </div>
   </header>
@@ -69,12 +69,21 @@
         </p>
 
         <div class="hero-cta-group">
-          <a href="#quickstart" class="btn btn-primary btn-lg">Start Building Free</a>
+          <div class="beta-signup-container">
+            <form class="beta-signup-form" id="hero-beta-form" data-form-id="1FAIpQLSf6z6c00hg3DbjIX1AVQ0bUBLNtGyoybqAWX06Q_f6tR5svJA" data-entry-id="1271661547">
+              <div class="input-action-group">
+                <input type="email" name="email" class="beta-email-input" placeholder="Enter your email to join the beta..." required autocomplete="email" aria-label="Email address for beta access" />
+                <button type="submit" class="btn btn-primary btn-cta">Join Beta</button>
+              </div>
+              <div class="form-feedback" aria-live="polite"></div>
+            </form>
+          </div>
           <div class="hero-terminal-pill">
             <code>pnpm create embdy@latest</code>
             <button class="copy-btn" data-copy="pnpm create embdy@latest" title="Copy CLI Command">Copy</button>
           </div>
         </div>
+        <p class="hero-beta-subtext">✨ Private beta is open — get early access to the agentic business runtime & SDK.</p>
 
         <div class="hero-metrics-row">
           <div class="metric-card">
@@ -867,20 +876,30 @@
   </section>
 
 
-  <!-- Quickstart & Final CTA Banner -->
-  <section class="section" id="quickstart">
+  <!-- Quickstart & Final Beta Signup Banner -->
+  <section class="section" id="beta-signup">
     <div class="container">
       <div class="cta-banner gsap-reveal">
-        <span class="badge-tag badge-terracotta" style="margin-bottom: 1rem;">Get Started in 60 Seconds</span>
+        <span class="badge-tag badge-terracotta" style="margin-bottom: 1rem;">Early Beta Access</span>
         <h2>Build software that outlives its author.</h2>
-        <p>Turn prompt vibes into production value. Deploy your first rot-proof app in minutes.</p>
+        <p>Turn prompt vibes into production value. Join the private beta to deploy your first rot-proof, agentic app.</p>
 
-        <div class="hero-cta-group" style="justify-content: center;">
+        <div class="beta-signup-container" style="margin: 0 auto 1.5rem auto;">
+          <form class="beta-signup-form" id="banner-beta-form" data-form-id="1FAIpQLSf6z6c00hg3DbjIX1AVQ0bUBLNtGyoybqAWX06Q_f6tR5svJA" data-entry-id="1271661547">
+            <div class="input-action-group">
+              <input type="email" name="email" class="beta-email-input" placeholder="Enter your email to request beta access..." required autocomplete="email" aria-label="Email address for beta access" />
+              <button type="submit" class="btn btn-primary btn-cta">Request Beta Access</button>
+            </div>
+            <div class="form-feedback" aria-live="polite"></div>
+          </form>
+        </div>
+
+        <div class="hero-cta-group" style="justify-content: center; margin-bottom: 0;">
           <div class="hero-terminal-pill" style="background: #FFFDF9; border-color: var(--stroke-main);">
             <code>pnpm create embdy@latest crm-app</code>
             <button class="copy-btn" data-copy="pnpm create embdy@latest crm-app">Copy Command</button>
           </div>
-          <a href="https://github.com/nimrod4278/embdy" target="_blank" class="btn btn-primary btn-lg">View GitHub Repo</a>
+          <a href="https://github.com/nimrod4278/embdy" target="_blank" class="btn btn-secondary btn-lg">View GitHub Repo</a>
         </div>
       </div>
     </div>

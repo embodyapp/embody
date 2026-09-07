@@ -267,7 +267,118 @@
   flex-wrap: wrap;
   gap: 1rem;
   align-items: center;
-  margin-bottom: 2.5rem;
+  margin-bottom: 1.25rem;
+}
+
+/* ============================================================
+   BETA SIGNUP FORM COMPONENT
+   ============================================================ */
+.beta-signup-container {
+  flex: 1 1 360px;
+  max-width: 480px;
+}
+
+.beta-signup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.input-action-group {
+  display: flex;
+  align-items: center;
+  background: var(--bg-card);
+  border: var(--stroke-width) solid var(--stroke-main);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-hard);
+  padding: 0.3rem 0.4rem 0.3rem 1.15rem;
+  transition: all var(--transition-fast);
+  width: 100%;
+}
+
+.input-action-group:focus-within {
+  border-color: var(--color-sunset-orange);
+  box-shadow: var(--shadow-hard-lg);
+  transform: translate(-1px, -1px);
+}
+
+.beta-email-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--text-main);
+  outline: none;
+  padding: 0.45rem 0.5rem 0.45rem 0;
+}
+
+.beta-email-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+.input-action-group .btn-cta {
+  border-radius: var(--radius-pill);
+  padding: 0.6rem 1.25rem;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.form-feedback {
+  display: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--stroke-main);
+  margin-top: 0.25rem;
+  transition: all var(--transition-fast);
+}
+
+.form-feedback.is-success {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #EAF7EE;
+  color: #1B5E20;
+  border-color: #2E7D32;
+  box-shadow: var(--shadow-hard-sm);
+}
+
+.form-feedback.is-error {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #FEECEB;
+  color: #B71C1C;
+  border-color: #C62828;
+  box-shadow: var(--shadow-hard-sm);
+}
+
+.hero-beta-subtext {
+  font-size: 0.825rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Banner variant */
+.cta-banner .beta-signup-container {
+  max-width: 520px;
+}
+
+.cta-banner .input-action-group {
+  background: #FFFDF9;
+  box-shadow: var(--shadow-hard);
 }
 
 .hero-terminal-pill {
@@ -2155,6 +2266,25 @@
   .hero-cta-group {
     flex-direction: column;
     align-items: stretch;
+  }
+  .beta-signup-container {
+    max-width: 100%;
+  }
+  .input-action-group {
+    flex-direction: column;
+    align-items: stretch;
+    border-radius: var(--radius-lg);
+    padding: 0.6rem;
+    gap: 0.5rem;
+  }
+  .beta-email-input {
+    text-align: center;
+    padding: 0.4rem 0.5rem;
+  }
+  .input-action-group .btn-cta {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
   }
   .extend-visual-canvas {
     padding: 1rem 0.75rem;
