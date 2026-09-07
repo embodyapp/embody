@@ -9,6 +9,7 @@
   "scripts": {
     "build": "pnpm -r --if-present build",
     "clean": "pnpm -r --if-present clean && rm -rf coverage",
+    "deploy:landing": "pnpm --filter @app/landing build && npx firebase-tools deploy --only hosting:embdy",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . && node scripts/check-package-boundaries.mjs",
