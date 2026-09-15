@@ -12,7 +12,7 @@ This file is intentionally simple so small agents can coordinate without a proje
 | D-02 | Resolve durable workflow semantics/scope | DONE | pi | ADR 0003: included in MVP as Phase 11; durable DAG, version-pinned instances, at-least-once steps, retries, cancellation/compensation, per-step auth |
 | D-03 | Approve cross-app event delivery protocol | DONE | pi | ADR 0004: direct delivery baseline through a transport seam; durable gateway relay is optional P7-04 |
 | D-04 | Set supported Node/PostgreSQL/SQLite versions | DONE | pi | ADR 0002: Node 22/24, PostgreSQL 16+, SQLite 3.45+ JSON1 |
-| D-05 | Select first-party licensing model | DONE | pi | Source-available dual licensing inspired by n8n: Sustainable Use community terms plus paid commercial terms and separate trademark policy; not OSI open source |
+| D-05 | Select first-party licensing model | DONE | pi | Unmodified Elastic License 2.0 plus paid commercial hosting terms and a separate trademark policy; source-available, not OSI open source |
 
 ## Work items
 
@@ -55,8 +55,8 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P12-01 | Security, resilience, and performance hardening | IN_PROGRESS | pi | P10-03,P11-03 | Threat model/runbooks, production secret/HTTPS checks, security headers, and local audit/SBOM tooling added; performance CI/budgets explicitly deferred by owner, while fuzz, soak, outage/restore drills still require later operational evidence |
 | P12-02 | Packaging, compatibility, and release docs | IN_PROGRESS | pi | P12-01 | Typed tarball inspection passes; package readmes/changelogs, compatibility/upgrade policy, non-root E2E image and release checklist added; signed images, clean tarball E2E/quickstart and Phase 13 terms remain gated |
 | P13-01 | Ownership and legal foundation | IN_PROGRESS | pi | P12-02,D-05 | Nimrod Feldman identified as personal rightsholder; chain of title, exact identity details, CLA, trademark, and counsel review remain publication blockers. See `docs/commercial/`. |
-| P13-02 | Community and commercial terms | NOT_STARTED | — | P13-01 | Business intent recorded without generating legal terms; counsel-approved license, commercial agreement, trademark policy, definitions, examples, and FAQ remain required. |
-| P13-03 | Repository, artifacts, and entitlements | NOT_STARTED | — | P13-02 | Preparatory safeguards added: first-party packages and generated apps are explicitly `UNLICENSED`; generated apps inherit no license. Exact approved terms and entitlements remain pending. |
+| P13-02 | Community and commercial terms | IN_PROGRESS | pi | P13-01 | Unmodified ELv2 selected and installed; counsel review, commercial agreement, trademark policy, definitions, examples, and FAQ approval remain required. |
+| P13-03 | Repository, artifacts, and entitlements | IN_PROGRESS | pi | P13-02 | Root and package ELv2 files plus `Elastic-2.0` metadata installed; generated apps remain user-owned and `UNLICENSED`. Full artifact inspection and entitlements remain pending. |
 | P13-04 | Third-party and distribution compliance | NOT_STARTED | — | P13-03 | Pre-license CI metadata/claims gate added; artifact SBOM, attribution audit, compatibility policy, and legal review remain required. |
 | P13-05 | Commercial launch readiness | NOT_STARTED | — | P13-04 | Hosting and official support reserved; independent customer-specific consulting allowed. ICP, pricing, operations, contracts, and rehearsal remain pending. |
 

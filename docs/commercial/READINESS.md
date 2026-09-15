@@ -7,16 +7,17 @@ This is the evidence checklist for Phase 13. Drafts and automation may be prepar
 - [ ] Counsel confirms chain of title for Git history, first-party assets, and existing contributions.
 - [ ] Counsel confirms the rightsholder identity, publication year, governing law, and authorized signatory.
 - [ ] Trademark clearance is completed for Embody, package names, logos, and relevant domains.
-- [ ] The rightsholder and counsel approve versioned community-license text.
+- [ ] Counsel confirms the rightsholder's selection and repository application of unmodified Elastic License 2.0.
 - [ ] The rightsholder and counsel approve the commercial agreement, trial terms, CLA, and trademark policy.
 - [ ] Approved legal texts are installed as canonical repository files; no generated legal text is substituted.
 - [ ] Every public description uses “source-available,” never “open source.”
 
 ## Repository and artifact preparation
 
-- [x] Publishable package manifests explicitly say `UNLICENSED` while legal terms are pending.
+- [x] Publishable package manifests identify the license as `Elastic-2.0`.
 - [x] Generated applications are private and `UNLICENSED` by default and contain no inherited `LICENSE`.
-- [ ] After approval, package metadata references the canonical license and packed artifacts contain exact `LICENSE` and required notice files.
+- [x] Package metadata references ELv2 and package directories contain exact copies of the canonical `LICENSE`.
+- [ ] Packed npm, source, and container artifacts are verified to contain the exact applicable `LICENSE` and required notice files.
 - [ ] Source archives, npm tarballs, containers, documentation, and marketplace artifacts are inspected.
 - [ ] A frozen-lockfile SBOM and third-party attribution report are archived for each release artifact.
 - [ ] Unknown, custom, copyleft, source-available, model/data, and noncommercial dependencies receive explicit review.

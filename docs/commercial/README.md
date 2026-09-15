@@ -1,6 +1,7 @@
 # Embody commercial preparation
 
 - [Decision register](DECISIONS.md)
+- [License options, BSL comparison, and decision plan](LICENSE-OPTIONS.md)
 - [Readiness and evidence checklist](READINESS.md)
 
-These files document business intent and release preparation only. They are not licensing terms and grant no rights. The repository does not yet contain an approved community license; first-party package manifests therefore remain `UNLICENSED` until counsel-approved terms are installed.
+These planning files do not grant rights. The canonical repository [`LICENSE`](../../LICENSE) grants rights under the unmodified Elastic License 2.0; first-party package manifests use the SPDX identifier `Elastic-2.0`. Separate commercial terms, the trademark policy, and final legal review remain release blockers.

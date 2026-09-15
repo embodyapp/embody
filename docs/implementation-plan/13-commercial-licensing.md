@@ -10,19 +10,21 @@ Licensing can protect the business model, but it does not by itself prove demand
 
 ## License decision
 
-Use a **source-available dual-license model inspired by n8n**:
+Use a **source-available dual-license model based on the unmodified Elastic License 2.0 (ELv2)**:
 
-1. The public repository is offered under an **Embody Sustainable Use License** (community license).
-2. Customers who need rights outside the community license receive a separate paid **Embody Commercial License**.
+1. The public repository is offered under the standard **Elastic License 2.0**.
+2. Customers who need rights outside ELv2 receive a separate paid **Embody Commercial License**.
 3. Names, logos, and product identity are governed separately by an **Embody trademark policy**.
 
-This is deliberately **not an OSI-approved open-source model** and must be described as “source-available” or, if counsel confirms the terminology, “fair-code.” Documentation, package metadata, website copy, and sales material must not call the project “open source.” Apache-2.0, MIT, and AGPL do not meet the stated business requirement because they permit competing hosted services.
+ELv2 permanently reserves hosted or managed services that provide users with access to a substantial set of Embody's features or functionality. Community members may use Embody to build and host distinct applications when their users are consuming the application's domain functionality rather than a substantial set of Embody's general-purpose platform functionality. Borderline scenarios require counsel-approved guidance or commercial terms; do not modify ELv2 while representing it as the standard license.
 
-The exact legal text must be prepared or approved by qualified counsel. Do not copy n8n's terms or publish an agent-authored license without confirming reuse rights, enforceability, governing law, and consistency with the commercial agreement.
+This is deliberately **not an OSI-approved open-source model** and must be described as “source-available.” Documentation, package metadata, website copy, and sales material must not call the project “open source.” BSL and FSL do not meet the permanent-protection requirement because their restrictions expire; Apache-2.0, MIT, and AGPL permit competing hosted services.
+
+The repository uses the unmodified published ELv2 text. Qualified counsel must still confirm its application to Embody, ownership, enforceability, and consistency with the commercial agreement before public release.
 
 ## Product-use policy to encode
 
-The community license must make the following boundary understandable without requiring users to infer business intent.
+The ELv2 FAQ and commercial policy must make the following boundary understandable without requiring users to infer business intent.
 
 ### Allowed without payment
 
@@ -31,18 +33,17 @@ The community license must make the following boundary understandable without re
 - Users may build private internal plugins and modifications.
 - Users may build, sell, and host applications whose primary value is distinct domain functionality built with Embody, provided those applications do not expose Embody as a general-purpose automation/agent platform or substitute for an Embody commercial offering.
 - Consultants may charge for development, deployment, training, and maintenance when Embody runs for a specific customer and is not offered as the consultant's shared managed service.
-- Community plugins may be distributed under the community license or another explicitly approved compatible source-available license.
+- Plugins and modified distributions may be distributed subject to ELv2 and any independently applicable license obligations.
 
 ### Requires a commercial agreement
 
-- Offering Embody, or substantially equivalent Embody functionality, as a hosted or managed service to third parties.
-- White-labeling, reselling, OEM distribution, or embedding Embody where Embody supplies a substantial portion of the product's value.
-- Selling modified Embody distributions.
-- Selling closed-source/proprietary Embody plugins or marketplace extensions. Customer-private internal plugins remain allowed.
-- Removing or replacing required product notices, bypassing commercial feature/license controls, or using protected branding beyond the trademark policy.
-- Any use for which the community terms are unclear and the customer needs negotiated rights, warranties, indemnity, or support commitments.
+- Providing Embody to third parties as a hosted or managed service where users receive access to a substantial set of Embody's features or functionality.
+- White-label, resale, OEM, or embedding scenarios only when they include that prohibited hosted or managed service; ELv2 does not independently prohibit redistribution.
+- Exercising rights separately granted by the rightsholder to alter protected license-key functionality or required notices.
+- Using protected branding beyond the separate trademark policy.
+- Obtaining negotiated rights, warranties, indemnity, or support commitments beyond ELv2.
 
-The policy must define “internal use,” “application,” “plugin,” “managed service,” “competing offering,” “substantial portion of value,” “customer environment,” “consultant,” “distribution,” and corporate affiliates. Include concrete allowed/prohibited examples. Avoid language broad enough to capture ordinary SaaS products merely because they use Embody internally.
+The FAQ must explain “application,” “hosted or managed service,” “substantial set of features or functionality,” “customer environment,” and “consultant” through concrete examples, without changing ELv2 or claiming restrictions it does not contain. Avoid language broad enough to capture ordinary SaaS products merely because they use Embody internally.
 
 ## P13-01: ownership and legal foundation
 
@@ -57,19 +58,19 @@ The policy must define “internal use,” “application,” “plugin,” “m
 
 ## P13-02: community and commercial terms
 
-- Produce the counsel-approved community license, commercial-license template, evaluation/trial terms, and trademark policy from the product-use policy above.
+- Confirm counsel approval of unmodified ELv2 as applied to Embody, and produce the commercial-license template, evaluation/trial terms, and trademark policy from the product-use policy above.
 - Ensure the community and commercial grants are mutually consistent and identify which agreement controls when a customer purchases commercial rights.
-- Define commercial rights by product/SKU: managed hosting, enterprise self-hosting, OEM/embedding, proprietary plugins, marketplace distribution, support, and professional services.
+- Define commercial products and rights without charging for rights ELv2 already grants. Candidate SKUs include otherwise-prohibited managed hosting, separately licensed enterprise features, warranties, support, and professional services.
 - Define affiliate, contractor, user/seat, environment, usage, and revenue boundaries so pricing cannot be avoided accidentally and normal customer operations are not unexpectedly prohibited.
 - Specify term, renewal, audit/verification rights, cure periods, termination, post-termination operation/data export, warranty disclaimers, liability caps, indemnities, confidentiality, and dispute terms.
 - Publish a plain-language licensing FAQ with examples for internal use, customer-specific consulting, domain SaaS applications, agencies, cloud marketplaces, proprietary plugins, forks, and managed-service competitors.
 - Establish a documented intake and escalation process for licensing questions; only authorized people may issue binding exceptions.
-- Version the community license and commercial terms. Record which software release was distributed under which terms, and never retroactively change rights already granted.
+- Record which software release was distributed under which license version and commercial terms, and never retroactively change rights already granted.
 
 ## P13-03: repository and distribution implementation
 
-- Add the approved community-license text as root `LICENSE`, applicable copyright notices, and an accurate `NOTICE` containing only required notices.
-- Mark publishable npm packages with `"license": "SEE LICENSE IN LICENSE"` or another counsel-approved machine-readable expression for the nonstandard license. Include the exact applicable license and notice files in every tarball.
+- Keep the exact unmodified ELv2 text as root `LICENSE`, add applicable copyright notices, and maintain an accurate `NOTICE` containing only required notices.
+- Mark publishable npm packages with the SPDX identifier `"license": "Elastic-2.0"`. Include the exact applicable license and notice files in every tarball.
 - Keep private examples consistent with repository terms while clearly identifying sample status. Separate any independently licensed SDK or interoperability component into an explicit package rather than implying a different license.
 - Ensure applications generated by `create-embody-app` belong to their users. Generated private packages remain `UNLICENSED` by default and receive no Embody copyright claim; offer explicit license selection separately if added later.
 - Add file-level notices only where legally or operationally useful; avoid noisy headers that conflict with generated or third-party files.
@@ -112,7 +113,7 @@ The policy must define “internal use,” “application,” “plugin,” “m
 
 ### Legal and policy gates
 
-- Counsel and the authorized rightsholder approve the exact community license, commercial templates, CLA, trademark policy, FAQ, and public terminology.
+- Counsel and the authorized rightsholder approve ELv2's application to Embody, commercial templates, CLA, trademark policy, FAQ, and public terminology.
 - Chain-of-title review accounts for every material existing contribution and asset; unresolved ownership blocks release.
 - Allowed/prohibited scenario tests cover internal self-hosting, domain applications, consultants, managed hosting, OEM use, modified distributions, private plugins, and sold proprietary plugins without contradictory answers.
 - Public pages consistently say “source-available,” not “open source,” and clearly link the applicable terms before download or purchase.

@@ -376,4 +376,4 @@ For in-depth architectural documents, lifecycle diagrams, and technical deep div
 
 ## 📄 License
 
-MIT © [Embody Contributors](https://github.com/nimrod4278/embody)
+Embody is source-available under the [Elastic License 2.0](LICENSE). You may build and host your own applications with Embody, but you may not provide Embody itself as a hosted or managed service that exposes a substantial set of its functionality. Commercial hosting rights are available separately. Embody is not OSI-approved open-source software.

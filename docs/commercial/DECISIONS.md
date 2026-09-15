@@ -7,8 +7,8 @@ This register records product intent for counsel and implementation. It is not a
 | Decision | Current position | Approved by |
 |---|---|---|
 | Rightsholder | Nimrod Feldman, acting personally until any documented assignment to a legal entity | Nimrod Feldman |
-| Distribution model | Source-available community terms plus separately purchased commercial rights; not OSI open source | Nimrod Feldman |
-| Reserved commercial service | Only the rightsholder and providers authorized in writing may offer Embody itself, or substantially equivalent Embody platform functionality, as a shared hosted or managed service | Nimrod Feldman |
+| Distribution model | Unmodified Elastic License 2.0 (`Elastic-2.0`) plus separately purchased commercial rights; source-available, not OSI open source | Nimrod Feldman |
+| Reserved commercial service | Only the rightsholder and authorized providers may provide Embody as a hosted or managed service where users receive access to a substantial set of Embody's features or functionality | Nimrod Feldman |
 | Support | “Official Embody Support,” protected branding, warranties, and contractual SLAs are reserved to the rightsholder and authorized providers | Nimrod Feldman |
 | Independent services | Consultants may charge to develop, deploy, train, and maintain a customer-specific installation, but may not operate a shared managed Embody service or imply official status | Nimrod Feldman |
 | Internal self-hosting | Intended to be permitted without payment under the future community terms | Nimrod Feldman |
@@ -34,6 +34,6 @@ Until approved, public materials must not promise these capabilities, prices, se
 
 ## Interpretation requiring counsel
 
-Counsel must turn the business intent into precise definitions without accidentally restricting ordinary applications or customer-specific consulting. In particular, review “managed service,” “substantially equivalent functionality,” “primary value,” affiliates, contractors, customer environment, and authorized provider.
+Counsel must confirm how unchanged ELv2 applies without accidentally restricting ordinary applications or customer-specific consulting. In particular, review “hosted or managed service,” “substantial set of features or functionality,” affiliates, contractors, customer environments, and authorized providers. Public guidance must not modify ELv2 or claim restrictions absent from its text.
 
 The exact rightsholder identity, address for notices, publication year, governing law, jurisdiction, and assignment path to a future entity also remain to be confirmed before publication.

@@ -15,20 +15,30 @@ async function exists(path) {
 
 // Until counsel-approved terms are installed, publishable packages must not imply
 // that recipients receive MIT, open-source, or other unapproved rights.
-const licenseInstalled = await exists(join(root, "LICENSE"));
+const licensePath = join(root, "LICENSE");
+const licenseInstalled = await exists(licensePath);
+const canonicalLicense = licenseInstalled ? await readFile(licensePath, "utf8") : undefined;
 const packageDirectories = await readdir(join(root, "packages"), { withFileTypes: true });
 for (const entry of packageDirectories) {
   if (!entry.isDirectory()) continue;
-  const manifestPath = join(root, "packages", entry.name, "package.json");
+  const packageRoot = join(root, "packages", entry.name);
+  const manifestPath = join(packageRoot, "package.json");
   if (!(await exists(manifestPath))) continue;
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   if (!licenseInstalled && manifest.license !== "UNLICENSED") {
-    errors.push(`${manifestPath}: expected license UNLICENSED while approved LICENSE is absent`);
+    errors.push(`${manifestPath}: expected license UNLICENSED while LICENSE is absent`);
   }
-  if (licenseInstalled && manifest.license === "UNLICENSED") {
-    errors.push(
-      `${manifestPath}: approved LICENSE exists but package metadata is still UNLICENSED`,
-    );
+  if (licenseInstalled && manifest.license !== "Elastic-2.0") {
+    errors.push(`${manifestPath}: expected SPDX license identifier Elastic-2.0`);
+  }
+  const packageLicensePath = join(packageRoot, "LICENSE");
+  if (licenseInstalled && !(await exists(packageLicensePath))) {
+    errors.push(`${packageLicensePath}: package license copy is missing`);
+  } else if (
+    licenseInstalled &&
+    (await readFile(packageLicensePath, "utf8")) !== canonicalLicense
+  ) {
+    errors.push(`${packageLicensePath}: differs from canonical root LICENSE`);
   }
 }
 
@@ -60,7 +70,7 @@ if (errors.length > 0) {
 } else {
   console.log(
     licenseInstalled
-      ? "License readiness metadata is consistent with the installed LICENSE."
-      : "Pre-license readiness checks passed; release remains blocked pending approved terms.",
+      ? "License metadata and package copies are consistent with the installed LICENSE."
+      : "Pre-license readiness checks passed; release remains blocked pending license installation.",
   );
 }

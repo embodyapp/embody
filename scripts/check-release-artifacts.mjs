@@ -27,6 +27,9 @@ try {
     if (forbidden.length)
       throw new Error(`${pkg.name} tarball contains forbidden files: ${forbidden.join(", ")}`);
     const manifest = JSON.parse(readFileSync(join(pkg.path, "package.json"), "utf8"));
+    if (manifest.license !== "Elastic-2.0")
+      throw new Error(`${pkg.name} does not declare Elastic-2.0`);
+    if (!files.includes("LICENSE")) throw new Error(`${pkg.name} tarball lacks LICENSE`);
     if (!manifest.exports || (!manifest.types && !manifest.exports["."]?.types))
       throw new Error(`${pkg.name} lacks typed exports`);
     console.log(`${pkg.name}: ${files.length} intended files`);
