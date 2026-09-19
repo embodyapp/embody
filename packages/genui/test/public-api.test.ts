@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-describe("built public API", () => {
+describe("built GenUI public API", () => {
   it("is consumable through package exports under Node ESM", () => {
     const root = resolve(import.meta.dirname, "..");
     execFileSync(process.execPath, [
@@ -10,10 +10,16 @@ describe("built public API", () => {
       "-p",
       resolve(root, "tsconfig.build.json"),
     ]);
-    const script = resolve(root, "../../test/fixtures/core-consumer/index.mjs");
-
-    expect(execFileSync(process.execPath, [script], { encoding: "utf8" })).toBe(
-      "email/sendBatch\n",
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        'import { genUiResourceUri } from "@embody/genui"; console.log(genUiResourceUri("demo", "board", "1.0.0"));',
+      ],
+      { cwd: root, encoding: "utf8" },
     );
+
+    expect(output).toBe("ui://demo/board@1.0.0\n");
   }, 15_000);
 });

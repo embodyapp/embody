@@ -70,9 +70,12 @@ export {
   compileManifest,
   stableStringify,
   type ActionManifest,
+  type ActionPresentationManifest,
   type AppManifest,
   type EntityManifest,
   type JsonSchema,
+  type ViewFallback,
+  type ViewManifest,
   type WorkflowManifest,
 } from "./manifest.js";
 export {

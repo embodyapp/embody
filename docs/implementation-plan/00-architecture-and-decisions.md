@@ -47,6 +47,10 @@ Approved by [ADR 0004](../adr/0004-cross-app-event-delivery.md). Cross-app event
 5. No-subscriber delivery succeeds with an audit record. Envelopes are limited to 256 KiB; completed delivery/inbox records are retained at least 30 days and dead letters require explicit resolution.
 6. Optional P7-04 may add a gateway relay transport that durably assumes fan-out and retry ownership before acknowledging the publisher, without changing domain plugins.
 
+### D-06: GenUI presentation and renderer boundaries
+
+Approved by [ADR 0005](../adr/0005-generative-ui-presentation.md). Embody applications own trusted static/declarative views and bind them to validated action output. `@embody/genui` includes standard web, Markdown/text, and standalone-browser renderers; MCP hosts retain responsibility for iframe sandboxing; native Pi rendering lives in optional `@embody/genui-pi`. Model-authored executable UI is prohibited, UI actions use normal allowlisted Embody execution, and every view has a non-HTML fallback. Phase 14 contains the implementation and independent release gates.
+
 ### Other clarifications to approve
 
 - `afterCreate/afterUpdate/afterDelete` hooks run inside the entity transaction after mutation but before commit so `ctx.events.publish` is atomic. They must not perform irreversible external I/O; async side effects belong in event handlers. `before*` hooks run before mutation in that same transaction.
@@ -69,6 +73,6 @@ Approved by [ADR 0004](../adr/0004-cross-app-event-delivery.md). Cross-app event
 2. **Round-trip tests**: encoded/decoded manifest, principal, event, and execute objects retain all contract fields.
 3. **Naming tests**: dotted targets map deterministically to global/scoped MCP and CLI names; collision fixtures are rejected.
 4. **Threat-model review tests/checklist**: every external endpoint has documented authentication, authorization, input limit, replay behavior, and redaction rule.
-5. **Decision completion**: D-01 through D-04 are marked `DONE`; Phase 11 implements the approved workflow decision before P12.
+5. **Decision completion**: D-01 through D-04 and D-06 are marked `DONE`; Phase 11 implements the approved workflow decision before P12, and Phase 14 implements D-06 before GenUI is advertised.
 
 Phase 0 passes when another agent can implement contracts without making a new security- or compatibility-sensitive decision.
