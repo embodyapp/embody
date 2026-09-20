@@ -138,7 +138,7 @@ async function mailMessages() {
 let mcp;
 try {
   const started = await compose("up", "--detach", "--build", "--wait", "--wait-timeout", "180");
-  assert.equal(started.code, 0, started.stderr);
+  assert.equal(started.code, 0, `${started.stdout}\n${started.stderr}`);
 
   await eventually(async () => {
     const apps = await catalog();
