@@ -13,12 +13,13 @@
   "type": "module",
   "sideEffects": false,
   "files": [
+    "bin",
     "dist",
     "README.md",
     "CHANGELOG.md"
   ],
   "bin": {
-    "create-embody-app": "./dist/bin.js"
+    "create-embody-app": "./bin/create-embody-app.js"
   },
   "exports": {
     ".": {

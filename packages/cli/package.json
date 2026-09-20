@@ -13,12 +13,13 @@
   "type": "module",
   "sideEffects": false,
   "files": [
+    "bin",
     "dist",
     "README.md",
     "CHANGELOG.md"
   ],
   "bin": {
-    "embody": "./dist/bin.js"
+    "embody": "./bin/embody.js"
   },
   "exports": {
     ".": {
