@@ -11,3 +11,7 @@ firebase.json
 .firebaserc
 .firebase/
 .claude/
+.out
+.post.*
+.reddit*
+.try

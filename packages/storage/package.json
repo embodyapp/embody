@@ -1,7 +1,15 @@
 {
   "name": "@embody/storage",
   "version": "0.0.0",
+  "description": "Transactional SQLite and PostgreSQL storage adapters for Embody applications.",
   "license": "Elastic-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nimrod4278/embody.git",
+    "directory": "packages/storage"
+  },
+  "homepage": "https://github.com/nimrod4278/embody#readme",
+  "bugs": "https://github.com/nimrod4278/embody/issues",
   "type": "module",
   "sideEffects": false,
   "files": [
@@ -29,6 +37,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@types/pg": "^8.23.1",
     "better-sqlite3": "^13.0.3",
     "pg": "^8.23.0"
   },
@@ -36,7 +45,6 @@
     "@embody/core": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.20.1",
-    "@types/pg": "^8.23.1",
     "testcontainers": "^12.1.0"
   }
 }

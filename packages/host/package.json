@@ -1,7 +1,15 @@
 {
   "name": "@embody/host",
   "version": "0.0.0",
+  "description": "HTTP host runtime, event workers, and progress streaming for Embody applications.",
   "license": "Elastic-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nimrod4278/embody.git",
+    "directory": "packages/host"
+  },
+  "homepage": "https://github.com/nimrod4278/embody#readme",
+  "bugs": "https://github.com/nimrod4278/embody/issues",
   "type": "module",
   "sideEffects": false,
   "files": [

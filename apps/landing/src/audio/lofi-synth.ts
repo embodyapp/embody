@@ -35,7 +35,7 @@ export class LoFiPlayer {
     }
 
     if (this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      void this.ctx.resume();
     }
 
     this.masterGain = this.ctx.createGain();
@@ -57,7 +57,9 @@ export class LoFiPlayer {
     if (this.noiseNode) {
       try {
         (this.noiseNode as AudioBufferSourceNode).stop();
-      } catch {}
+      } catch {
+        // The source may already have stopped.
+      }
       this.noiseNode.disconnect();
       this.noiseNode = null;
     }

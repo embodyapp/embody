@@ -6,7 +6,7 @@
 
 ## 💻 Cursor IDE Setup
 
-Cursor has native support for the Model Context Protocol. You can connect Cursor directly to your local development server or a remote Embody Gateway.
+Cursor has native support for the Model Context Protocol. Connect it to a local or remote Embody Gateway; an individual `embody dev` host does not expose the organization-wide MCP catalog.
 
 ### Configuration via `.cursor/mcp.json`
 
@@ -16,7 +16,8 @@ Create a file named `.cursor/mcp.json` in the root of your workspace (or open **
 {
   "mcpServers": {
     "embody": {
-      "url": "http://127.0.0.1:8080/mcp"
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": { "Authorization": "Bearer YOUR_LOCAL_GATEWAY_TOKEN" }
     }
   }
 }
@@ -34,10 +35,9 @@ If you are connecting to a remote Embody Gateway requiring authentication:
         "@embody/cli",
         "mcp",
         "--url",
-        "https://gateway.internal/mcp",
-        "--token",
-        "YOUR_JWT_TOKEN"
-      ]
+        "https://gateway.internal/mcp"
+      ],
+      "env": { "EMBODY_TOKEN": "YOUR_SHORT_LIVED_TOKEN" }
     }
   }
 }
@@ -67,8 +67,9 @@ Click the **MCP Server** icon in the Cline panel (top-right toolbar) and select 
         "@embody/cli",
         "mcp",
         "--url",
-        "http://127.0.0.1:8080/mcp"
+        "http://127.0.0.1:3000/mcp"
       ],
+      "env": { "EMBODY_TOKEN": "YOUR_LOCAL_GATEWAY_TOKEN" },
       "disabled": false,
       "autoApprove": [
         "ops_tasks_task_list",

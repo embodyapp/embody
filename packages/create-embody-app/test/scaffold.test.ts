@@ -24,11 +24,20 @@ it("generates the documented safe starter layout", async () => {
   const packageJson = JSON.parse(
     await readFile(join(app.directory, "package.json"), "utf8"),
   ) as Record<string, unknown>;
+  const scaffolderPackage = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { version: string };
   expect(packageJson).not.toHaveProperty("secret");
   expect(packageJson).toMatchObject({
     private: true,
     license: "UNLICENSED",
     scripts: { prestart: "pnpm build" },
+    dependencies: {
+      "@embody/cli": `^${scaffolderPackage.version}`,
+      "@embody/core": `^${scaffolderPackage.version}`,
+      "@embody/host": `^${scaffolderPackage.version}`,
+    },
+    devDependencies: { "@embody/testing": `^${scaffolderPackage.version}` },
   });
   expect(await readFile(join(app.directory, "README.md"), "utf8")).toContain(
     "belongs to its creator",

@@ -11,6 +11,7 @@ export {
   type DevServer,
   type EmbodyDevConfig,
 } from "./dev.js";
+export { startMcpBridge, type McpBridge, type McpBridgeOptions } from "./mcp-bridge.js";
 
 export const EXIT = {
   usage: 2,
@@ -164,7 +165,7 @@ function validate(value: unknown, schema: Schema, path = "input"): void {
 function usage(io: CliIo, code: number = EXIT.usage): number {
   return fail(
     io,
-    "Usage: embody apps list|inspect <app> | embody <app> <entity> <create|get|list|update|delete> [id] [--flags] | embody <app> <action> [--flags]",
+    "Usage: embody dev [configPath] | embody mcp --url <endpoint> [--token <token>] | embody apps list|inspect <app> | embody <app> <entity> <create|get|list|update|delete> [id] [--flags] | embody <app> <action> [--flags]",
     code,
   );
 }

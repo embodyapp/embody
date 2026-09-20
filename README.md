@@ -168,9 +168,11 @@ pnpm dev
 ```
 
 Your app will start on `http://127.0.0.1:8080` with:
-- `http://127.0.0.1:8080/mcp`: Live Model Context Protocol endpoint.
 - `http://127.0.0.1:8080/health`: Healthcheck endpoint.
-- In-memory / SQLite transactional storage.
+- `http://127.0.0.1:8080/__inspector`: Loopback-only development inspector.
+- SQLite transactional storage.
+
+CLI discovery and MCP endpoints are exposed after the app registers with an Embody Gateway.
 
 ---
 
@@ -187,7 +189,7 @@ Add Embody to your `claude_desktop_config.json`:
   "mcpServers": {
     "embody": {
       "command": "npx",
-      "args": ["-y", "@embody/cli", "mcp", "--url", "http://127.0.0.1:8080/mcp"]
+      "args": ["-y", "@embody/cli", "mcp", "--url", "http://127.0.0.1:3000/mcp", "--token", "YOUR_TOKEN"]
     }
   }
 }
@@ -201,7 +203,8 @@ In your `.cursor/mcp.json` or Cline settings:
 {
   "mcpServers": {
     "embody": {
-      "url": "http://127.0.0.1:8080/mcp"
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": { "Authorization": "Bearer YOUR_TOKEN" }
     }
   }
 }
@@ -221,10 +224,10 @@ Embody includes a unified CLI that works seamlessly for human developers in the 
 
 ```bash
 # List all registered applications and capabilities
-embody app list
+embody apps list
 
 # Inspect an application's entities and actions
-embody app inspect ops
+embody apps inspect ops
 
 # Create an entity record
 embody ops task create --title "Investigate memory leak" --priority high

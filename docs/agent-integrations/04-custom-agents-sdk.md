@@ -27,7 +27,7 @@ async def run_agent():
     async with httpx.AsyncClient() as client:
         session = StreamableHTTPClientSession(
             client=client,
-            url="http://127.0.0.1:8080/mcp"
+            url="https://gateway.example.com/mcp"
         )
         async with ClientSession(session) as mcp:
             await mcp.initialize()
@@ -69,7 +69,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 
 async function main() {
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://127.0.0.1:8080/mcp")
+    new URL("https://gateway.example.com/mcp")
   );
 
   const client = new Client(

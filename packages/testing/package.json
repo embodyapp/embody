@@ -1,7 +1,15 @@
 {
   "name": "@embody/testing",
   "version": "0.0.0",
+  "description": "Typed integration testing harness for Embody applications and plugins.",
   "license": "Elastic-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nimrod4278/embody.git",
+    "directory": "packages/testing"
+  },
+  "homepage": "https://github.com/nimrod4278/embody#readme",
+  "bugs": "https://github.com/nimrod4278/embody/issues",
   "type": "module",
   "sideEffects": false,
   "files": [

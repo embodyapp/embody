@@ -1,5 +1,9 @@
 import { access, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { createRequire } from "node:module";
+
+const packageVersion = (createRequire(import.meta.url)("../package.json") as { version: string })
+  .version;
 
 export interface CreateAppOptions {
   readonly name: string;
@@ -39,12 +43,12 @@ function template(name: string): Readonly<Record<string, string>> {
             start: "node dist/src/index.js",
           },
           dependencies: {
-            "@embody/cli": "^0.0.0",
-            "@embody/core": "^0.0.0",
-            "@embody/host": "^0.0.0",
+            "@embody/cli": `^${packageVersion}`,
+            "@embody/core": `^${packageVersion}`,
+            "@embody/host": `^${packageVersion}`,
           },
           devDependencies: {
-            "@embody/testing": "^0.0.0",
+            "@embody/testing": `^${packageVersion}`,
             "@types/node": "^22.20.1",
             typescript: "^5.9.3",
             vitest: "^4.0.18",
@@ -79,7 +83,7 @@ function template(name: string): Readonly<Record<string, string>> {
     ".gitignore": "node_modules\ndist\n.embody\n.env\n",
     ".dockerignore": "node_modules\ndist\n.git\n.env\n",
     Dockerfile:
-      'FROM node:24-alpine\nWORKDIR /app\nCOPY . .\nRUN corepack enable && pnpm install --frozen-lockfile && pnpm build\nEXPOSE 8080\nHEALTHCHECK CMD node -e "fetch(\'http://127.0.0.1:8080/health\').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"\nCMD ["node", "dist/src/index.js"]\n',
+      'FROM node:24-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install && npm run build && chown -R node:node /app\nUSER node\nEXPOSE 8080\nHEALTHCHECK CMD node -e "fetch(\'http://127.0.0.1:8080/health\').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"\nCMD ["node", "dist/src/index.js"]\n',
   };
 }
 

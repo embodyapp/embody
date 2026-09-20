@@ -48,7 +48,7 @@ ConflictError: The record has been modified by another actor since it was last r
   ```
 - **Check 2**: Ensure `@embody/cli` is reachable in your terminal. Test the bridge command manually:
   ```bash
-  npx -y @embody/cli mcp --url http://127.0.0.1:8080/mcp
+  EMBODY_TOKEN="$TOKEN" npx -y @embody/cli mcp --url https://gateway.example.com/mcp
   ```
 - **Check 3**: Completely quit and restart Claude Desktop after editing `claude_desktop_config.json`.
 - **Check 4**: Check Claude's MCP log file:

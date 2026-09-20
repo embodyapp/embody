@@ -8,10 +8,11 @@ import posthog, { posthogEnabled } from './posthog';
 import gsap from 'gsap';
 import { CODE_SAMPLES } from './data/code-samples';
 import { CRM_ARCHITECTURE_LAYERS } from './data/crm-architecture';
+import type { LoFiPlayer } from './audio/lofi-synth';
 
 // Initialize State
 let activeSampleId = 'declaration';
-let lofiInstance: import('./audio/lofi-synth').LoFiPlayer | null = null;
+let lofiInstance: LoFiPlayer | null = null;
 
 // HTML escape helper
 function escapeHtml(str: string): string {
@@ -302,7 +303,7 @@ function setupCopyButtons() {
             copy_target: btn.getAttribute('id') || 'documentation_snippet',
           });
         }
-        navigator.clipboard.writeText(textToCopy);
+        void navigator.clipboard.writeText(textToCopy);
         const originalText = btn.textContent;
         btn.textContent = 'Copied! ✨';
         setTimeout(() => {
@@ -324,7 +325,7 @@ function setupCopyButtons() {
             sample_id: sample.id,
           });
         }
-        navigator.clipboard.writeText(sample.code);
+        void navigator.clipboard.writeText(sample.code);
         copyPlaygroundBtn.textContent = 'Copied! ✨';
         setTimeout(() => {
           copyPlaygroundBtn.textContent = 'Copy Code';
@@ -530,28 +531,30 @@ function setupLoFiPlayer() {
 
   if (!vinylBtn || !vinylDisc) return;
 
-  vinylBtn.addEventListener('click', async () => {
-    if (!lofiInstance) {
-      if (vinylStatus) vinylStatus.textContent = 'Loading audio synth...';
-      const { LoFiPlayer } = await import('./audio/lofi-synth');
-      lofiInstance = new LoFiPlayer();
-    }
+  vinylBtn.addEventListener('click', () => {
+    void (async () => {
+      if (!lofiInstance) {
+        if (vinylStatus) vinylStatus.textContent = 'Loading audio synth...';
+        const { LoFiPlayer } = await import('./audio/lofi-synth');
+        lofiInstance = new LoFiPlayer();
+      }
 
-    const isPlaying = lofiInstance.toggle();
-    if (posthogEnabled) {
-      posthog.capture('lofi_player_toggled', { is_playing: isPlaying });
-    }
-    if (isPlaying) {
-      vinylDisc.classList.add('vinyl-spinning');
-      if (vinylStatus) vinylStatus.textContent = 'Playing Lo-Fi Beats & Cracking Vinyl 🎶';
-      vinylBtn.textContent = 'Mute';
-      startHeroArtCanvasAnimation();
-    } else {
-      vinylDisc.classList.remove('vinyl-spinning');
-      if (vinylStatus) vinylStatus.textContent = 'Click to spin lo-fi chill deck';
-      vinylBtn.textContent = 'Play';
-      pauseHeroArtCanvasAnimation();
-    }
+      const isPlaying = lofiInstance.toggle();
+      if (posthogEnabled) {
+        posthog.capture('lofi_player_toggled', { is_playing: isPlaying });
+      }
+      if (isPlaying) {
+        vinylDisc.classList.add('vinyl-spinning');
+        if (vinylStatus) vinylStatus.textContent = 'Playing Lo-Fi Beats & Cracking Vinyl 🎶';
+        vinylBtn.textContent = 'Mute';
+        startHeroArtCanvasAnimation();
+      } else {
+        vinylDisc.classList.remove('vinyl-spinning');
+        if (vinylStatus) vinylStatus.textContent = 'Click to spin lo-fi chill deck';
+        vinylBtn.textContent = 'Play';
+        pauseHeroArtCanvasAnimation();
+      }
+    })();
   });
 }
 
@@ -570,8 +573,8 @@ function setupExtendabilityShowcase() {
   const canvasEl = document.getElementById('extend-canvas');
   const cardB2B = document.getElementById('card-b2b');
   const cardEcom = document.getElementById('card-ecom');
-  const wireB2B = document.querySelector('.branch-wire-b2b') as SVGPathElement | null;
-  const wireEcom = document.querySelector('.branch-wire-ecom') as SVGPathElement | null;
+  const wireB2B = document.querySelector<SVGPathElement>('.branch-wire-b2b');
+  const wireEcom = document.querySelector<SVGPathElement>('.branch-wire-ecom');
 
   if (!toggleBtns.length || !canvasEl) return;
 
@@ -651,7 +654,7 @@ function setupBetaSignupForms() {
       feedbackEl.innerHTML = `<span>✓ You're on the beta access list! We'll notify you soon.</span>`;
     }
 
-    form.addEventListener('submit', async (e) => {
+    form.addEventListener('submit', (e) => {
       e.preventDefault();
       if (!emailInput || !submitBtn || !feedbackEl) return;
 
@@ -742,7 +745,7 @@ function setupBetaSignupForms() {
             }
           }
         });
-      } catch (err) {
+      } catch {
         submitBtn.disabled = false;
         submitBtn.innerText = originalBtnText;
         emailInput.disabled = false;

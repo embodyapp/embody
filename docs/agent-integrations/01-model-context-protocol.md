@@ -88,11 +88,11 @@ When the agent calls a tool via `tools/call`:
 Embody supports two official MCP transport methods:
 
 1. **Streamable HTTP (Recommended for Remote / Web)**:
-   Exposed at `http://127.0.0.1:8080/mcp`. Supports bidirectional HTTP POST requests with Server-Sent Events (SSE) streaming.
+   Exposed by the Embody Gateway at `/mcp` and `/mcp/:appId`. It supports bidirectional HTTP requests with Server-Sent Events (SSE) streaming.
 2. **Stdio Bridge (Recommended for Local Desktop Clients)**:
    Provided by the `@embody/cli` binary:
    ```bash
-   embody mcp --url http://127.0.0.1:8080/mcp
+   EMBODY_TOKEN="$TOKEN" embody mcp --url https://gateway.example.com/mcp
    ```
    This converts standard input/output streams used by Claude Desktop into HTTP calls to your Embody server.
 

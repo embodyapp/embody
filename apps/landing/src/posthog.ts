@@ -1,7 +1,8 @@
 import posthog from 'posthog-js';
 
-const posthogKey = import.meta.env.VITE_POSTHOG_KEY;
-const posthogHost = import.meta.env.VITE_POSTHOG_HOST;
+const env = import.meta.env as unknown as Readonly<Record<string, string | undefined>>;
+const posthogKey = env['VITE_POSTHOG_KEY'];
+const posthogHost = env['VITE_POSTHOG_HOST'];
 
 export const posthogEnabled = Boolean(posthogKey && posthogHost);
 

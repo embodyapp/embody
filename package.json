@@ -19,6 +19,7 @@
     "release:artifacts": "pnpm build && node scripts/check-release-artifacts.mjs",
     "api-report": "pnpm --filter @embody/core api-report",
     "test": "pnpm -r --if-present test",
+    "test:consumer": "pnpm build && node scripts/test-packed-consumer.mjs",
     "test:postgres": "pnpm -r --if-present test:postgres",
     "test:e2e": "pnpm -r --if-present test:e2e",
     "typecheck": "pnpm -r --if-present typecheck",

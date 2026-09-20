@@ -26,7 +26,7 @@ If the file does not exist, create it.
 
 Add your Embody server under the `mcpServers` object:
 
-### Local Development (Zero-Auth)
+### Local Gateway
 
 ```json
 {
@@ -38,8 +38,11 @@ Add your Embody server under the `mcpServers` object:
         "@embody/cli",
         "mcp",
         "--url",
-        "http://127.0.0.1:8080/mcp"
-      ]
+        "http://127.0.0.1:3000/mcp"
+      ],
+      "env": {
+        "EMBODY_TOKEN": "YOUR_LOCAL_GATEWAY_TOKEN"
+      }
     }
   }
 }
@@ -57,10 +60,11 @@ Add your Embody server under the `mcpServers` object:
         "@embody/cli",
         "mcp",
         "--url",
-        "https://gateway.internal/mcp",
-        "--token",
-        "eyJhbGciOi..."
-      ]
+        "https://gateway.internal/mcp"
+      ],
+      "env": {
+        "EMBODY_TOKEN": "YOUR_SHORT_LIVED_TOKEN"
+      }
     }
   }
 }

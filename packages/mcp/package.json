@@ -1,7 +1,15 @@
 {
   "name": "@embody/mcp",
   "version": "0.0.0",
+  "description": "Model Context Protocol server adapter for Embody applications and gateways.",
   "license": "Elastic-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nimrod4278/embody.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/nimrod4278/embody#readme",
+  "bugs": "https://github.com/nimrod4278/embody/issues",
   "type": "module",
   "sideEffects": false,
   "files": [

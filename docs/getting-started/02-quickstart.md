@@ -157,60 +157,40 @@ Registered Tools:
   ops.tasks.bulkComplete
 ```
 
-Your app is live with three essential endpoints:
-- `http://127.0.0.1:8080/mcp`: The live Model Context Protocol (MCP) stream.
-- `http://127.0.0.1:8080/health`: JSON health check and uptime monitor.
-- `http://127.0.0.1:8080/__inspector`: Interactive web UI for testing tools and schemas.
+Your app is live with three development endpoints:
+- `http://127.0.0.1:8080/health`: JSON health check.
+- `http://127.0.0.1:8080/__inspector`: Index of loopback-only inspector APIs.
+- `http://127.0.0.1:8080/__inspector/manifest`: Compiled actions and schemas.
+
+The development inspector returns JSON; it is not a production UI. CLI discovery and MCP are exposed by an Embody Gateway after the application is deployed and registered.
 
 ---
 
-## 🧪 Step 4: Interact with Your App via the CLI
+## 🧪 Step 4: Exercise the Local Development App
 
-In another terminal window, verify that the Embody CLI can introspect and mutate your application.
-
-### 1. Inspect the Registered Application
+In another terminal, inspect the compiled manifest:
 
 ```bash
-pnpm embody apps list
+curl http://127.0.0.1:8080/__inspector/manifest
 ```
 
-Output:
-```json
-[
-  {
-    "appId": "ops",
-    "version": "1.0.0"
-  }
-]
-```
-
-### 2. Create a Task
+Create a task through the same execution pipeline used by production hosts:
 
 ```bash
-pnpm embody ops task create --title "Investigate Redis cache eviction" --priority high
+curl -X POST http://127.0.0.1:8080/__inspector/execute \
+  -H 'content-type: application/json' \
+  -d '{"target":"tasks.task.create","input":{"data":{"title":"Investigate Redis cache eviction","priority":"high"}}}'
 ```
 
-Output:
-```json
-{
-  "id": "e83296c0-7e3f-4f81-a97e-d1b49f481c03",
-  "orgId": "local-org",
-  "entityType": "task",
-  "data": {
-    "title": "Investigate Redis cache eviction",
-    "priority": "high",
-    "status": "todo"
-  },
-  "createdAt": "2026-09-06T18:00:00.000Z",
-  "updatedAt": "2026-09-06T18:00:00.000Z"
-}
-```
-
-### 3. List Tasks with Filters
+List the tasks:
 
 ```bash
-pnpm embody ops task list --status todo
+curl -X POST http://127.0.0.1:8080/__inspector/execute \
+  -H 'content-type: application/json' \
+  -d '{"target":"tasks.task.list","input":{"filter":{"status":"todo"}}}'
 ```
+
+After deploying the app with a gateway, use `embody apps list`, hierarchical action commands, and the gateway MCP endpoint. The local inspector intentionally avoids pretending to provide production authentication or authorization.
 
 ---
 
@@ -218,13 +198,15 @@ pnpm embody ops task list --status todo
 
 Let's test what happens when an AI agent attempts to mark the task as `done` without providing a PR URL.
 
-Using the test suite or by simulating an agent actor:
+Use `@embody/testing` to execute the update with an agent principal. The loopback inspector intentionally represents a local human developer, so it is not a valid authorization test. In a deployed environment, the equivalent authenticated agent command is:
 
 ```bash
-pnpm embody ops task update e83296c0-7e3f-4f81-a97e-d1b49f481c03 --status done
+EMBODY_GATEWAY_URL=https://gateway.example.com \
+EMBODY_TOKEN="$AGENT_TOKEN" \
+embody ops task update e83296c0-7e3f-4f81-a97e-d1b49f481c03 --status done
 ```
 
-If invoked by a human operator, the update succeeds. But when invoked by an agent (e.g., via Claude Desktop, Cursor, or an authenticated agent token), Embody blocks the transaction with an explicit error:
+When invoked by an agent principal, Embody blocks the transaction with an explicit error:
 
 ```text
 HookVetoError: Autonomous agents cannot mark a task 'done' without a linked PR URL.

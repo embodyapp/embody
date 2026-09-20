@@ -1,0 +1,45 @@
+name: Release npm packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      dist-tag:
+        description: npm dist-tag for this release
+        required: true
+        default: next
+        type: choice
+        options:
+          - next
+          - latest
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - name: Install an npm CLI with trusted-publishing support
+        run: npm install --global npm@11
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - run: pnpm release:artifacts
+      - run: node scripts/test-packed-consumer.mjs
+      - name: Publish packages
+        run: pnpm changeset publish --tag "${{ inputs['dist-tag'] }}"

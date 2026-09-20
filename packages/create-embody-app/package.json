@@ -1,7 +1,15 @@
 {
   "name": "create-embody-app",
   "version": "0.0.0",
+  "description": "Create a ready-to-run Embody TypeScript application.",
   "license": "Elastic-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nimrod4278/embody.git",
+    "directory": "packages/create-embody-app"
+  },
+  "homepage": "https://github.com/nimrod4278/embody#readme",
+  "bugs": "https://github.com/nimrod4278/embody/issues",
   "type": "module",
   "sideEffects": false,
   "files": [
