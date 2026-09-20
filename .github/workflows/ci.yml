@@ -67,5 +67,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - run: npm install --global npm@11
+      - run: npm --version
       - run: node scripts/test-packed-consumer.mjs
       - run: pnpm test:e2e
