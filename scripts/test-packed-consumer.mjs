@@ -61,15 +61,42 @@ try {
   const generated = JSON.parse(readFileSync(generatedPath, "utf8"));
   generated.dependencies ??= {};
   generated.devDependencies ??= {};
-  for (const [name, tarball] of packed) {
+  for (const name of packed.keys()) {
     delete generated.dependencies[name];
     delete generated.devDependencies[name];
-    const destination =
-      name === "@embody/testing" ? generated.devDependencies : generated.dependencies;
-    destination[name] = `file:${tarball}`;
   }
   writeFileSync(generatedPath, `${JSON.stringify(generated, null, 2)}\n`);
   run("npm", ["install", "--no-audit", "--no-fund"], { cwd: app });
+
+  // npm Arborist cannot reliably construct one graph from multiple mutually dependent
+  // tarball arguments. Install in dependency order, as a registry exposes each package.
+  const installOrder = [
+    "@embody/core",
+    "@embody/storage",
+    "@embody/auth",
+    "@embody/mcp",
+    "@embody/host",
+    "@embody/gateway",
+    "@embody/cli",
+    "@embody/testing",
+    "create-embody-app",
+  ];
+  for (const name of installOrder) {
+    const tarball = packed.get(name);
+    if (!tarball) throw new Error(`Missing ${name} tarball`);
+    run(
+      "npm",
+      [
+        "install",
+        "--no-audit",
+        "--no-fund",
+        "--save-exact",
+        ...(name === "@embody/testing" ? ["--save-dev"] : []),
+        tarball,
+      ],
+      { cwd: app },
+    );
+  }
   run("npm", ["run", "typecheck"], { cwd: app });
   run("npm", ["test"], { cwd: app });
   run("npm", ["run", "build"], { cwd: app });
