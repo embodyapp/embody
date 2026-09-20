@@ -57,7 +57,19 @@ try {
   );
 
   const app = join(temporary, "public-smoke");
-  run("npm", ["install", "--no-audit", "--no-fund", ...packed.values()], { cwd: app });
+  const generatedPath = join(app, "package.json");
+  const generated = JSON.parse(readFileSync(generatedPath, "utf8"));
+  generated.dependencies ??= {};
+  generated.devDependencies ??= {};
+  for (const [name, tarball] of packed) {
+    delete generated.dependencies[name];
+    delete generated.devDependencies[name];
+    const destination =
+      name === "@embody/testing" ? generated.devDependencies : generated.dependencies;
+    destination[name] = `file:${tarball}`;
+  }
+  writeFileSync(generatedPath, `${JSON.stringify(generated, null, 2)}\n`);
+  run("npm", ["install", "--no-audit", "--no-fund"], { cwd: app });
   run("npm", ["run", "typecheck"], { cwd: app });
   run("npm", ["test"], { cwd: app });
   run("npm", ["run", "build"], { cwd: app });
@@ -96,7 +108,6 @@ try {
     await once(child, "exit");
   }
 
-  const generated = JSON.parse(readFileSync(join(app, "package.json"), "utf8"));
   if (generated.license !== "UNLICENSED") throw new Error("Generated app ownership changed");
   console.log("Packed external-consumer smoke passed.");
 } finally {
