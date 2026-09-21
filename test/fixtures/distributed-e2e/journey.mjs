@@ -255,7 +255,7 @@ try {
       "-d",
       "kanban",
       "-Atc",
-      "select count(*) from pg_locks l join pg_class c on c.oid=l.relation where c.relname='embody_entities' and l.mode='RowExclusiveLock' and not l.granted",
+      "select count(*) from pg_stat_activity a where a.datname='kanban' and a.pid<>pg_backend_pid() and cardinality(pg_blocking_pids(a.pid)) > 0",
     );
     return Number(query.stdout.trim()) > 0;
   }, "blocked pre-commit mutation");
