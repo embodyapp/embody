@@ -377,6 +377,12 @@ For in-depth architectural documents, lifecycle diagrams, and technical deep div
 
 ---
 
+## 🤝 Community and support
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change.
+- Use [SUPPORT.md](SUPPORT.md) for help and [SECURITY.md](SECURITY.md) for private vulnerability reporting.
+- Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## 📄 License
 
-Embody is source-available under the [Elastic License 2.0](LICENSE). You may build and host your own applications with Embody, but you may not provide Embody itself as a hosted or managed service that exposes a substantial set of its functionality. Commercial hosting rights are available separately. Embody is not OSI-approved open-source software.
+Embody is source-available under the [Elastic License 2.0](LICENSE). You may build and host your own applications with Embody, but you may not provide Embody itself as a hosted or managed service that exposes a substantial set of its functionality. Commercial hosting rights are available separately. Embody is not OSI-approved open-source software. See the [licensing FAQ](docs/commercial/LICENSING-FAQ.md) for non-binding, plain-language guidance; the license text controls.

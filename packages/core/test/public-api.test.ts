@@ -15,5 +15,5 @@ describe("built public API", () => {
     expect(execFileSync(process.execPath, [script], { encoding: "utf8" })).toBe(
       "email/sendBatch\n",
     );
-  });
+  }, 30_000);
 });

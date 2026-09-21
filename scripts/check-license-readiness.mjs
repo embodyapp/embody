@@ -16,8 +16,12 @@ async function exists(path) {
 // Until counsel-approved terms are installed, publishable packages must not imply
 // that recipients receive MIT, open-source, or other unapproved rights.
 const licensePath = join(root, "LICENSE");
+const noticePath = join(root, "NOTICE");
 const licenseInstalled = await exists(licensePath);
+const noticeInstalled = await exists(noticePath);
 const canonicalLicense = licenseInstalled ? await readFile(licensePath, "utf8") : undefined;
+const canonicalNotice = noticeInstalled ? await readFile(noticePath, "utf8") : undefined;
+if (licenseInstalled && !noticeInstalled) errors.push(`${noticePath}: root notice is missing`);
 const packageDirectories = await readdir(join(root, "packages"), { withFileTypes: true });
 for (const entry of packageDirectories) {
   if (!entry.isDirectory()) continue;
@@ -39,6 +43,15 @@ for (const entry of packageDirectories) {
     (await readFile(packageLicensePath, "utf8")) !== canonicalLicense
   ) {
     errors.push(`${packageLicensePath}: differs from canonical root LICENSE`);
+  }
+  const packageNoticePath = join(packageRoot, "NOTICE");
+  if (noticeInstalled && !(await exists(packageNoticePath))) {
+    errors.push(`${packageNoticePath}: package notice copy is missing`);
+  } else if (noticeInstalled && (await readFile(packageNoticePath, "utf8")) !== canonicalNotice) {
+    errors.push(`${packageNoticePath}: differs from canonical root NOTICE`);
+  }
+  if (noticeInstalled && !manifest.files?.includes("NOTICE")) {
+    errors.push(`${manifestPath}: files must include NOTICE`);
   }
 }
 

@@ -30,6 +30,7 @@ try {
     if (manifest.license !== "Elastic-2.0")
       throw new Error(`${pkg.name} does not declare Elastic-2.0`);
     if (!files.includes("LICENSE")) throw new Error(`${pkg.name} tarball lacks LICENSE`);
+    if (!files.includes("NOTICE")) throw new Error(`${pkg.name} tarball lacks NOTICE`);
     if (!manifest.exports || (!manifest.types && !manifest.exports["."]?.types))
       throw new Error(`${pkg.name} lacks typed exports`);
     console.log(`${pkg.name}: ${files.length} intended files`);

@@ -16,7 +16,8 @@
     "bin",
     "dist",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "NOTICE"
   ],
   "bin": {
     "embody": "./bin/embody.js"
