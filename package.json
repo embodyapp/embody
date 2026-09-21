@@ -12,6 +12,7 @@
     "deploy:landing": "pnpm --filter @app/landing build && npx firebase-tools deploy --only hosting:embdy",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "prelint": "pnpm -r --filter './packages/**' --if-present build",
     "lint": "eslint . && node scripts/check-package-boundaries.mjs",
     "license:check": "node scripts/check-license-readiness.mjs",
     "security:audit": "pnpm audit --audit-level high",
