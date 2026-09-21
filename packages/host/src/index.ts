@@ -84,6 +84,7 @@ export interface RegistrationClientOptions {
   readonly clearInterval?: typeof clearInterval;
   readonly setTimeout?: typeof setTimeout;
   readonly clearTimeout?: typeof clearTimeout;
+  readonly heartbeatIntervalMs?: number;
   /** Injected for deterministic bounded-jitter retry tests. */
   readonly random?: () => number;
 }
@@ -147,7 +148,7 @@ export function createRegistrationClient(options: RegistrationClientOptions) {
       } catch {
         scheduleRetry();
       }
-      timer = schedule(heartbeat, 30_000);
+      timer = schedule(heartbeat, options.heartbeatIntervalMs ?? 30_000);
     },
     stop: (): void => {
       stopped = true;
@@ -372,6 +373,7 @@ const appEnvironmentSchema = z.object({
   DATABASE_FILE: z.string().min(1).default(".embody/app.sqlite"),
   DATABASE_URL: z.url().optional(),
   GATEWAY_URL: z.url().optional(),
+  GATEWAY_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(250).max(300_000).default(30_000),
   PUBLIC_URL: z.url().optional(),
   GATEWAY_REGISTRATION_SECRET: z.string().min(16).optional(),
   GATEWAY_JWT_ISSUER: z.string().min(1).optional(),
@@ -565,6 +567,7 @@ export async function createAppHost(
           endpoint: environment.PUBLIC_URL,
           healthCheckUrl: new URL("/health", environment.PUBLIC_URL).toString(),
           manifest: kernel.manifest,
+          heartbeatIntervalMs: environment.GATEWAY_HEARTBEAT_INTERVAL_MS,
           secret: environment.GATEWAY_REGISTRATION_SECRET,
         })
       : undefined;

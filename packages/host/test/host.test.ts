@@ -172,6 +172,7 @@ describe("remote host", () => {
   });
   it("re-registers on a gateway not-found heartbeat and stops its scheduler", async () => {
     const ticks: (() => void)[] = [];
+    let heartbeatInterval: number | undefined;
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValueOnce(new Response(null, { status: 200 }))
@@ -193,13 +194,16 @@ describe("remote host", () => {
       },
       secret: "do-not-log",
       fetch,
-      setInterval: (callback: () => void) => {
+      heartbeatIntervalMs: 1_000,
+      setInterval: (callback: () => void, milliseconds?: number) => {
         ticks.push(callback);
+        heartbeatInterval = milliseconds;
         return 1 as never;
       },
       clearInterval: clear,
     });
     await client.start();
+    expect(heartbeatInterval).toBe(1_000);
     ticks[0]!();
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
     client.stop();

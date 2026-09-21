@@ -76,6 +76,7 @@ Embody uses a strict, fail-closed configuration parser (`parseAppEnvironment`). 
 | `DATABASE_FILE` | `string` | `".embody/app.sqlite"` | Filepath for local SQLite storage (development only). |
 | `DATABASE_URL` | `string` (Postgres URL) | *None* | Connection string for PostgreSQL (required in production). |
 | `GATEWAY_URL` | `string` (URL) | *None* | URL of the central Embody Gateway for multi-app registration. |
+| `GATEWAY_HEARTBEAT_INTERVAL_MS` | `number` | `30000` | Registration heartbeat interval; keep this lower than the Gateway registry TTL. |
 | `PUBLIC_URL` | `string` (URL) | *None* | Public hostname where this app is reachable by the Gateway. |
 | `GATEWAY_REGISTRATION_SECRET` | `string` (>= 16 chars) | *None* | Secret key used to register this app with the Gateway. |
 | `GATEWAY_JWT_ISSUER` | `string` | *None* | Expected issuer claim in incoming Bearer tokens. |
