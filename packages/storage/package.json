@@ -1,6 +1,6 @@
 {
   "name": "@embody/storage",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Transactional SQLite and PostgreSQL storage adapters for Embody applications.",
   "license": "Elastic-2.0",
   "repository": {

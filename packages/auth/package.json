@@ -1,6 +1,6 @@
 {
   "name": "@embody/auth",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Authentication and principal verification for Embody applications and gateways.",
   "license": "Elastic-2.0",
   "repository": {

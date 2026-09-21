@@ -1,6 +1,6 @@
 {
   "name": "@embody/testing",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Typed integration testing harness for Embody applications and plugins.",
   "license": "Elastic-2.0",
   "repository": {
