@@ -243,22 +243,18 @@ try {
   const interrupted = execute("kanban", "kanban.card.update", {
     id: card.id,
     data: { status: "in_progress" },
-  }).catch(() => undefined);
-  await eventually(async () => {
-    const query = await compose(
-      "exec",
-      "-T",
-      "postgres",
-      "psql",
-      "-U",
-      "embody",
-      "-d",
-      "kanban",
-      "-Atc",
-      "select count(*) from pg_stat_activity a where a.datname='kanban' and a.pid<>pg_backend_pid() and cardinality(pg_blocking_pids(a.pid)) > 0",
-    );
-    return Number(query.stdout.trim()) > 0;
-  }, "blocked pre-commit mutation");
+  });
+  const earlyOutcome = await Promise.race([
+    interrupted
+      .then(async (response) => `HTTP ${response.status}: ${await response.text()}`)
+      .catch((error) => `request error: ${String(error)}`),
+    new Promise((resolvePending) => globalThis.setTimeout(() => resolvePending(undefined), 1_000)),
+  ]);
+  assert.equal(
+    earlyOutcome,
+    undefined,
+    `Mutation completed instead of blocking behind the pre-commit lock: ${earlyOutcome}`,
+  );
   assert.equal((await compose("kill", "kanban")).code, 0);
   const unlocked = await compose(
     "exec",
@@ -275,7 +271,7 @@ try {
   assert.equal(unlocked.code, 0, unlocked.stderr);
   lock.kill("SIGTERM");
   if (lock.exitCode === null) await once(lock, "close");
-  await interrupted;
+  await interrupted.catch(() => undefined);
   assert.equal((await compose("start", "kanban")).code, 0);
   await eventually(
     () => globalThis.fetch(`http://127.0.0.1:${kanbanPort}/health`).then((response) => response.ok),
