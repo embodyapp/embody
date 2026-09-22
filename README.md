@@ -5,6 +5,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
 [![pnpm](https://img.shields.io/badge/pnpm-%3E%3D11.0.0-orange.svg)](https://pnpm.io/)
+[![skills.sh](https://skills.sh/b/nimrod4278/embody)](https://skills.sh/nimrod4278/embody)
 
 ---
 
@@ -66,6 +67,18 @@ Embody is structured as a modular TypeScript monorepo with clean architectural b
 | [`@embody/auth`](./packages/auth) | Pluggable authentication providers, API keys, Bearer token verifiers, and principal context scoping. |
 | [`@embody/testing`](./packages/testing) | End-to-end testing harness with typed actor simulation (`agent`, `human`, `system`) and observation helpers. |
 | [`create-embody-app`](./packages/create-embody-app) | Instant zero-config application scaffolding CLI. |
+
+---
+
+## 🤖 Install the Agent Skill
+
+Give a compatible coding agent the Embody development workflow, API patterns, safety guidance, and testing conventions:
+
+```bash
+npx skills add nimrod4278/embody --skill embody
+```
+
+The skill is defined in [`skills/embody/SKILL.md`](./skills/embody/SKILL.md) and is discoverable on [skills.sh](https://skills.sh/nimrod4278/embody/embody). Review the skill before installing it, as you should with any agent instructions.
 
 ---
 
