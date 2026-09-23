@@ -8,11 +8,11 @@ export const posthogEnabled = Boolean(posthogKey && posthogHost);
 
 if (!posthogKey) {
   if (import.meta.env.DEV) {
-    throw new Error('VITE_POSTHOG_KEY variable required by PostHog is missing or un-configured, this causes events to be silently missed. This error stops appearing once VITE_POSTHOG_KEY is configured');
+    console.info('PostHog analytics disabled: VITE_POSTHOG_KEY is not configured.');
   }
 } else if (!posthogHost) {
   if (import.meta.env.DEV) {
-    throw new Error('VITE_POSTHOG_HOST variable required by PostHog is missing or un-configured, this causes events to be silently missed. This error stops appearing once VITE_POSTHOG_HOST is configured');
+    console.info('PostHog analytics disabled: VITE_POSTHOG_HOST is not configured.');
   }
 } else {
   posthog.init(posthogKey, {
