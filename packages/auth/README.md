@@ -25,6 +25,6 @@ const verifier = gatewayJwtVerifier({
 
 `localDevVerifier` is deliberately restricted to development environments. Never expose a host using it to an untrusted network.
 
-See the [authentication guide](https://github.com/nimrod4278/embody/blob/main/docs/guides/06-authentication-and-principals.md).
+See the [authentication guide](https://github.com/embodyapp/embody/blob/main/docs/guides/06-authentication-and-principals.md).
 
 Licensed under the [Elastic License 2.0](./LICENSE).

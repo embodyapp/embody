@@ -20,6 +20,6 @@ To run PostgreSQL integration tests, provide a disposable PostgreSQL 16+ databas
 EMBODY_POSTGRES_URL=postgres://runtime:password@localhost:5432/embody pnpm --filter @embody/storage test:postgres
 ```
 
-See the [storage guide](https://github.com/nimrod4278/embody/blob/main/docs/guides/02-entities-and-storage.md).
+See the [storage guide](https://github.com/embodyapp/embody/blob/main/docs/guides/02-entities-and-storage.md).
 
 Licensed under the [Elastic License 2.0](./LICENSE).

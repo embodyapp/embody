@@ -39,6 +39,6 @@ npx -y @embody/cli mcp --url https://gateway.example.com/mcp --token "$EMBODY_TO
 
 The bridge lets stdio-only desktop clients connect to a remote Streamable HTTP MCP endpoint. Tokens can also be supplied through `EMBODY_TOKEN`; command-line arguments may be visible in process listings.
 
-See the complete [CLI reference](https://github.com/nimrod4278/embody/blob/main/docs/developer-tools/01-cli-reference.md).
+See the complete [CLI reference](https://github.com/embodyapp/embody/blob/main/docs/developer-tools/01-cli-reference.md).
 
 Licensed under the [Elastic License 2.0](./LICENSE).

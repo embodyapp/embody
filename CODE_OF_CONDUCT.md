@@ -34,7 +34,7 @@ This Code of Conduct applies in all project spaces and when an individual offici
 
 ## Reporting and enforcement
 
-Report abusive, harassing, or otherwise unacceptable behavior privately through the repository owner's contact options on [GitHub](https://github.com/nimrod4278). Do not include sensitive personal information in a public issue.
+Report abusive, harassing, or otherwise unacceptable behavior privately through the repository owner's contact options on [GitHub](https://github.com/embodyapp). Do not include sensitive personal information in a public issue.
 
 Maintainers will respect the privacy and security of reporters as far as reasonably possible. Enforcement decisions may include correction, warning, temporary suspension, or permanent removal, based on context, impact, and pattern of behavior.
 

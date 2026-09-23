@@ -20,6 +20,6 @@ Most application authors do not instantiate this package directly. `@embody/gate
 npx -y @embody/cli mcp --url https://gateway.example.com/mcp --token "$EMBODY_TOKEN"
 ```
 
-See the [MCP integration guide](https://github.com/nimrod4278/embody/blob/main/docs/agent-integrations/01-model-context-protocol.md).
+See the [MCP integration guide](https://github.com/embodyapp/embody/blob/main/docs/agent-integrations/01-model-context-protocol.md).
 
 Licensed under the [Elastic License 2.0](./LICENSE).

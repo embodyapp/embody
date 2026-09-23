@@ -19,6 +19,6 @@ Requires Node.js 22 or 24. The generated project includes:
 
 The scaffolder never overwrites a non-empty directory. Generated applications belong to their creators and are marked `UNLICENSED` until the creator selects a license.
 
-See the [quickstart](https://github.com/nimrod4278/embody/blob/main/docs/getting-started/02-quickstart.md).
+See the [quickstart](https://github.com/embodyapp/embody/blob/main/docs/getting-started/02-quickstart.md).
 
 Licensed under the [Elastic License 2.0](./LICENSE).

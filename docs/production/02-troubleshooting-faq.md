@@ -74,5 +74,5 @@ No. Embody is source-available under the [Elastic License 2.0](../../LICENSE), w
 
 ## 💬 Getting Help
 
-- **GitHub Issues**: [github.com/nimrod4278/embody/issues](https://github.com/nimrod4278/embody/issues)
-- **Discussions**: [github.com/nimrod4278/embody/discussions](https://github.com/nimrod4278/embody/discussions)
+- **GitHub Issues**: [github.com/embodyapp/embody/issues](https://github.com/embodyapp/embody/issues)
+- **Discussions**: [github.com/embodyapp/embody/discussions](https://github.com/embodyapp/embody/discussions)

@@ -59,7 +59,7 @@ Never rerun a partially failed publication blindly. First use `npm view <package
 
 After all nine package pages exist, open each package on npmjs.com and select **Settings → Trusted Publisher → GitHub Actions**. Use exactly:
 
-- GitHub organization or user: `nimrod4278`
+- GitHub organization or user: `embodyapp`
 - Repository: `embody`
 - Workflow filename: `release.yml`
 - Environment: `npm`

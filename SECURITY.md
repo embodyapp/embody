@@ -13,7 +13,7 @@ Security fixes are provided for the latest published release. Pre-release and ol
 
 Do not disclose suspected vulnerabilities in a public issue, discussion, pull request, or social-media post.
 
-Use [GitHub's private vulnerability reporting form](https://github.com/nimrod4278/embody/security/advisories/new). Include, when possible:
+Use [GitHub's private vulnerability reporting form](https://github.com/embodyapp/embody/security/advisories/new). Include, when possible:
 
 - affected package and version or commit;
 - impact and attack prerequisites;

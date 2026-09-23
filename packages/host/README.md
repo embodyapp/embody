@@ -37,6 +37,6 @@ Development defaults to loopback SQLite. Production requires PostgreSQL, gateway
 
 The application host exposes health and execution endpoints. Organization-wide CLI and MCP discovery are exposed by a registered `@embody/gateway` deployment.
 
-See the [deployment guide](https://github.com/nimrod4278/embody/blob/main/docs/production/01-deployment.md).
+See the [deployment guide](https://github.com/embodyapp/embody/blob/main/docs/production/01-deployment.md).
 
 Licensed under the [Elastic License 2.0](./LICENSE).

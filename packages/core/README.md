@@ -50,6 +50,6 @@ const moved = await ctx.entities.card.updateMany(
 
 `getMany([])` returns an empty list. `updateMany` requires at least one unique ID. Both preserve input order and reject if any ID is missing or belongs to another tenant. Bulk updates validate every merged record before mutation, then run each record's normal update hooks and events. Because contextual stores execute inside the current action transaction, any validation error, conflict, hook veto, or outbox failure rolls back the whole batch.
 
-See the [plugin guide](https://github.com/nimrod4278/embody/blob/main/docs/guides/01-defining-plugins.md).
+See the [plugin guide](https://github.com/embodyapp/embody/blob/main/docs/guides/01-defining-plugins.md).
 
 Licensed under the [Elastic License 2.0](./LICENSE).

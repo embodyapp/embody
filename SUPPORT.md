@@ -4,8 +4,8 @@ Embody is currently provided without warranties, service-level commitments, or g
 
 ## Community help
 
-- Ask usage and design questions in [GitHub Discussions](https://github.com/nimrod4278/embody/discussions).
-- Report reproducible defects with [GitHub Issues](https://github.com/nimrod4278/embody/issues).
+- Ask usage and design questions in [GitHub Discussions](https://github.com/embodyapp/embody/discussions).
+- Report reproducible defects with [GitHub Issues](https://github.com/embodyapp/embody/issues).
 - Consult the [documentation hub](docs/README.md) and [troubleshooting guide](docs/production/02-troubleshooting-faq.md).
 
 When requesting help, include the Embody package versions, Node.js version, storage backend, operating system, relevant configuration with secrets removed, and a minimal reproduction.

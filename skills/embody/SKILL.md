@@ -5,7 +5,7 @@ license: Elastic-2.0
 compatibility: Requires Node.js 22 or 24. Embody applications use TypeScript and ESM; pnpm is recommended.
 metadata:
   author: nimrod4278
-  repository: https://github.com/nimrod4278/embody
+  repository: https://github.com/embodyapp/embody
 ---
 
 # Embody
@@ -210,11 +210,11 @@ Prefer an environment variable or the client's secret facility over a literal to
 
 Consult the version-matched source and docs when an API is uncertain. Do not invent framework methods.
 
-- Documentation hub: https://github.com/nimrod4278/embody/tree/main/docs
-- Quickstart: https://github.com/nimrod4278/embody/blob/main/docs/getting-started/02-quickstart.md
-- Plugin guide: https://github.com/nimrod4278/embody/blob/main/docs/guides/01-defining-plugins.md
-- Safety hooks: https://github.com/nimrod4278/embody/blob/main/docs/guides/04-mechanical-safety-guardrails.md
-- Testing guide: https://github.com/nimrod4278/embody/blob/main/docs/developer-tools/03-testing-guide.md
-- CLI reference: https://github.com/nimrod4278/embody/blob/main/docs/developer-tools/01-cli-reference.md
-- MCP integration: https://github.com/nimrod4278/embody/blob/main/docs/agent-integrations/01-model-context-protocol.md
-- Complete examples: https://github.com/nimrod4278/embody/tree/main/examples
+- Documentation hub: https://github.com/embodyapp/embody/tree/main/docs
+- Quickstart: https://github.com/embodyapp/embody/blob/main/docs/getting-started/02-quickstart.md
+- Plugin guide: https://github.com/embodyapp/embody/blob/main/docs/guides/01-defining-plugins.md
+- Safety hooks: https://github.com/embodyapp/embody/blob/main/docs/guides/04-mechanical-safety-guardrails.md
+- Testing guide: https://github.com/embodyapp/embody/blob/main/docs/developer-tools/03-testing-guide.md
+- CLI reference: https://github.com/embodyapp/embody/blob/main/docs/developer-tools/01-cli-reference.md
+- MCP integration: https://github.com/embodyapp/embody/blob/main/docs/agent-integrations/01-model-context-protocol.md
+- Complete examples: https://github.com/embodyapp/embody/tree/main/examples

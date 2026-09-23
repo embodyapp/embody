@@ -24,6 +24,6 @@ Warm-start performance is measured outside assertions to avoid flaky tests: run 
 
 Latest local baseline (2026-09-03): 100 samples after one warmup on Node v24.12.0/x86_64; median **5.72 ms**, p95 **7.32 ms**. Run `pnpm --filter @embody/testing benchmark` to reproduce.
 
-See the [testing guide](https://github.com/nimrod4278/embody/blob/main/docs/developer-tools/03-testing-guide.md).
+See the [testing guide](https://github.com/embodyapp/embody/blob/main/docs/developer-tools/03-testing-guide.md).
 
 Licensed under the [Elastic License 2.0](./LICENSE).

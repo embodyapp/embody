@@ -15,8 +15,8 @@ Requires Node.js 22 or 24 and uses ESM.
 - `/mcp` and `/mcp/:appId` for Model Context Protocol clients.
 - Registration and heartbeat routes for application hosts.
 
-For a deployable environment-driven entrypoint, use the reference implementation in [`apps/gateway`](https://github.com/nimrod4278/embody/tree/main/apps/gateway). Production deployments must use TLS, rotated secrets, explicit endpoint allowlists, durable audit storage, and appropriate rate limits.
+For a deployable environment-driven entrypoint, use the reference implementation in [`apps/gateway`](https://github.com/embodyapp/embody/tree/main/apps/gateway). Production deployments must use TLS, rotated secrets, explicit endpoint allowlists, durable audit storage, and appropriate rate limits.
 
-See the [gateway guide](https://github.com/nimrod4278/embody/blob/main/docs/guides/07-gateway-and-control-plane.md).
+See the [gateway guide](https://github.com/embodyapp/embody/blob/main/docs/guides/07-gateway-and-control-plane.md).
 
 Licensed under the [Elastic License 2.0](./LICENSE).

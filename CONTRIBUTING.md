@@ -4,7 +4,7 @@ Thank you for your interest in Embody.
 
 ## Before you start
 
-- Use [GitHub Discussions](https://github.com/nimrod4278/embody/discussions) or an issue for design proposals and substantial changes.
+- Use [GitHub Discussions](https://github.com/embodyapp/embody/discussions) or an issue for design proposals and substantial changes.
 - Search existing issues before filing a new one.
 - Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
