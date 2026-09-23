@@ -25,7 +25,7 @@ Do not include real credentials, personal data, or customer data. Use synthetic 
 
 The project will acknowledge reports through the private advisory, validate and prioritize them, and coordinate remediation and disclosure with the reporter. Response or remediation times are not guaranteed. Please keep the report confidential until a coordinated disclosure date is agreed or the project publishes a fix.
 
-If the private-reporting form is unavailable, do not open a public issue containing vulnerability details. Open a minimal issue asking the maintainer to enable private reporting, without identifying the affected component or describing the vulnerability.
+If the private-reporting form is unavailable, email [nimrod@tryembody.com](mailto:nimrod@tryembody.com). Do not open a public issue containing vulnerability details.
 
 ## Scope
 
