@@ -63,14 +63,51 @@ const workflowManifestSchema = z
       .strict(),
   })
   .strict();
+const viewIdSchema = z
+  .string()
+  .min(1)
+  .max(63)
+  .regex(/^[a-z][a-z0-9-]*$/);
+const semanticVersionSchema = z
+  .string()
+  .min(5)
+  .max(100)
+  .regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/);
+const viewResourceUriSchema = z
+  .string()
+  .min(8)
+  .max(500)
+  .regex(
+    /^ui:\/\/[a-z][a-z0-9-]{0,62}\/[a-z][a-z0-9-]{0,62}@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/,
+  );
+const integritySchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+
 const actionManifestSchema = z
   .object({
     description: z.string().max(2_000).optional(),
     inputSchema: jsonSchema,
     outputSchema: jsonSchema.optional(),
     generated: z.boolean(),
+    presentation: z.object({ view: viewIdSchema }).strict().optional(),
   })
   .strict();
+const viewManifestSchema = z
+  .object({
+    protocolVersion: protocolVersionSchema,
+    id: viewIdSchema,
+    kind: z.enum(["standard", "custom"]),
+    description: z.string().max(2_000).optional(),
+    propsSchema: jsonSchema,
+    resourceUri: viewResourceUriSchema,
+    version: semanticVersionSchema,
+    callableTargets: z.array(targetSchema).max(100),
+    fallback: z.enum(["markdown", "text", "json"]),
+    integrity: integritySchema,
+  })
+  .strict();
+const viewManifestRecordSchema = z
+  .record(viewIdSchema, viewManifestSchema)
+  .refine((views) => Object.keys(views).length <= 500, "Too many views");
 
 export const appManifestSchema = z
   .object({
@@ -79,9 +116,64 @@ export const appManifestSchema = z
     entities: z.record(z.string(), entityManifestSchema),
     actions: z.record(z.string(), actionManifestSchema),
     workflows: z.record(z.string(), workflowManifestSchema).default({}),
+    views: viewManifestRecordSchema.optional(),
     eventSubscriptions: z.array(targetSchema).max(10_000),
   })
-  .strict();
+  .strict()
+  .superRefine((manifest, context) => {
+    const views = manifest.views ?? {};
+    const resourceUris = new Set<string>();
+    for (const [viewId, view] of Object.entries(views)) {
+      if (view.id !== viewId)
+        context.addIssue({
+          code: "custom",
+          path: ["views", viewId, "id"],
+          message: "View ID must match its manifest key",
+        });
+      const resource = new URL(view.resourceUri);
+      if (resource.pathname !== `/${viewId}@${view.version}`)
+        context.addIssue({
+          code: "custom",
+          path: ["views", viewId, "resourceUri"],
+          message: "Resource URI must match the view ID and version",
+        });
+      if (resourceUris.has(view.resourceUri))
+        context.addIssue({
+          code: "custom",
+          path: ["views", viewId, "resourceUri"],
+          message: "Resource URI must be unique",
+        });
+      resourceUris.add(view.resourceUri);
+      if (new Set(view.callableTargets).size !== view.callableTargets.length)
+        context.addIssue({
+          code: "custom",
+          path: ["views", viewId, "callableTargets"],
+          message: "Callable targets must be unique",
+        });
+      for (const target of view.callableTargets)
+        if (manifest.actions[target] === undefined)
+          context.addIssue({
+            code: "custom",
+            path: ["views", viewId, "callableTargets"],
+            message: "Callable target must reference an action",
+          });
+    }
+    for (const [target, action] of Object.entries(manifest.actions)) {
+      if (action.presentation === undefined) continue;
+      if (action.outputSchema === undefined)
+        context.addIssue({
+          code: "custom",
+          path: ["actions", target, "outputSchema"],
+          message: "Presented action must declare an output schema",
+        });
+      if (views[action.presentation.view] === undefined)
+        context.addIssue({
+          code: "custom",
+          path: ["actions", target, "presentation", "view"],
+          message: "Presented action must reference a declared view",
+        });
+    }
+  });
 
 export const registrationRequestSchema = z
   .object({
@@ -92,7 +184,16 @@ export const registrationRequestSchema = z
     healthCheckUrl: z.url().max(2_000),
     manifest: appManifestSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((registration, context) => {
+    for (const [viewId, view] of Object.entries(registration.manifest.views ?? {}))
+      if (new URL(view.resourceUri).hostname !== registration.appId)
+        context.addIssue({
+          code: "custom",
+          path: ["manifest", "views", viewId, "resourceUri"],
+          message: "Resource URI authority must match the app ID",
+        });
+  });
 
 export const heartbeatRequestSchema = z
   .object({

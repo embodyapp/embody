@@ -13,11 +13,32 @@ export interface EntityManifest {
   readonly defaultSort?: { readonly field: string; readonly direction: "asc" | "desc" };
 }
 
+export interface ActionPresentationManifest {
+  readonly view: string;
+}
+
 export interface ActionManifest {
   readonly description?: string;
   readonly inputSchema: JsonSchema;
   readonly outputSchema?: JsonSchema;
   readonly generated: boolean;
+  readonly presentation?: ActionPresentationManifest;
+}
+
+export type ViewFallback = "markdown" | "text" | "json";
+
+/** Transport-neutral metadata for one immutable human-facing action-result view. */
+export interface ViewManifest {
+  readonly protocolVersion: 1;
+  readonly id: string;
+  readonly kind: "standard" | "custom";
+  readonly description?: string;
+  readonly propsSchema: JsonSchema;
+  readonly resourceUri: string;
+  readonly version: string;
+  readonly callableTargets: readonly string[];
+  readonly fallback: ViewFallback;
+  readonly integrity: string;
 }
 
 export interface WorkflowManifest {
@@ -35,6 +56,7 @@ export interface AppManifest {
   readonly entities: Readonly<Record<string, EntityManifest>>;
   readonly actions: Readonly<Record<string, ActionManifest>>;
   readonly workflows?: Readonly<Record<string, WorkflowManifest>>;
+  readonly views?: Readonly<Record<string, ViewManifest>>;
   readonly eventSubscriptions: readonly string[];
 }
 

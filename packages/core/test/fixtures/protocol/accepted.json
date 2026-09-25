@@ -13,6 +13,45 @@
       "eventSubscriptions": []
     }
   },
+  "registrationWithView": {
+    "protocolVersion": 1,
+    "appId": "kanban",
+    "version": "1.2.0",
+    "endpoint": "https://kanban.internal:8081",
+    "healthCheckUrl": "https://kanban.internal:8081/health",
+    "manifest": {
+      "protocolVersion": 1,
+      "plugins": [{ "id": "kanban", "version": "1.0.0" }],
+      "entities": {},
+      "actions": {
+        "kanban.board": {
+          "inputSchema": { "type": "object" },
+          "outputSchema": { "type": "object" },
+          "generated": false,
+          "presentation": { "view": "board" }
+        },
+        "kanban.card.update": {
+          "inputSchema": { "type": "object" },
+          "outputSchema": { "type": "object" },
+          "generated": true
+        }
+      },
+      "views": {
+        "board": {
+          "protocolVersion": 1,
+          "id": "board",
+          "kind": "standard",
+          "propsSchema": { "type": "object" },
+          "resourceUri": "ui://kanban/board@1.0.0",
+          "version": "1.0.0",
+          "callableTargets": ["kanban.card.update"],
+          "fallback": "markdown",
+          "integrity": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "eventSubscriptions": []
+    }
+  },
   "heartbeat": { "protocolVersion": 1, "appId": "kanban", "generation": "g1" },
   "execution": {
     "protocolVersion": 1,

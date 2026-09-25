@@ -34,6 +34,14 @@ export interface ActionManifest {
     readonly inputSchema: JsonSchema;
     // (undocumented)
     readonly outputSchema?: JsonSchema;
+    // (undocumented)
+    readonly presentation?: ActionPresentationManifest;
+}
+
+// @public (undocumented)
+export interface ActionPresentationManifest {
+    // (undocumented)
+    readonly view: string;
 }
 
 // @public (undocumented)
@@ -57,6 +65,8 @@ export interface AppManifest {
     }[];
     // (undocumented)
     readonly protocolVersion: 1;
+    // (undocumented)
+    readonly views?: Readonly<Record<string, ViewManifest>>;
     // (undocumented)
     readonly workflows?: Readonly<Record<string, WorkflowManifest>>;
 }
@@ -85,6 +95,9 @@ export const appManifestSchema: z.ZodObject<{
         inputSchema: z.ZodRecord<z.ZodString, z.ZodUnknown>;
         outputSchema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         generated: z.ZodBoolean;
+        presentation: z.ZodOptional<z.ZodObject<{
+            view: z.ZodString;
+        }, z.core.$strict>>;
     }, z.core.$strict>>;
     workflows: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodObject<{
         description: z.ZodOptional<z.ZodString>;
@@ -101,6 +114,25 @@ export const appManifestSchema: z.ZodObject<{
             cancel: z.ZodString;
             retry: z.ZodString;
         }, z.core.$strict>;
+    }, z.core.$strict>>>;
+    views: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+        protocolVersion: z.ZodLiteral<1>;
+        id: z.ZodString;
+        kind: z.ZodEnum<{
+            standard: "standard";
+            custom: "custom";
+        }>;
+        description: z.ZodOptional<z.ZodString>;
+        propsSchema: z.ZodRecord<z.ZodString, z.ZodUnknown>;
+        resourceUri: z.ZodString;
+        version: z.ZodString;
+        callableTargets: z.ZodArray<z.ZodString>;
+        fallback: z.ZodEnum<{
+            markdown: "markdown";
+            text: "text";
+            json: "json";
+        }>;
+        integrity: z.ZodString;
     }, z.core.$strict>>>;
     eventSubscriptions: z.ZodArray<z.ZodString>;
 }, z.core.$strict>;
@@ -862,6 +894,9 @@ export const registrationRequestSchema: z.ZodObject<{
             inputSchema: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             outputSchema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             generated: z.ZodBoolean;
+            presentation: z.ZodOptional<z.ZodObject<{
+                view: z.ZodString;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         workflows: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodObject<{
             description: z.ZodOptional<z.ZodString>;
@@ -878,6 +913,25 @@ export const registrationRequestSchema: z.ZodObject<{
                 cancel: z.ZodString;
                 retry: z.ZodString;
             }, z.core.$strict>;
+        }, z.core.$strict>>>;
+        views: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+            protocolVersion: z.ZodLiteral<1>;
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                standard: "standard";
+                custom: "custom";
+            }>;
+            description: z.ZodOptional<z.ZodString>;
+            propsSchema: z.ZodRecord<z.ZodString, z.ZodUnknown>;
+            resourceUri: z.ZodString;
+            version: z.ZodString;
+            callableTargets: z.ZodArray<z.ZodString>;
+            fallback: z.ZodEnum<{
+                markdown: "markdown";
+                text: "text";
+                json: "json";
+            }>;
+            integrity: z.ZodString;
         }, z.core.$strict>>>;
         eventSubscriptions: z.ZodArray<z.ZodString>;
     }, z.core.$strict>;
@@ -941,6 +995,33 @@ export interface ValidationIssue {
     readonly message: string;
     // (undocumented)
     readonly path: readonly (string | number)[];
+}
+
+// @public (undocumented)
+export type ViewFallback = "markdown" | "text" | "json";
+
+// @public
+export interface ViewManifest {
+    // (undocumented)
+    readonly callableTargets: readonly string[];
+    // (undocumented)
+    readonly description?: string;
+    // (undocumented)
+    readonly fallback: ViewFallback;
+    // (undocumented)
+    readonly id: string;
+    // (undocumented)
+    readonly integrity: string;
+    // (undocumented)
+    readonly kind: "standard" | "custom";
+    // (undocumented)
+    readonly propsSchema: JsonSchema;
+    // (undocumented)
+    readonly protocolVersion: 1;
+    // (undocumented)
+    readonly resourceUri: string;
+    // (undocumented)
+    readonly version: string;
 }
 
 // @public (undocumented)
