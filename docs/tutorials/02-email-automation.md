@@ -193,7 +193,7 @@ describe("Email Automation System", () => {
         actorType: "human",
         actorId: "sarah",
         roles: ["marketing_lead"],
-        scopes: ["email:send"],
+        scopes: ["email:sendBatch"],
       },
     });
 
@@ -211,7 +211,7 @@ describe("Email Automation System", () => {
       expect(mockMailer.sentMessages).toHaveLength(3);
 
       // Verify captured progress
-      const finalProgress = harness.capturedProgress.at(-1);
+      const finalProgress = harness.progress().at(-1);
       expect(finalProgress?.update.percent).toBe(100);
     } finally {
       await harness.close();

@@ -12,7 +12,7 @@ In Embody, you declare a **Dynamic Entity** once using a **Zod schema**. Embody 
 - Creates and manages database storage.
 - Enforces strict runtime validation on every read and write.
 - Compiles automatic CRUD actions for humans (CLI) and AI agents (MCP).
-- Applies optimistic concurrency locking to prevent agents from overwriting concurrent changes.
+- Applies internal optimistic concurrency checks while committing updates.
 
 ---
 
@@ -56,7 +56,7 @@ export const trackerPlugin = definePlugin({
 
 ## 🔄 Automatic CRUD Actions
 
-Declaring the `issue` entity above automatically generates six distinct, fully typed actions:
+Declaring the `issue` entity above automatically generates five fully typed actions:
 
 ### 1. `create`
 Inserts a new record, validates defaults, assigns a UUID, and timestamps the creation:
@@ -96,13 +96,13 @@ Programmatic equivalent:
 ```typescript
 const issues = await context.entities.issue.list({
   filter: { status: "open", severity: "critical" },
-  sort: { field: "createdAt", direction: "desc" },
+  sort: { field: "severity", direction: "desc" },
   limit: 25,
   offset: 0,
 });
 ```
 
-### 4. `update` (with Optimistic Concurrency Locking)
+### 4. `update`
 Applies a partial patch to an existing record:
 
 ```bash
@@ -117,17 +117,18 @@ const updated = await context.entities.issue.update(issueId, {
 });
 ```
 
-#### Preventing Concurrent Agent Overwrites (`expectedUpdatedAt`)
-When multiple AI agents work on the same tickets concurrently, Agent B might overwrite a change made by Agent A milliseconds earlier. Embody solves this via optimistic locking:
+The entity engine supplies the current record timestamp to storage as an internal optimistic concurrency check. The public accessor does not accept an `expectedUpdatedAt` argument. Keep read-modify-write behavior inside one Embody action transaction and handle `ConflictError` if concurrent storage activity invalidates a commit.
+
+Generated action calls use an envelope:
 
 ```typescript
-// Throws ConflictError if another agent updated this issue in the meantime
-await context.entities.issue.update(
-  issueId,
-  { status: "resolved" },
-  { expectedUpdatedAt: issue.updatedAt }
-);
+await harness.client.tracker.issue.update({
+  id: issueId,
+  data: { status: "resolved" },
+});
 ```
+
+After a conflict, re-read state and reconsider the intended mutation instead of blindly retrying stale input.
 
 ### 5. `delete`
 Removes a record by ID:
@@ -136,15 +137,19 @@ Removes a record by ID:
 embody tracker issue delete a7c2e0b5-1234-4567-89ab-cdef01234567
 ```
 
-### 6. `updateMany`
-Atomically updates multiple records in a single database transaction:
+### Internal `getMany` and `updateMany` accessors
+
+Handlers can read or update batches even though these are not generated as public CRUD actions:
 
 ```typescript
+const records = await context.entities.issue.getMany([id1, id2]);
 await context.entities.issue.updateMany([
-  { id: id1, data: { status: "closed" } },
-  { id: id2, data: { status: "closed" } },
+  { id: records[0].id, data: { status: "closed" } },
+  { id: records[1].id, data: { status: "closed" } },
 ]);
 ```
+
+`getMany` returns records in input order and rejects if an ID is missing. `updateMany` requires at least one unique ID, validates the complete batch before its first mutation, runs normal hooks, and rolls the whole transaction back on failure. Expose a custom action when agents or CLI users need a batch operation.
 
 ---
 

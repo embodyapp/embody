@@ -78,7 +78,13 @@ Give a compatible coding agent the Embody development workflow, API patterns, sa
 npx skills add embodyapp/embody --skill embody
 ```
 
-The skill is defined in [`skills/embody/SKILL.md`](./skills/embody/SKILL.md) and is discoverable on [skills.sh](https://skills.sh/embodyapp/embody/embody). Review the skill before installing it, as you should with any agent instructions.
+The skill is defined in [`skills/embody/SKILL.md`](./skills/embody/SKILL.md), includes focused references for the current public APIs, and is discoverable on [skills.sh](https://skills.sh/embodyapp/embody/embody). Review the skill before installing it, as you should with any agent instructions.
+
+Update an existing installation after a new version is merged:
+
+```bash
+npx skills update
+```
 
 ---
 
@@ -223,11 +229,11 @@ In your `.cursor/mcp.json` or Cline settings:
 }
 ```
 
-When connected, the AI agent immediately receives typed tools such as:
-- `ops.task.create`: Create a new task with full schema validation.
-- `ops.task.list`: Filter and query tasks by status, priority, or custom attributes.
-- `ops.task.update`: Update task attributes (gated by safety hooks).
-- `ops.tasks.bulkComplete`: Execute your custom business action.
+When connected, the AI agent immediately receives typed MCP tools such as:
+- `ops_tasks_task_create`: Create a new task with full schema validation.
+- `ops_tasks_task_list`: Filter and query tasks by status, priority, or custom attributes.
+- `ops_tasks_task_update`: Update task attributes (gated by safety hooks).
+- `ops_tasks_bulk_complete`: Execute your custom business action.
 
 ---
 
@@ -252,7 +258,7 @@ embody ops task list --status todo
 embody ops task update <TASK_ID> --status in_progress
 
 # Pass JSON payloads directly or via stdin
-echo '{"taskIds": ["c7a4e6...", "f1b2d3..."]}' | embody ops tasks bulkComplete --json
+echo '{"taskIds": ["c7a4e6...", "f1b2d3..."]}' | embody ops bulkComplete --json
 ```
 
 ---
@@ -262,15 +268,20 @@ echo '{"taskIds": ["c7a4e6...", "f1b2d3..."]}' | embody ops tasks bulkComplete -
 Traditional API keys allow an AI agent to do anything the key owner can do. Embody uses **principal-aware capability attenuation**:
 
 1. **Actor Scoping**: Every request identifies whether the actor is a `human`, `agent`, or `system`.
-2. **Vetoable Hooks**: `beforeCreate`, `beforeUpdate`, and `beforeDelete` hooks can inspect state changes and veto mutations with descriptive error messages before any database transaction commits.
-3. **Spend Limits & Approval Gates**: Actions can enforce budgets and require supervisor approval before execution.
+2. **Vetoable Hooks**: Entity lifecycle hooks inspect state changes and veto mutations with descriptive errors before the database transaction commits.
+3. **Spend Limits & Approval Gates**: Custom actions validate trusted approval state before performing mutations; entity hooks still protect every mutation path.
 4. **Deterministic Auditing**: All actions and state changes produce a verifiable audit trail with actor metadata.
 
 ```typescript
-// Example: Spend Policy Hook
-define.beforeAction("payout", async (input, context) => {
-  if (context.principal.actorType === "agent" && input.amount > 500) {
-    throw new HookVetoError("Transactions over $500 require human supervisor approval");
+// Example: agent-specific state-transition policy
+define.beforeUpdate("task", ({ current, patch }, context) => {
+  if (
+    context.principal.actorType === "agent" &&
+    patch.status === "done" &&
+    !current.data.prUrl &&
+    !patch.prUrl
+  ) {
+    throw new HookVetoError("Agents cannot complete tasks without a linked PR URL");
   }
 });
 ```
@@ -290,29 +301,25 @@ it("prevents agents from completing tasks without a PR URL", async () => {
   const harness = await createTestHarness({ plugins: config.plugins });
 
   try {
-    // 1. Human creates a task
-    const task = await harness.call("ops.task.create", {
+    const task = await harness.client.tasks.task.create({
       data: { title: "Refactor auth", status: "todo" },
     });
+    const agent = harness.asAgent("agent-007");
 
-    // 2. Switch context to autonomous agent actor
-    const agentHarness = harness.asActor({ actorType: "agent", actorId: "agent-007" });
-
-    // 3. Attempting to mark done without prUrl is vetoed
-    await expect(
-      agentHarness.call("ops.task.update", {
+    const veto = await agent.veto(() =>
+      agent.client.tasks.task.update({
         id: task.id,
         data: { status: "done" },
-      })
-    ).rejects.toThrow("Agents cannot mark a task 'done' without a verified PR URL");
+      }),
+    );
+    expect(veto.message).toContain("linked PR URL");
 
-    // 4. Marking done with prUrl succeeds
-    const completed = await agentHarness.call("ops.task.update", {
+    const completed = await agent.client.tasks.task.update({
       id: task.id,
       data: { status: "done", prUrl: "https://github.com/org/repo/pull/42" },
     });
 
-    expect(completed.status).toBe("done");
+    expect(completed.data.status).toBe("done");
   } finally {
     await harness.close();
   }

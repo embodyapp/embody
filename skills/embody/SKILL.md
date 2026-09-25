@@ -1,6 +1,6 @@
 ---
 name: embody
-description: Build, extend, test, and operate agent-native TypeScript applications with the Embody framework. Use when scaffolding an Embody app; defining plugins, Zod entities, typed actions, services, events, durable workflows, or mechanical safety hooks; testing human and agent principals; or exposing an app through the Embody CLI, gateway, and MCP.
+description: Build, extend, test, and operate agent-native TypeScript applications with Embody. Use when scaffolding an app; defining plugins, Zod entities, typed actions, services, events, durable workflows, or mechanical safety hooks; testing principals and transactions; or connecting through the CLI, MCP, a managed Embody Gateway, or a self-hosted gateway.
 license: Elastic-2.0
 compatibility: Requires Node.js 22 or 24. Embody applications use TypeScript and ESM; pnpm is recommended.
 metadata:
@@ -12,32 +12,39 @@ metadata:
 
 Build deterministic backends and operational applications for autonomous agents. Prefer typed schemas and runtime-enforced policy over prompt-only instructions.
 
-## Workflow
+## Start here
 
-1. Inspect the repository before changing it. Look for `embody.config.ts`, `package.json`, existing plugins, tests, and the installed `@embody/*` versions.
-2. If starting a new project, scaffold it instead of recreating the setup manually:
+1. Inspect `embody.config.ts`, `package.json`, existing plugins and tests, and installed `@embody/*` versions.
+2. Preserve the package manager, versions, ESM conventions, and plugin boundaries. Do not upgrade dependencies unless required.
+3. Read the matching bundled reference before implementing:
 
-   ```bash
-   npx -y create-embody-app@latest my-agent-app
-   cd my-agent-app
-   npm install
-   ```
+| Task | Reference |
+| --- | --- |
+| Entities, actions, services, CRUD signatures | [entities-actions-and-services.md](references/entities-actions-and-services.md) |
+| Hooks, principals, scopes, errors | [safety-auth-and-errors.md](references/safety-auth-and-errors.md) |
+| Events, outbox, durable workflows | [events-and-workflows.md](references/events-and-workflows.md) |
+| Harness tests and observations | [testing.md](references/testing.md) |
+| CLI, MCP, managed or self-hosted gateway | [gateway-cli-and-mcp.md](references/gateway-cli-and-mcp.md) |
 
-   With pnpm, use `pnpm create embody-app my-agent-app` and `pnpm install`.
+If the installed package differs from these instructions, treat its declarations, package README, tests, and source as authoritative. Never invent framework methods.
 
-3. Model each cohesive business domain as a plugin.
-4. Define persisted business objects as Zod-backed entities.
-5. Use custom actions for workflows and multi-record operations.
-6. Enforce invariants in hooks, especially for callers whose `principal.actorType` is `"agent"`.
-7. Publish events through `context.events` when state changes must trigger durable downstream work.
-8. Test successful behavior and denied behavior with `@embody/testing`.
-9. Run the project's test, typecheck, and build scripts before finishing.
+## New applications
 
-When working in an existing application, preserve its package manager, package versions, module conventions, and plugin boundaries. Do not upgrade dependencies unless the task requires it.
+Prefer the scaffold:
+
+```bash
+npx -y create-embody-app@latest my-agent-app
+cd my-agent-app
+npm install
+```
+
+With pnpm, use `pnpm create embody-app my-agent-app` and `pnpm install`.
+
+Model each cohesive business domain as a plugin. Use entities for persisted business objects, custom actions for workflows and multi-record operations, services for external adapters, hooks for state invariants, events for durable downstream work, and durable workflows for retryable multi-step processes.
 
 ## Core implementation pattern
 
-Use the two-argument `definePlugin` form when entities need typed actions or hooks:
+Use the two-argument `definePlugin` form for typed actions and typed update hooks:
 
 ```typescript
 import { definePlugin, HookVetoError, z } from "@embody/core";
@@ -49,7 +56,7 @@ const TaskSchema = z.object({
   prUrl: z.string().url().optional(),
 });
 
-const tasksPlugin = definePlugin(
+export const tasksPlugin = definePlugin(
   {
     id: "tasks",
     version: "1.0.0",
@@ -66,11 +73,12 @@ const tasksPlugin = definePlugin(
       completeMany: define.action({
         description: "Complete several tasks atomically",
         input: z.object({ taskIds: z.array(z.uuid()).min(1) }),
+        output: z.object({ count: z.number().int().nonnegative() }),
         handler: async ({ taskIds }, context) => {
           const tasks = await context.entities.task.updateMany(
             taskIds.map((id) => ({ id, data: { status: "done" as const } })),
           );
-          return { count: tasks.length, tasks };
+          return { count: tasks.length };
         },
       }),
     },
@@ -101,24 +109,49 @@ export default defineApp({
 });
 ```
 
-Keep entity and action descriptions explicit because they become tool guidance for agents. Add indexes only for fields that the application queries. Use `context.entities` rather than bypassing the framework with direct database access inside actions.
+Descriptions become guidance for agents, so make them explicit. Add indexes only for fields the application queries. Use `context.entities` instead of direct database writes inside actions.
 
-## Mechanical safety rules
+## Know which API surface you are using
 
-Treat policy as executable code:
+Handler accessors and generated action inputs intentionally differ:
 
-- Put schema constraints in Zod.
-- Put state-transition, authorization, approval, and spend rules in `beforeCreate`, `beforeUpdate`, `beforeDelete`, or `beforeAction` hooks.
-- Throw `HookVetoError` with a specific, actionable reason.
-- Inspect `context.principal.actorType`, roles, and scopes when policy differs for agents, humans, and system workers.
+```typescript
+// Inside an action or event handler:
+await context.entities.task.update(taskId, { status: "done" });
+
+// Through the generated action boundary or typed test client:
+await harness.client.tasks.task.update({
+  id: taskId,
+  data: { status: "done" },
+});
+```
+
+Names also differ by transport:
+
+```text
+Kernel/test target: tasks.task.update
+Deployed target:    ops.tasks.task.update
+MCP tool:           ops_tasks_task_update
+CLI:                embody ops task update <id>
+```
+
+## Mechanical safety
+
+- Put structural constraints and defaults in Zod.
+- Put persisted state-transition invariants in entity lifecycle hooks.
+- Throw `HookVetoError` with a specific, actionable reason for a policy veto.
+- Inspect `principal.actorType`, roles, and scopes when policy differs by caller.
+- Use normal authorization scopes to restrict which actions a principal may invoke.
 - Keep checks and mutations in the Embody execution path so failures roll back transactionally.
-- Never substitute a prompt instruction, UI validation, or client-side check for a server-side invariant.
-- Use `updateMany` for an all-or-nothing batch rather than a loop of separately committed updates.
-- Treat external side effects as retryable and idempotent. Publish durable events through the transactional outbox rather than making an untracked dual write.
+- Use `updateMany` for all-or-nothing batches.
+- Never substitute prompt instructions, UI validation, or client-side checks for server-side invariants.
+- Treat external effects as retryable and idempotent; publish durable events rather than making an untracked dual write.
+
+Do not use undocumented helpers such as `define.beforeAction`. Read [safety-auth-and-errors.md](references/safety-auth-and-errors.md) for the currently supported typed hooks and raw lifecycle hook keys.
 
 ## Testing pattern
 
-Test through the harness instead of calling handlers directly. Always close it:
+Test through `@embody/testing`, not by calling handlers directly. Always close the harness:
 
 ```typescript
 import { createTestHarness } from "@embody/testing";
@@ -132,30 +165,35 @@ it("enforces the agent completion rule", async () => {
     const task = await harness.client.tasks.task.create({
       data: { title: "Ship the change", status: "todo" },
     });
-    const agent = harness.asActor({
-      actorType: "agent",
-      actorId: "coding-agent",
-      roles: [],
-      scopes: [],
-    });
+    const agent = harness.asAgent("coding-agent");
 
-    await expect(
-      agent.call("tasks.task.update", {
+    const veto = await agent.veto(() =>
+      agent.client.tasks.task.update({
         id: task.id,
         data: { status: "done" },
       }),
-    ).rejects.toThrow("linked PR URL");
+    );
+    expect(veto.message).toContain("linked PR URL");
+
+    const completed = await agent.client.tasks.task.update({
+      id: task.id,
+      data: {
+        status: "done",
+        prUrl: "https://github.com/example/repository/pull/123",
+      },
+    });
+    expect(completed.data.status).toBe("done");
   } finally {
     await harness.close();
   }
 });
 ```
 
-For every guardrail, test at least one rejection and one allowed path. Also test relevant actor types, rollback behavior for batch operations, emitted outbox events, and progress updates where applicable.
+Do not give the test actor empty scopes unless testing authorization denial: scope checks run before action handlers and hooks. Test rejection, allowed behavior, persisted state, batch rollback, events, progress, cancellation, and actor/tenant boundaries as applicable.
 
-## Running and inspecting
+## Run and inspect
 
-Use scripts already declared by the project. A scaffolded application normally supports:
+Use scripts already declared by the project. A scaffold normally supports:
 
 ```bash
 npm test
@@ -164,57 +202,44 @@ npm run build
 npm run dev
 ```
 
-The local development host exposes loopback-only endpoints such as:
+The local host exposes loopback-only development endpoints such as:
 
 - `http://127.0.0.1:8080/health`
 - `http://127.0.0.1:8080/__inspector`
 - `http://127.0.0.1:8080/__inspector/manifest`
 
-Do not represent the local inspector as a production authorization boundary. Production CLI discovery and MCP access are provided through a registered Embody gateway.
+The inspector is not a production authentication boundary and must not be exposed publicly.
 
-For a deployed gateway, set `EMBODY_GATEWAY_URL` and `EMBODY_TOKEN`, then inspect before mutating:
+## Gateway and MCP
+
+The production gateway is a deployment role, not necessarily a hosted dependency. Choose either:
+
+- **Managed Embody Gateway:** the paid hosted control plane operated by Embody.
+- **Self-hosted gateway:** a gateway the operator builds with `@embody/gateway`, using the repository application as a reference.
+
+Application business logic and agent integrations should move between compatible gateways by changing configuration and credentials, not code. Both models provide catalog, execution, registration, CLI, and MCP surfaces. See [gateway-cli-and-mcp.md](references/gateway-cli-and-mcp.md) before configuring either model.
+
+For clients, set `EMBODY_GATEWAY_URL` and `EMBODY_TOKEN`, inspect before mutating, and prefer JSON output:
 
 ```bash
 npx -y @embody/cli apps list
 npx -y @embody/cli apps inspect ops
 ```
 
-Prefer JSON input/output for automation. Never print, commit, or embed bearer tokens.
+Connect MCP clients to `/mcp` or the least-privilege app-scoped `/mcp/<appId>`. Prefer environment variables or a client secret facility over literal tokens. Never print, commit, or embed bearer tokens.
 
-## MCP integration
+## Verify before finishing
 
-Connect agents to the gateway's MCP endpoint, not the local inspector. A stdio bridge can be configured with:
+1. Run the relevant tests, typecheck, and build.
+2. Confirm every framework method exists in the installed version.
+3. Confirm denied operations fail for the intended reason—not an earlier scope or validation error.
+4. Confirm external effects are idempotent under retries.
+5. Confirm secrets and development-only endpoints are not exposed.
 
-```json
-{
-  "mcpServers": {
-    "embody": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@embody/cli",
-        "mcp",
-        "--url",
-        "https://gateway.example.com/mcp",
-        "--token",
-        "YOUR_TOKEN"
-      ]
-    }
-  }
-}
-```
+## Upstream references
 
-Prefer an environment variable or the client's secret facility over a literal token when supported. Use an app-scoped endpoint such as `/mcp/<appId>` when an agent should not discover every registered application.
+Use these when working in the Embody repository or when internet access is available:
 
-## References
-
-Consult the version-matched source and docs when an API is uncertain. Do not invent framework methods.
-
-- Documentation hub: https://github.com/embodyapp/embody/tree/main/docs
-- Quickstart: https://github.com/embodyapp/embody/blob/main/docs/getting-started/02-quickstart.md
-- Plugin guide: https://github.com/embodyapp/embody/blob/main/docs/guides/01-defining-plugins.md
-- Safety hooks: https://github.com/embodyapp/embody/blob/main/docs/guides/04-mechanical-safety-guardrails.md
-- Testing guide: https://github.com/embodyapp/embody/blob/main/docs/developer-tools/03-testing-guide.md
-- CLI reference: https://github.com/embodyapp/embody/blob/main/docs/developer-tools/01-cli-reference.md
-- MCP integration: https://github.com/embodyapp/embody/blob/main/docs/agent-integrations/01-model-context-protocol.md
+- Documentation: https://github.com/embodyapp/embody/tree/main/docs
+- Package READMEs: https://github.com/embodyapp/embody/tree/main/packages
 - Complete examples: https://github.com/embodyapp/embody/tree/main/examples
