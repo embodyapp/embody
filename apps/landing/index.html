@@ -36,13 +36,11 @@
       </nav>
 
       <div class="nav-actions">
-        <!-- <a href="https://github.com/embodyapp/embody" target="_blank" class="btn btn-secondary btn-sm" id="btn-github">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
-          </svg>
+        <a href="https://skills.sh/embodyapp/embody/embody" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm cta-track" data-cta="nav_skill">Install skill</a>
+        <a href="https://github.com/embodyapp/embody" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm cta-track" data-cta="nav_github" aria-label="Star Embody on GitHub">
+          <span aria-hidden="true">★</span>
           <span>Star</span>
-        </a> -->
-        <a href="#beta-signup" class="btn btn-primary btn-sm btn-nav-beta">Join Beta</a>
+        </a>
       </div>
     </div>
   </header>
@@ -69,21 +67,10 @@
         </p>
 
         <div class="hero-cta-group">
-          <div class="beta-signup-container">
-            <form class="beta-signup-form" id="hero-beta-form" data-form-id="1FAIpQLSf6z6c00hg3DbjIX1AVQ0bUBLNtGyoybqAWX06Q_f6tR5svJA" data-entry-id="1271661547">
-              <div class="input-action-group">
-                <input type="email" name="email" class="beta-email-input" placeholder="Enter your email to join the beta..." required autocomplete="email" aria-label="Email address for beta access" />
-                <button type="submit" class="btn btn-primary btn-cta">Join Beta</button>
-              </div>
-              <div class="form-feedback" aria-live="polite"></div>
-            </form>
-          </div>
-          <!-- <div class="hero-terminal-pill">
-            <code>pnpm create embdy@latest</code>
-            <button class="copy-btn" data-copy="pnpm create embdy@latest" title="Copy CLI Command">Copy</button>
-          </div> -->
+          <button type="button" class="btn btn-primary btn-lg copy-command-btn" data-copy="npx skills add embodyapp/embody --skill embody" title="Copy skill install command" aria-label="Copy skill install command">npx skills add embodyapp/embody --skill embody</button>
+          <a href="https://github.com/embodyapp/embody" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-lg cta-track" data-cta="hero_github"><span aria-hidden="true">★</span> Star on GitHub</a>
         </div>
-        <p class="hero-beta-subtext">✨ Private beta is open — get early access to the agentic business runtime & SDK.</p>
+        <p class="hero-install-subtext">One command gives your coding agent the Embody workflow, patterns, and safety guidance.</p>
 
         <div class="hero-metrics-row">
           <div class="metric-card">
@@ -876,30 +863,22 @@
   </section>
 
 
-  <!-- Quickstart & Final Beta Signup Banner -->
-  <section class="section" id="beta-signup">
+  <!-- Quickstart & Final CTA Banner -->
+  <section class="section" id="get-started">
     <div class="container">
       <div class="cta-banner gsap-reveal">
-        <span class="badge-tag badge-terracotta" style="margin-bottom: 1rem;">Early Beta Access</span>
-        <h2>Build software that outlives its author.</h2>
-        <p>Turn prompt vibes into production value. Join the private beta to deploy your first rot-proof, agentic app.</p>
+        <span class="badge-tag badge-terracotta" style="margin-bottom: 1rem;">Install the Embody skill</span>
+        <h2>Give your coding agent the Embody workflow.</h2>
+        <p>Install the skill in one command, then star the project to follow what ships next.</p>
 
-        <div class="beta-signup-container" style="margin: 0 auto 1.5rem auto;">
-          <form class="beta-signup-form" id="banner-beta-form" data-form-id="1FAIpQLSf6z6c00hg3DbjIX1AVQ0bUBLNtGyoybqAWX06Q_f6tR5svJA" data-entry-id="1271661547">
-            <div class="input-action-group">
-              <input type="email" name="email" class="beta-email-input" placeholder="Enter your email to request beta access..." required autocomplete="email" aria-label="Email address for beta access" />
-              <button type="submit" class="btn btn-primary btn-cta">Request Beta Access</button>
-            </div>
-            <div class="form-feedback" aria-live="polite"></div>
-          </form>
+        <div class="cta-command hero-terminal-pill">
+          <code>npx skills add embodyapp/embody --skill embody</code>
+          <button class="copy-btn" data-copy="npx skills add embodyapp/embody --skill embody" title="Copy skill install command" aria-label="Copy skill install command">Copy command</button>
         </div>
 
-        <div class="hero-cta-group" style="justify-content: center; margin-bottom: 0;">
-          <!-- <div class="hero-terminal-pill" style="background: #FFFDF9; border-color: var(--stroke-main);">
-            <code>pnpm create embdy@latest crm-app</code>
-            <button class="copy-btn" data-copy="pnpm create embdy@latest crm-app">Copy Command</button>
-          </div>
-          <a href="https://github.com/embodyapp/embody" target="_blank" class="btn btn-secondary btn-lg">View GitHub Repo</a> -->
+        <div class="hero-cta-group cta-actions">
+          <a href="https://skills.sh/embodyapp/embody/embody" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-lg cta-track" data-cta="banner_skill">View skill on skills.sh</a>
+          <a href="https://github.com/embodyapp/embody" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-lg cta-track" data-cta="banner_github">★ Star Embody on GitHub</a>
         </div>
       </div>
     </div>
@@ -927,7 +906,8 @@
           <a href="#extendability">The Solution</a>
           <a href="#agents">Agentic First</a>
           <a href="#playground">How it works</a>
-          <a href="#beta-signup" class="footer-nav-highlight">Join Beta</a>
+          <a href="https://skills.sh/embodyapp/embody/embody" target="_blank" rel="noopener noreferrer" class="footer-nav-highlight cta-track" data-cta="footer_skill">Install the skill</a>
+          <a href="https://github.com/embodyapp/embody" target="_blank" rel="noopener noreferrer" class="cta-track" data-cta="footer_github">Star on GitHub</a>
         </nav>
       </div>
 

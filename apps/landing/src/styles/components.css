@@ -271,7 +271,7 @@
 }
 
 /* ============================================================
-   BETA SIGNUP FORM COMPONENT
+   INSTALLATION CTA
    ============================================================ */
 .beta-signup-container {
   flex: 1 1 360px;
@@ -361,17 +361,30 @@
   box-shadow: var(--shadow-hard-sm);
 }
 
-.hero-beta-subtext {
+.hero-install-command {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.install-command-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.hero-install-subtext {
   font-size: 0.825rem;
   color: var(--text-muted);
   font-weight: 600;
   margin-bottom: 2rem;
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
 }
 
-/* Banner variant */
+/* Legacy form and banner variants */
 .cta-banner .beta-signup-container {
   max-width: 520px;
 }
@@ -397,6 +410,26 @@
 
 .hero-terminal-pill code {
   color: var(--color-terracotta);
+  overflow-wrap: anywhere;
+}
+
+.cta-command {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto 1.5rem;
+  background: #FFFDF9;
+  text-align: left;
+}
+
+.cta-actions {
+  justify-content: center;
+  margin-bottom: 0;
+}
+
+.copy-command-btn {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  white-space: normal;
 }
 
 .copy-btn {
@@ -2288,6 +2321,19 @@
   .hero-cta-group {
     flex-direction: column;
     align-items: stretch;
+  }
+  .hero-install-command {
+    align-items: stretch;
+  }
+  .hero-install-command .hero-terminal-pill,
+  .cta-command {
+    border-radius: var(--radius-lg);
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .hero-install-command .copy-btn,
+  .cta-command .copy-btn {
+    align-self: stretch;
   }
   .beta-signup-container {
     max-width: 100%;
