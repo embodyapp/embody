@@ -88,7 +88,7 @@ Agents across your organization collaborate on a single connected storage engine
 ### 3. Mechanical Safety & Policy Guardrails (The Policy Shield)
 You never rely on LLM system prompts to enforce safety rules. In Embody:
 - Every execution identifies the **Actor Type** (`agent`, `human`, or `system`).
-- Pre-commit hooks (`beforeCreate`, `beforeUpdate`, `beforeDelete`, `beforeAction`) can evaluate state transitions and throw `HookVetoError` before transactions commit.
+- Entity lifecycle hooks can evaluate persisted state transitions and throw `HookVetoError` before transactions commit; custom actions enforce their own business policy before mutation.
 - Mechanical policies enforce hard spending limits, mandatory pull request URLs, and required human supervisor approvals.
 
 ### 4. Durable Outbox & SSE Streaming

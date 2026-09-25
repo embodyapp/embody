@@ -116,9 +116,9 @@ From this single declaration, Embody automatically provisions:
    - `create`: Insert new records with schema validation.
    - `get`: Fetch by unique ID.
    - `list`: Filter, sort, and paginate by indexed attributes.
-   - `update`: Apply partial patches with optimistic concurrency locking (`expectedUpdatedAt`).
-   - `delete`: Soft or hard delete records.
-   - `updateMany`: Atomically update batches of records.
+   - `update`: Apply partial patches with an internal optimistic commit check.
+   - `delete`: Delete records.
+   - Define a custom action around internal `getMany` or `updateMany` accessors when callers need an atomic batch operation.
 3. **Agent MCP Tools**: Introspectable tools with parameter validation schemas.
 
 ---
@@ -180,21 +180,20 @@ Embody enforces **mechanical invariants** using pre-commit hooks:
 
 ```typescript
 hooks: [
-  // Before an action executes
-  define.beforeAction("payout", async (input, context) => {
-    if (context.principal.actorType === "agent" && input.amount > 500) {
-      throw new HookVetoError("Transactions over $500 require human supervisor authorization.");
-    }
-  }),
-
   // Before an entity update commits to the database
-  define.beforeUpdate("lead", async ({ current, patch }, context) => {
-    if (patch.status === "qualified" && current.data.score < 70) {
-      throw new HookVetoError("Leads with a score under 70 cannot be marked 'qualified'.");
+  define.beforeUpdate("lead", ({ current, patch }, context) => {
+    if (
+      context.principal.actorType === "agent" &&
+      patch.status === "qualified" &&
+      current.data.score < 70
+    ) {
+      throw new HookVetoError("Agents cannot qualify leads with a score under 70.");
     }
   }),
 ]
 ```
+
+Use scopes to restrict custom-action invocation and validate action-specific business policy in the handler before mutation. Entity hooks still protect mutations made by custom actions.
 
 ### Why Vetoable Hooks Are Different
 1. **Pre-Commit Execution**: Hooks run *inside* the storage transaction. If a hook throws a `HookVetoError`, the transaction rolls back completely.

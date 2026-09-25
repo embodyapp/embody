@@ -166,11 +166,9 @@ describe("Kanban App Safety & Actions", () => {
     });
 
     // 2. Switch context to an AI agent
-    const agentHarness = harness.asActor({
-      actorType: "agent",
-      actorId: "coding-agent-42",
+    const agentHarness = harness.asAgent("coding-agent-42", {
       roles: ["agent"],
-      scopes: ["kanban:write"],
+      scopes: ["kanban:*"],
     });
 
     // 3. Agent attempts to mark done without PR -> Must be vetoed

@@ -42,7 +42,9 @@ docs/
 │
 └── 🚢 Production & Operations
     ├── 01. Deployment                ──► Docker, PostgreSQL, health checks, clustering
-    └── 02. Troubleshooting & FAQ     ──► Common error codes, debugging vetoes, and FAQ
+    ├── 02. Troubleshooting & FAQ     ──► Common error codes, debugging vetoes, and FAQ
+    ├── 03–06. Security & Operations  ──► Security, runbooks, upgrades, and performance
+    └── 07. Self-hosting Gateway      ──► Operate @embody/gateway in production
 ```
 
 ---
@@ -59,7 +61,7 @@ Start here if you are new to Embody:
 ### 📖 [Core Guides](./guides/01-defining-plugins.md)
 Master the architecture of Embody:
 - **[Defining Plugins](./guides/01-defining-plugins.md)**: Plugin architecture, the 7-phase microkernel boot process, and services.
-- **[Entities & Storage](./guides/02-entities-and-storage.md)**: Schema declaration with Zod, automated CRUD, optimistic locking, and database engines.
+- **[Entities & Storage](./guides/02-entities-and-storage.md)**: Schema declaration with Zod, automated CRUD, transactional batches, and database engines.
 - **[Actions & Handlers](./guides/03-actions-and-handlers.md)**: Custom workflows, progress reporting, and cancellation.
 - **[Mechanical Safety Guardrails](./guides/04-mechanical-safety-guardrails.md)**: Pre-commit veto hooks, spend limits, and supervisor gates.
 - **[Events & Outbox](./guides/05-events-and-outbox.md)**: The Transactional Outbox pattern, reliable at-least-once delivery, and SSE streaming.
@@ -91,6 +93,7 @@ Ship with confidence:
 - **[Troubleshooting & FAQ](./production/02-troubleshooting-faq.md)**: Debugging common errors, HookVetoError, and answers to common questions.
 - **[Security](./production/03-security.md)** and **[operations runbook](./production/04-operations-runbook.md)**.
 - **[Compatibility/upgrades](./production/05-compatibility-and-upgrades.md)** and **[performance baseline](./production/06-performance-baseline.md)**.
+- **[Self-hosting the Gateway](./production/07-self-hosting-the-gateway.md)**: Identity, registration, endpoint policy, audit, availability, and rotation.
 - **[Release evidence checklist](./RELEASE-CHECKLIST.md)**.
 
 ---

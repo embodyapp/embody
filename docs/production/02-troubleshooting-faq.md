@@ -12,7 +12,7 @@ HookVetoError: Autonomous agents cannot complete cards without a linked PR URL.
   Code: HOOK_VETO
   Target: ops.tasks.card.update
 ```
-- **Cause**: A mechanical safety hook (`beforeCreate`, `beforeUpdate`, `beforeAction`, etc.) detected a policy violation.
+- **Cause**: An entity lifecycle hook or custom-action policy check detected a policy violation.
 - **Resolution**: This is an intended behavior. Inspect the error message. If you are testing as an agent, provide the required field (e.g. `prUrl`) or request approval. If you are an administrator testing in the terminal, ensure you are authenticated with a `human` actor type.
 
 ---
@@ -30,8 +30,8 @@ ValidationError: Invalid action input: path 'recipients[2]' must be a valid emai
 ```text
 ConflictError: The record has been modified by another actor since it was last read.
 ```
-- **Cause**: Optimistic concurrency control rejected the update because `expectedUpdatedAt` does not match the current database timestamp. Another agent modified the record in the meantime.
-- **Resolution**: Re-fetch the latest record state using `get`, re-apply your changes, and call `update` again.
+- **Cause**: The entity engine's internal optimistic commit check found that another operation changed the record during the transaction.
+- **Resolution**: Re-fetch the latest record state using `get`, reconsider and re-apply the intended change, and call `update` again. The public accessor does not accept an `expectedUpdatedAt` argument.
 
 ---
 
@@ -58,8 +58,11 @@ ConflictError: The record has been modified by another actor since it was last r
 
 ## ❓ Frequently Asked Questions (FAQ)
 
-### Can I run Embody without the central Gateway?
-**Yes.** The Embody Gateway is an optional control plane for multi-application architectures. A standalone Embody application (`defineApp`) runs its own HTTP and MCP endpoints directly on port 8080 with zero extra infrastructure.
+### Can I run Embody without a gateway?
+
+For local development, yes: the application host provides a loopback inspector without additional infrastructure. The inspector is not a production MCP or authentication boundary.
+
+For production CLI and MCP access, use either the paid managed Embody Gateway or operate your own compatible control plane with `@embody/gateway`. See the [gateway guide](../guides/07-gateway-and-control-plane.md) and [self-hosting guide](./07-self-hosting-the-gateway.md).
 
 ### How does Embody handle database migrations when schemas change?
 In development, Embody synchronizes tables and indexes automatically. In production with PostgreSQL, entity records are stored in accelerated JSONB columns alongside structured indexes. Adding optional fields or defaults does not require blocking table locks.

@@ -1,102 +1,120 @@
 # Testing Agent Applications with `@embody/testing`
 
-> Learn how to write deterministic unit and end-to-end tests for AI agent applications using the `@embody/testing` test harness.
+> Exercise the production kernel, transactions, principals, outbox, and workflows without live infrastructure.
 
 ---
 
-## 🧪 Why Testing Agent Software is Different
+## Setup
 
-Testing software built for autonomous AI agents requires more than standard HTTP assertion tests:
-1. **Actor Persona Simulation**: You must verify that an action succeeds for a `human` supervisor but is vetoed for an `agent`.
-2. **Deterministic Veto Verification**: You must test that safety hooks throw `HookVetoError` when invariants are violated.
-3. **Outbox & Event Assertions**: You must verify that domain events are written to the outbox atomically.
-4. **SSE Progress Verification**: You must test that long-running actions emit correct progress percentages.
-
-The `@embody/testing` package provides an in-memory, isolated test harness designed specifically for these workflows.
-
----
-
-## 🚀 Setting Up the Test Harness
-
-Install `@embody/testing` and `vitest` in your project:
+Install the harness and test runner:
 
 ```bash
 pnpm add -D @embody/testing vitest
 ```
 
-### Basic Harness Initialization
-
-The `createTestHarness` factory starts an isolated, in-memory SQLite storage engine and boots your plugins through the complete 7-phase microkernel lifecycle:
+Pass a literal plugin tuple to retain typed client inference, and always close the harness:
 
 ```typescript
-import { describe, expect, it, afterEach } from "vitest";
 import { createTestHarness } from "@embody/testing";
-import { tasksPlugin } from "./src/plugins/tasks.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { tasksPlugin } from "../src/tasks.js";
 
-describe("Tasks Safety Tests", () => {
-  let harness: Awaited<ReturnType<typeof createTestHarness>>;
+let harness: Awaited<ReturnType<typeof createTestHarness>> | undefined;
 
-  afterEach(async () => {
-    // Closes DB connections and cleans up temporary test directories
-    await harness?.close();
-  });
+afterEach(async () => {
+  await harness?.close();
+  harness = undefined;
+});
 
-  it("boots cleanly with in-memory storage", async () => {
-    harness = await createTestHarness({
-      plugins: [tasksPlugin],
-    });
-
-    expect(harness.appManifest.entities).toHaveProperty("task");
-  });
+it("boots the production execution path", async () => {
+  harness = await createTestHarness({ plugins: [tasksPlugin] as const });
+  expect(harness.kernel.manifest.entities).toBeDefined();
 });
 ```
 
+The harness owns an isolated temporary SQLite database and boots the same kernel execution path used by a host.
+
 ---
 
-## 🎭 Simulating Actors (`asActor`)
+## Typed and dynamic invocation
 
-The test harness allows you to switch execution contexts between different actors effortlessly:
+Use the generated typed client for normal tests:
 
 ```typescript
-it("prevents agents from completing tasks without a PR URL", async () => {
-  const harness = await createTestHarness({
-    plugins: [tasksPlugin],
-    actor: { actorType: "human", actorId: "alice", roles: ["admin"], scopes: ["*"] },
-  });
+const task = await harness.client.tasks.task.create({
+  data: { title: "Implement SSO", status: "todo" },
+});
+
+await harness.client.tasks.completeMany({ taskIds: [task.id] });
+```
+
+Use `call()` when a target is dynamic:
+
+```typescript
+await harness.call("tasks.task.update", {
+  id: task.id,
+  data: { status: "in_progress" },
+});
+```
+
+Harness targets omit the app ID because the harness boots plugins directly. Generated entity action inputs use `{ data }`, while entity accessors inside handlers accept data directly.
+
+---
+
+## Simulating principals
+
+Use immutable request views:
+
+```typescript
+const agent = harness.asAgent("coding-agent");
+const human = harness.asHuman("alice", {
+  roles: ["admin"],
+  scopes: ["tasks:*"],
+});
+
+const system = harness.as({
+  orgId: "test",
+  actorId: "outbox-worker",
+  actorType: "system",
+  roles: [],
+  scopes: ["tasks:*"],
+});
+```
+
+`asAgent` and `asHuman` inherit omitted tenant, role, scope, and metadata values from the current view. Scope checks occur before handlers and hooks. Do not use an empty scope list when testing a hook unless authorization denial is the intended result.
+
+---
+
+## Testing a mechanical guardrail
+
+```typescript
+it("requires a PR before an agent completes a task", async () => {
+  const harness = await createTestHarness({ plugins: [tasksPlugin] as const });
 
   try {
-    // 1. Human creates a task
-    const task = await harness.call("ops.tasks.task.create", {
-      data: { title: "Refactor auth middleware", status: "todo" },
+    const task = await harness.client.tasks.task.create({
+      data: { title: "Refactor authentication", status: "todo" },
     });
+    const agent = harness.asAgent("coding-agent");
 
-    expect(task.data.status).toBe("todo");
-
-    // 2. Switch context to an autonomous agent
-    const agentHarness = harness.asActor({
-      actorType: "agent",
-      actorId: "devin-01",
-      roles: ["contributor"],
-      scopes: ["tasks:write"],
-    });
-
-    // 3. Agent attempts to mark done without PR -> Must be VETOED
-    await expect(
-      agentHarness.call("ops.tasks.task.update", {
+    const veto = await agent.veto(() =>
+      agent.client.tasks.task.update({
         id: task.id,
         data: { status: "done" },
-      })
-    ).rejects.toThrow("Agents cannot mark a task 'done' without a linked PR URL");
+      }),
+    );
+    expect(veto.message).toContain("PR");
 
-    // 4. Agent provides a valid PR URL -> Must SUCCEED
-    const completed = await agentHarness.call("ops.tasks.task.update", {
+    const unchanged = await harness.client.tasks.task.get({ id: task.id });
+    expect(unchanged.data.status).toBe("todo");
+
+    const completed = await agent.client.tasks.task.update({
       id: task.id,
       data: {
         status: "done",
-        prUrl: "https://github.com/my-org/repo/pull/123",
+        prUrl: "https://github.com/example/repository/pull/123",
       },
     });
-
     expect(completed.data.status).toBe("done");
   } finally {
     await harness.close();
@@ -104,110 +122,100 @@ it("prevents agents from completing tasks without a PR URL", async () => {
 });
 ```
 
+Use `veto()` when a `HookVetoError` is expected. It rejects non-veto failures, preventing a permission or validation error from creating a false-positive guardrail test.
+
 ---
 
-## 🎯 Typed Proxy Client (`harness.client`)
+## Service overrides
 
-Instead of string-based `harness.call(...)`, you can use the typed proxy client for full TypeScript autocomplete:
+Only declared services can be overridden:
 
 ```typescript
-// Auto-completed and type-checked against your plugin's Zod schema
-const card = await harness.client.kanban.card.create({
-  data: {
-    title: "Implement SSO login",
-    priority: "urgent",
+const harness = await createTestHarness({
+  plugins: [notificationsPlugin] as const,
+  services: {
+    "notifications.mailer": fakeMailer,
   },
 });
-
-// Calling a custom action
-const result = await harness.client.kanban.bulkMove({
-  cardIds: [card.id],
-  newStatus: "in_progress",
-});
 ```
+
+Use deterministic fakes rather than live network services.
 
 ---
 
-## 📦 Asserting Transactional Outbox Events
+## Events and outbox processing
 
-Verify that domain events are written to the outbox and processed reliably:
+Inspect persisted events and run eligible handlers explicitly:
 
 ```typescript
-it("publishes review event when card moves to in_review", async () => {
-  const harness = await createTestHarness({ plugins: [kanbanPlugin] });
+const events = await harness.events("tasks.task.completed");
+expect(events).toHaveLength(1);
 
-  try {
-    const card = await harness.client.kanban.card.create({
-      data: { title: "New Feature", status: "in_progress" },
-    });
-
-    // Update status to in_review
-    await harness.client.kanban.card.update({
-      id: card.id,
-      data: { status: "in_review" },
-    });
-
-    // Inspect pending outbox events
-    const outboxEvents = await harness.getOutboxEvents();
-    expect(outboxEvents).toHaveLength(1);
-    expect(outboxEvents[0]?.eventName).toBe("kanban.card.ready_for_review");
-    expect(outboxEvents[0]?.payload).toMatchObject({
-      cardId: card.id,
-      title: "New Feature",
-    });
-
-    // Manually trigger the outbox worker to process events
-    const processedCount = await harness.processOutbox();
-    expect(processedCount).toBe(1);
-  } finally {
-    await harness.close();
-  }
-});
+await harness.tickOutbox();
+expect(fakeNotifier.calls).toHaveLength(1);
 ```
+
+Event delivery is at least once. Verify that subscribers pass stable idempotency keys to external providers.
 
 ---
 
-## 📊 Testing SSE Live Progress
+## Durable workflows
 
-The test harness automatically captures all progress events emitted via `context.progress(...)`:
+Start through the generated action, tick eligible steps, and inspect the durable snapshot:
 
 ```typescript
-it("emits streaming progress during batch email sending", async () => {
-  const harness = await createTestHarness({ plugins: [emailPlugin] });
+const started = (await harness.call("orders.fulfil.start", {
+  input: { orderId: "order-123" },
+  idempotencyKey: "fulfil:order-123",
+})) as { id: string };
 
-  try {
-    await harness.call("email.sendBatch", {
-      campaignId: "newsletter-01",
-      recipients: ["user1@test.com", "user2@test.com"],
-      subject: "Welcome",
-      template: "Hello World",
-    });
-
-    // Inspect captured progress updates
-    expect(harness.capturedProgress.length).toBeGreaterThanOrEqual(1);
-    const lastProgress = harness.capturedProgress.at(-1);
-    expect(lastProgress?.update.percent).toBe(100);
-  } finally {
-    await harness.close();
-  }
-});
+await harness.tickWorkflows(); // first eligible step
+await harness.tickWorkflows(); // newly unblocked dependent step
+const snapshot = await harness.workflow(started.id);
+expect(snapshot?.status).toBe("completed");
 ```
+
+Each tick runs currently eligible steps, so dependent steps generally require later ticks. Inject `now` into `createTestHarness` and advance a fake clock for retry backoff and delayed-step tests. Do not sleep in tests.
 
 ---
 
-## 🛡️ Inspecting Audit Trails
+## Progress, cancellation, and audit
 
-The microkernel records every action invocation in an immutable audit log accessible via `harness.auditEvents`:
+Calls accept an optional abort signal:
 
 ```typescript
-expect(harness.auditEvents[0]).toMatchObject({
-  target: "ops.tasks.task.create",
-  principal: {
-    actorId: "alice",
-    actorType: "human",
-  },
-  status: "success",
+const controller = new AbortController();
+const operation = harness.call("tasks.longOperation", input, {
+  signal: controller.signal,
 });
+controller.abort();
+await expect(operation).rejects.toThrow();
 ```
 
-Next: **[Tutorial: Building an Agent Kanban Board →](../tutorials/01-kanban-board.md)**
+Read observations with:
+
+```typescript
+const updates = harness.progress(); // optionally filter by requestId
+const audit = harness.audit();
+```
+
+Assert progress ordering and terminal audit outcomes where they are part of the contract.
+
+---
+
+## Test checklist
+
+For each feature, cover the applicable cases:
+
+- allowed and denied actors
+- expected error type or message
+- unchanged state after rejection
+- tenant separation
+- all-or-nothing batch rollback
+- event persistence and idempotent delivery
+- progress and cancellation
+- workflow retry, delay, cancellation, and compensation
+- audit outcome
+- harness cleanup
+
+Next: **[CLI Reference →](./01-cli-reference.md)**

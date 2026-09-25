@@ -1,78 +1,126 @@
 # Gateway & Control Plane
 
-> Learn how the Embody Gateway aggregates multiple applications, routes MCP tool requests, and provides centralized reverse proxying.
+> Use a managed or self-hosted Embody Gateway to expose production applications to operators and agents.
 
 ---
 
-## 🌐 The Role of the Gateway
+## Role of the gateway
 
-In a modern AI workforce, different teams build specialized applications:
-- The **Support App** manages customer tickets and SLA escalations.
-- The **Engineering Ops App** manages repositories, deployments, and PRs.
-- The **Billing App** manages invoices and subscriptions.
+The gateway is the production control plane between clients and independently deployed Embody application hosts:
 
-Connecting an AI agent to multiple distinct backend servers creates configuration friction and security risks.
-
-The **Embody Gateway** solves this by acting as a unified control plane and reverse proxy:
-
-```
-                      ┌──────────────────────────────────────┐
-                      │        Autonomous AI Agents          │
-                      │  (Claude Desktop, Cursor, LangChain) │
-                      └──────────────────┬───────────────────┘
-                                         │ Single MCP Connection
-                                         ▼
-                      ┌──────────────────────────────────────┐
-                      │            Embody Gateway            │
-                      │  • /mcp (Global Aggregated Tools)    │
-                      │  • /mcp/:app (Scoped Tools)          │
-                      │  • Central Auth & Token Validation   │
-                      └───────┬──────────────────────┬───────┘
-                              │                      │
-                   Forwarded  │                      │  Forwarded
-                   Requests   │                      │  Requests
-                              ▼                      ▼
-               ┌───────────────────────┐    ┌───────────────────────┐
-               │    Engineering App    │    │      Support App      │
-               │  (http://eng:8080)    │    │  (http://sup:8081)    │
-               └───────────────────────┘    └───────────────────────┘
+```text
+CLI and MCP clients
+        |
+        v
+Managed or self-hosted Embody Gateway
+  - authentication and authorization
+  - application registry and health
+  - catalog aggregation
+  - execution and progress relay
+  - audit and rate limiting
+        |
+        v
+One or more Embody application hosts
 ```
 
----
+It exposes:
 
-## 🎯 Key Gateway Capabilities
+- `/api/catalog` for discovery
+- `/api/execute` and `/api/execute/stream` for dispatch
+- `/mcp` for an authorized aggregate tool catalog
+- `/mcp/:appId` for an app-scoped MCP catalog
+- registration and heartbeat routes for application hosts
 
-### 1. Global Aggregated MCP (`/mcp`)
-Agents connect to a single endpoint (`https://gateway.company.com/mcp`). The Gateway dynamically aggregates all tools registered across all active applications into a single introspectable MCP catalog.
-
-### 2. App-Scoped MCP (`/mcp/:app`)
-When an agent is dedicated to a specific domain (for example, an agent that only works on customer support), you can point it to `/mcp/support`. The Gateway filters the tool manifest to only expose tools belonging to the `support` application. This prevents **tool bloating** and reduces context window consumption for the LLM.
-
-### 3. Centralized Reverse Proxy
-The Gateway proxies incoming HTTP and SSE calls directly to the respective application host without exposing individual microservice hosts to the public internet:
-- `GET /api/catalog`: Returns the compiled tool manifests of all registered applications.
-- `POST /api/execute`: Dispatches an action or entity mutation to the responsible downstream host.
+The local host inspector is a loopback-only development surface. It is not a production MCP endpoint or authentication boundary.
 
 ---
 
-## 🤝 The Dynamic Registration Protocol
+## Choose an operating model
 
-Downstream application hosts register themselves with the Gateway using a shared secret (`GATEWAY_REGISTRATION_SECRET`):
+### Managed Embody Gateway
 
-1. **Boot**: App host boots and reads its configuration.
-2. **Handshake**: App sends a registration request to `GATEWAY_URL/api/gateway/register`, passing its `appId`, version, public URL, and compiled manifest.
-3. **Heartbeat**: The app periodically sends heartbeat pings to verify liveness.
-4. **Tool Discovery**: The Gateway updates its internal routing table and notifies connected agents of tool catalog changes.
+Use the paid hosted service when Embody should operate the control plane. Provisioning supplies the gateway URL, application registration credentials, and client credentials. Application plugins remain independent of the managed service.
+
+### Self-hosted gateway
+
+Use `@embody/gateway` when an organization needs to operate its own control plane. The package exports `createGateway()` and explicit registry, authentication, signing, audit, network-policy, and rate-limit collaborators.
+
+The repository's `apps/gateway` process demonstrates composition for the distributed example environment. It contains example-specific identities and app credentials and is not a generic production configuration. See [Self-hosting the Gateway](../production/07-self-hosting-the-gateway.md).
+
+Both models implement the same registration, catalog, execution, and MCP contracts. Moving an application between compatible gateways should require configuration and credential changes, not business-logic changes.
 
 ---
 
-## 🚀 Deployment Topologies
+## Registration protocol
 
-Depending on your organization's scale, Embody supports two operational topologies:
+A production application host:
 
-| Topology | Best For | Description |
-| :--- | :--- | :--- |
-| **Standalone Mode** | Local dev, single-service apps | App runs as its own HTTP and MCP server on port 8080. No gateway needed. |
-| **Federated Gateway** | Production, multi-app teams | Central Gateway routes to multiple independent app hosts running in Docker/Kubernetes. |
+1. Boots its kernel and compiles its manifest.
+2. Registers its `appId`, version, reachable endpoint, health URL, and manifest.
+3. Authenticates registration with its app-specific registration secret.
+4. Sends heartbeats while healthy.
+5. Accepts execution only with a gateway-signed downstream token.
 
-Next: **[Model Context Protocol (MCP) →](../agent-integrations/01-model-context-protocol.md)**
+The host uses:
+
+```text
+GATEWAY_URL
+PUBLIC_URL
+GATEWAY_REGISTRATION_SECRET
+GATEWAY_JWT_ISSUER
+GATEWAY_JWT_SECRET
+```
+
+`GATEWAY_URL` can identify either operating model. `PUBLIC_URL` must be reachable by the gateway. Store all credentials in a secret manager and rotate them using an overlap or coordinated rollout procedure.
+
+---
+
+## Client access
+
+CLI and MCP clients use separate client credentials:
+
+```text
+EMBODY_GATEWAY_URL
+EMBODY_TOKEN
+```
+
+Inspect the authorized catalog before mutation:
+
+```bash
+npx -y @embody/cli apps list
+npx -y @embody/cli apps inspect ops
+```
+
+Use `/mcp/:appId` for focused agents to reduce tool context and accidental cross-domain access. The catalog is also filtered by the principal's scopes; endpoint scoping is not a substitute for authorization.
+
+---
+
+## Network and security requirements
+
+A production gateway must:
+
+- terminate or sit behind TLS
+- authenticate every client
+- map identities to tenant-aware principals and least-privilege scopes
+- use app-specific registration credentials
+- sign short-lived downstream host tokens
+- restrict application endpoints to approved origins
+- prevent server-side request forgery through registration data
+- keep durable audit records
+- enforce appropriate rate limits
+- monitor registration health and execution failures
+- support credential rotation and incident response
+
+Private application endpoints may be appropriate within a controlled network. Self-hosted operators must opt into them intentionally and should prefer explicit origin allowlists.
+
+---
+
+## Deployment topologies
+
+| Topology | Purpose | Access surface |
+| --- | --- | --- |
+| Local development | Build and inspect one app | Loopback `/__inspector` only |
+| Managed gateway | Hosted production control plane | Managed URL, CLI, and MCP |
+| Self-hosted gateway | Operator-controlled production plane | Operator URL, CLI, and MCP |
+
+Next: **[Model Context Protocol →](../agent-integrations/01-model-context-protocol.md)**
