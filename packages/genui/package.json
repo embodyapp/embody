@@ -1,0 +1,46 @@
+{
+  "name": "@embody/genui",
+  "version": "0.0.0",
+  "description": "Generative UI presentation contracts for agent-ready Embody applications.",
+  "license": "Elastic-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/embodyapp/embody.git",
+    "directory": "packages/genui"
+  },
+  "homepage": "https://github.com/embodyapp/embody#readme",
+  "bugs": "https://github.com/embodyapp/embody/issues",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "NOTICE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist coverage tsconfig.tsbuildinfo",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@embody/core": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1"
+  },
+  "engines": {
+    "node": "^22.0.0 || ^24.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

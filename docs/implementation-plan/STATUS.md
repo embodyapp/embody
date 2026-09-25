@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-09-06 by `pi`
+Last updated: 2026-09-19 by `pi/01a0b7d0`
 
 This file is intentionally simple so small agents can coordinate without a project-management service. Update one row when claiming and completing work. Preserve item IDs because plans and commits may reference them.
 
@@ -13,6 +13,7 @@ This file is intentionally simple so small agents can coordinate without a proje
 | D-03 | Approve cross-app event delivery protocol | DONE | pi | ADR 0004: direct delivery baseline through a transport seam; durable gateway relay is optional P7-04 |
 | D-04 | Set supported Node/PostgreSQL/SQLite versions | DONE | pi | ADR 0002: Node 22/24, PostgreSQL 16+, SQLite 3.45+ JSON1 |
 | D-05 | Select first-party licensing model | DONE | pi | Unmodified Elastic License 2.0 plus paid commercial hosting terms and a separate trademark policy; source-available, not OSI open source |
+| D-06 | Approve GenUI ownership and renderer boundaries | DONE | pi | ADR 0005: apps own trusted views; `@embody/genui` ships web/text/browser renderers; native Pi support is an optional adapter; unsupported clients retain fallback output |
 
 ## Work items
 
@@ -59,6 +60,13 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P13-03 | Repository, artifacts, and entitlements | IN_PROGRESS | pi | P13-02 | Root and package ELv2 files plus `Elastic-2.0` metadata installed; generated apps remain user-owned and `UNLICENSED`. Full artifact inspection and entitlements remain pending. |
 | P13-04 | Third-party and distribution compliance | NOT_STARTED | — | P13-03 | Pre-license CI metadata/claims gate added; artifact SBOM, attribution audit, compatibility policy, and legal review remain required. |
 | P13-05 | Commercial launch readiness | NOT_STARTED | — | P13-04 | Hosting and official support reserved; independent customer-specific consulting allowed. ICP, pricing, operations, contracts, and rehearsal remain pending. |
+| P14-01 | GenUI protocol, compatibility, and public contracts | IN_REVIEW | pi/01a0b7d0 | P5-01,P8-01,D-06 | Branch `feat/genui-p14-01`; core neutral manifest/API report, `@embody/genui` typed author API, schema-identity rule, deterministic integrity/URI, fixtures and SDK pin implemented. Core 70 and GenUI 23 tests pass; root typecheck/build, affected lint/format, license/artifact/changeset checks pass. Root test is environment-blocked by unbuilt `better-sqlite3` on unsupported Node 26/Android; root lint also has pre-existing landing errors. |
+| P14-02 | `@embody/genui` document model and web/text renderers | NOT_STARTED | — | P14-01 | Standard accessible component model, trusted custom bundles, official bridge runtime, deterministic Markdown/plain text, limits, XSS/CSP/browser tests. |
+| P14-03 | App host, manifest, resource, and inspector integration | NOT_STARTED | — | P9-02,P14-01,P14-02 | Authoritative enriched runtime manifest, immutable generation-bound resources, validated props/projectors, authenticated resource serving, development previews. |
+| P14-04 | MCP Apps catalog, resources, results, and interactions | NOT_STARTED | — | P8-01,P14-03 | Capability negotiation, `ui://` reads, tool metadata/results, same-principal allowlisted app calls, official client/reference-host conformance. |
+| P14-05 | Standalone browser fallback and developer experience | NOT_STARTED | — | P9-02,P14-03 | Shared renderer, loopback short-lived capability sessions, secure headers/lifecycle, scaffolder and inspector workflow. |
+| P14-06 | `@embody/genui-pi` native adapter | NOT_STARTED | — | P14-02,P14-05 | Pi extension/TUI standard renderer, mode-safe text/browser fallback, keyboard/accessibility and lifecycle/package tests. |
+| P14-07 | GenUI reference E2E, hardening, docs, and release gate | NOT_STARTED | — | P10-03,P14-04,P14-05,P14-06 | Kanban parity journey across plain MCP/MCP Apps/browser/Pi/CLI; fuzz, soak, performance, security, artifacts, compatibility and dated vendor smoke evidence. |
 
 ## Current verification snapshot
 
@@ -102,3 +110,6 @@ Append concise entries; do not rewrite history.
 - 2026-09-06 `pi`: completed P10-03: deployable gateway, built-artifact Compose topology, conventional host event workers, durable test mail adapter, generated test credentials/ports, and a nine-step CLI/MCP/HTTP journey with pre-commit publisher termination, post-fan-out publisher restart, post-side-effect receiver crash, TTL recovery, and isolation checks. Fixed gateway forwarding to include the required protocol version. A production-mode multi-process PostgreSQL smoke and affected tests/typechecks/builds passed.
 - 2026-09-06 `pi`: implemented the Phase 11 workflow contract, v4 SQLite/PostgreSQL persistence, worker/control surfaces, deterministic harness and inspector support. Added Phase 12 production hardening, SBOM/tarball automation, compatibility/security/runbook documentation, and evidence checklist; retained IN_PROGRESS states for gates requiring crash/fuzz/soak/restore/performance/release evidence.
 - 2026-09-06 `pi`: began non-binding Phase 13 preparation. Recorded Nimrod Feldman as personal rightsholder and reserved managed Embody hosting and official support while allowing customer-specific consulting. Removed false MIT/open-source claims, marked first-party and generated packages `UNLICENSED` pending counsel-approved terms, added generated-app ownership coverage, and added a CI readiness gate plus legal/commercial evidence checklist.
+- 2026-09-19 `pi`: approved ADR 0005 and planned Phase 14 GenUI. The app owns trusted static/declarative views; action data remains authoritative; `@embody/genui` includes web, text, and standalone-browser renderers; Pi is an optional native adapter; MCP Apps and all fallback/security/release proofs are explicit P14 gates. No implementation was claimed.
+- 2026-09-19 `pi/01a0b7d0`: claimed P14-01 on branch `feat/genui-p14-01`.
+- 2026-09-19 `pi/01a0b7d0`: implemented P14-01 contracts and moved it to review. Added optional core view/action presentation manifests with strict cross-reference/resource validation, `@embody/genui` typed definitions/bindings/integrity/manifest enrichment, direct-output schema identity checks, accepted/rejected and compile-time tests, package artifacts/docs/changeset, and an ext-apps 1.7.5/MCP SDK 1.30 compatibility pin. Core 70 tests and GenUI 23 tests pass; root typecheck/build and affected quality gates pass. Full root tests are blocked only because native SQLite was installed with scripts disabled after Node 26/Android could not build it; root lint reports unrelated existing landing issues.

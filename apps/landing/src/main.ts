@@ -294,13 +294,15 @@ function setupAgentSandbox() {
 
 // Setup Copy Buttons
 function setupCopyButtons() {
-  document.querySelectorAll('.copy-btn').forEach(btn => {
+  document.querySelectorAll('.copy-btn, .copy-command-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const textToCopy = btn.getAttribute('data-copy') || '';
       if (textToCopy) {
         if (posthogEnabled) {
           posthog.capture('code_sample_copied', {
-            copy_target: btn.getAttribute('id') || 'documentation_snippet',
+            copy_target: textToCopy.startsWith('npx skills add embodyapp/embody')
+              ? 'skill_install'
+              : btn.getAttribute('id') || 'documentation_snippet',
           });
         }
         void navigator.clipboard.writeText(textToCopy);
@@ -771,6 +773,19 @@ function setupBetaSignupForms() {
   });
 }
 
+function setupCtaTracking() {
+  document.querySelectorAll<HTMLElement>('.cta-track').forEach(link => {
+    link.addEventListener('click', () => {
+      if (posthogEnabled) {
+        posthog.capture('primary_cta_clicked', {
+          placement: link.dataset.cta ?? 'unknown',
+          destination: link.getAttribute('href'),
+        });
+      }
+    });
+  });
+}
+
 // Document Ready
 document.addEventListener('DOMContentLoaded', () => {
   renderArchitectureDiagram();
@@ -796,4 +811,5 @@ document.addEventListener('DOMContentLoaded', () => {
   initHeroCanvasAnimations();
   initHeroEntrance();
   setupBetaSignupForms();
+  setupCtaTracking();
 });

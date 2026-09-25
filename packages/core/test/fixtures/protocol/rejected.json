@@ -19,5 +19,59 @@
       "eventSubscriptions": []
     }
   },
-  "invalidProgress": { "percent": 101, "message": "bad" }
+  "invalidProgress": { "percent": 101, "message": "bad" },
+  "invalidViewUriRegistration": {
+    "protocolVersion": 1,
+    "appId": "kanban",
+    "version": "1.0.0",
+    "endpoint": "https://kanban.test",
+    "healthCheckUrl": "https://kanban.test/health",
+    "manifest": {
+      "protocolVersion": 1,
+      "plugins": [],
+      "entities": {},
+      "actions": {},
+      "views": {
+        "board": {
+          "protocolVersion": 1,
+          "id": "board",
+          "kind": "standard",
+          "propsSchema": {},
+          "resourceUri": "https://evil.test/view.html",
+          "version": "1.0.0",
+          "callableTargets": [],
+          "fallback": "markdown",
+          "integrity": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "eventSubscriptions": []
+    }
+  },
+  "invalidViewIntegrityRegistration": {
+    "protocolVersion": 1,
+    "appId": "kanban",
+    "version": "1.0.0",
+    "endpoint": "https://kanban.test",
+    "healthCheckUrl": "https://kanban.test/health",
+    "manifest": {
+      "protocolVersion": 1,
+      "plugins": [],
+      "entities": {},
+      "actions": {},
+      "views": {
+        "board": {
+          "protocolVersion": 1,
+          "id": "board",
+          "kind": "standard",
+          "propsSchema": {},
+          "resourceUri": "ui://kanban/board@1.0.0",
+          "version": "1.0.0",
+          "callableTargets": [],
+          "fallback": "markdown",
+          "integrity": "sha256:not-a-digest"
+        }
+      },
+      "eventSubscriptions": []
+    }
+  }
 }

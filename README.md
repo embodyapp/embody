@@ -66,6 +66,7 @@ Embody is structured as a modular TypeScript monorepo with clean architectural b
 | [`@embody/storage`](./packages/storage) | Transactional PostgreSQL and SQLite storage adapters with JSONB query acceleration and row-level security. |
 | [`@embody/auth`](./packages/auth) | Pluggable authentication providers, API keys, Bearer token verifiers, and principal context scoping. |
 | [`@embody/testing`](./packages/testing) | End-to-end testing harness with typed actor simulation (`agent`, `human`, `system`) and observation helpers. |
+| [`@embody/genui`](./packages/genui) | App-owned action-result presentation contracts and immutable view manifests; renderers are under active Phase 14 development. |
 | [`create-embody-app`](./packages/create-embody-app) | Instant zero-config application scaffolding CLI. |
 
 ---
