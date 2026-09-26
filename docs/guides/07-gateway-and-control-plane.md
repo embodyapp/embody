@@ -31,7 +31,7 @@ It exposes:
 - `/mcp/:appId` for an app-scoped MCP catalog
 - registration and heartbeat routes for application hosts
 
-The local host inspector is a loopback-only development surface. It is not a production MCP endpoint or authentication boundary.
+The local host inspector is a loopback-only development surface. It is not a production MCP endpoint or authentication boundary. For a disposable, multi-app **local Gateway demo** from a repository checkout, run `pnpm gateway:dev` (Node.js 22/24, pnpm, and Docker Compose required). This generates ignored test credentials, starts the reference Gateway, Kanban, Email, and PostgreSQL, and prints a CLI command once the apps register. Stop and remove its data with `pnpm gateway:dev:down`. See [local setup](../../apps/gateway/README.md). You do not need the Gateway to develop just one app with `pnpm dev`.
 
 ---
 

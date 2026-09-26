@@ -31,7 +31,7 @@ services:
       GATEWAY_JWT_ISSUER: ${GATEWAY_JWT_ISSUER:?set GATEWAY_JWT_ISSUER}
       GATEWAY_REGISTRY_TTL_MS: 3000
       E2E_SECOND_API_KEY: ${E2E_SECOND_API_KEY:?set E2E_SECOND_API_KEY}
-    ports: ["${GATEWAY_PORT:?set GATEWAY_PORT}:4000"]
+    ports: ["127.0.0.1:${GATEWAY_PORT:?set GATEWAY_PORT}:4000"]
     healthcheck:
       test:
         [
@@ -61,7 +61,7 @@ services:
       GATEWAY_REGISTRATION_SECRET: ${KANBAN_REGISTRATION_SECRET:?set KANBAN_REGISTRATION_SECRET}
       GATEWAY_JWT_ISSUER: ${GATEWAY_JWT_ISSUER:?set GATEWAY_JWT_ISSUER}
       GATEWAY_JWT_SECRET: ${GATEWAY_JWT_SECRET:?set GATEWAY_JWT_SECRET}
-    ports: ["${KANBAN_PORT:?set KANBAN_PORT}:8081"]
+    ports: ["127.0.0.1:${KANBAN_PORT:?set KANBAN_PORT}:8081"]
     depends_on:
       { postgres: { condition: service_healthy }, gateway: { condition: service_healthy } }
     healthcheck:
@@ -95,7 +95,7 @@ services:
       GATEWAY_JWT_ISSUER: ${GATEWAY_JWT_ISSUER:?set GATEWAY_JWT_ISSUER}
       GATEWAY_JWT_SECRET: ${GATEWAY_JWT_SECRET:?set GATEWAY_JWT_SECRET}
     restart: on-failure
-    ports: ["${EMAIL_PORT:?set EMAIL_PORT}:8082"]
+    ports: ["127.0.0.1:${EMAIL_PORT:?set EMAIL_PORT}:8082"]
     depends_on:
       { postgres: { condition: service_healthy }, gateway: { condition: service_healthy } }
     volumes:

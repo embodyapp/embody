@@ -96,6 +96,16 @@ npx skills update
 - **Node.js**: `>= 22.0.0`
 - **pnpm**: `>= 9.0.0` (or npm / yarn)
 
+**Developing one app?** Run `pnpm dev` in the app directory; no gateway is needed.
+**Want a local Gateway with CLI and MCP?** From a clone of this repository, install Docker with Compose and run:
+
+```bash
+corepack enable
+pnpm gateway:dev
+```
+
+The command builds and starts the example Gateway, Kanban, Email, and PostgreSQL stack, generates private test credentials on first run, and prints a CLI command once both apps register. No env-file editing or local dependency install is required. Run `pnpm gateway:dev:down` to stop it and remove its data. See [Local Gateway setup](./apps/gateway/README.md). This is an isolated reference stack, **not a production deployment**.
+
 ### 1. Scaffold a New App
 
 Generate a ready-to-run Embody application in seconds:

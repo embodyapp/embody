@@ -1,0 +1,6 @@
+# Local developer overlay for the distributed smoke topology.
+# Disable the intentional one-time mailer crash used by the e2e journey.
+services:
+  email:
+    environment:
+      MAILER_CRASH_AFTER_FIRST_WRITE: "false"
