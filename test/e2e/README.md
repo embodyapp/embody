@@ -20,6 +20,12 @@ ordered CLI/MCP batch progress; registry TTL disappearance and recovery; API-key
 and scope isolation; and rejection of a correctly signed token with the wrong app
 audience.
 
-`docker-compose.e2e.yml` can also be run manually by copying `e2e.env.example` to an
-ignored env file and filling every blank with generated test-only values. Never reuse
-these credentials outside an isolated test stack.
+For interactive local use, run `pnpm gateway:dev` from the repository root instead.
+It generates and reuses gitignored local test credentials, builds the Compose stack,
+waits for both apps to register, and prints a CLI example. `pnpm gateway:dev:logs`
+shows container logs; `pnpm gateway:dev:down` stops the stack and removes disposable
+data. See [the local Gateway instructions](../../apps/gateway/README.md).
+
+`docker-compose.e2e.yml` can still be run manually by copying `e2e.env.example` to an
+ignored env file and filling every blank with generated test-only values. Its published
+ports are loopback-only. Never reuse these credentials outside an isolated test stack.

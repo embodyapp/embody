@@ -27,6 +27,10 @@
   to { transform: rotate(360deg); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .vinyl-spinning { animation: none; }
+}
+
 /* ============================================================
    RENDER PERFORMANCE: CONTENT VISIBILITY FOR BELOW-THE-FOLD
    ============================================================ */

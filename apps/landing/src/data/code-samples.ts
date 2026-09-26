@@ -84,23 +84,23 @@ export default defineApp({
     language: 'bash',
     description: 'Generated terminal commands, typed validation, and formatted pipeline table outputs.',
     code: `# Create a new enterprise deal in the CRM
-$ embdy deal create \\
+$ embody deal create \\
     --title="Acme Corp Global Cloud Migration" \\
     --value=120000 \\
     --account="acc_acme_corp"
 ✔ Created DEAL-8402 in [lead] (id: del_7e930f1)
 
 # Assign account executive
-$ embdy deal assign DEAL-8402 --rep="usr_sarah"
+$ embody deal assign DEAL-8402 --rep="usr_sarah"
 ✔ Assigned DEAL-8402 to Sarah Chen (@sarah)
 
 # Advance stage to "proposal" (evaluates discount policy & guards)
-$ embdy deal advance DEAL-8402 --to="proposal"
+$ embody deal advance DEAL-8402 --to="proposal"
 ✔ State transitioned: qualified → proposal
 ✔ Discount guard passed (Discount 15% <= 20% max threshold)
 
 # View active sales pipeline stage
-$ embdy pipeline list --stage="proposal"
+$ embody pipeline list --stage="proposal"
 ┌───────────┬─────────────────────────────────┬──────────┬──────────┬───────────┐
 │ DEAL      │ TITLE                           │ VALUE    │ STAGE    │ OWNER     │
 ├───────────┼─────────────────────────────────┼──────────┼──────────┼───────────┤
@@ -160,7 +160,7 @@ $ embdy pipeline list --stage="proposal"
     description: 'Auto-generated REST and GraphQL endpoints with schema validation and audit trails.',
     code: `### 1. Advance Deal Stage via REST API
 POST /api/v1/deals/DEAL-8402/actions/advance HTTP/1.1
-Host: api.embdy.internal
+Host: api.embody.internal
 Authorization: Bearer eyJhbGciOi...
 Content-Type: application/json
 

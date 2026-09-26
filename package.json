@@ -9,7 +9,11 @@
   "scripts": {
     "build": "pnpm -r --if-present build",
     "clean": "pnpm -r --if-present clean && rm -rf coverage",
-    "deploy:landing": "pnpm --filter @app/landing build && npx firebase-tools deploy --only hosting:embdy",
+    "gateway:dev": "node scripts/gateway-dev.mjs up",
+    "gateway:dev:down": "node scripts/gateway-dev.mjs down",
+    "gateway:dev:logs": "node scripts/gateway-dev.mjs logs",
+    "gateway:dev:help": "node scripts/gateway-dev.mjs help",
+    "deploy:landing": "pnpm --filter @app/landing build && npx firebase-tools deploy --project nimrod-experiments --only hosting:embody",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prelint": "pnpm -r --filter './packages/**' --if-present build",

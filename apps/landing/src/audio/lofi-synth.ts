@@ -1,149 +1,150 @@
-// Lo-fi Vinyl & Chords Generator via Web Audio API
+// Coastline FM: an original, looped 92 BPM instrumental, synthesized only after a user click.
+const BPM = 92;
+const STEP = 60 / BPM / 4;
+const progression = [
+  { bass: 41, chord: [57, 60, 64, 67], lead: [72, 76, 79, 76] }, // Fmaj9
+  { bass: 38, chord: [57, 60, 64, 69], lead: [72, 69, 76, 72] }, // Dm9
+  { bass: 43, chord: [58, 62, 65, 69], lead: [74, 77, 81, 77] }, // Gm9
+  { bass: 36, chord: [58, 64, 67, 69], lead: [76, 74, 72, 67] }, // C13
+];
+const hz = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
+
 export class LoFiPlayer {
   private ctx: AudioContext | null = null;
-  private isPlaying = false;
-  private timerId: number | null = null;
-  private noiseNode: AudioNode | null = null;
-  private masterGain: GainNode | null = null;
+  private master: GainNode | null = null;
+  private noise: AudioBuffer | null = null;
+  private timer: number | null = null;
+  private step = 0;
+  private nextTime = 0;
+  private playing = false;
 
-  // Chill chord progression in Fmaj9 -> Dm9 -> Gm9 -> C13
-  private chords = [
-    [174.61, 220.00, 261.63, 329.63, 392.00], // Fmaj9 (F3, A3, C4, E4, G4)
-    [146.83, 174.61, 220.00, 261.63, 329.63], // Dm9   (D3, F3, A3, C4, E4)
-    [196.00, 233.08, 293.66, 349.23, 440.00], // Gm9   (G3, Bb3, D4, F4, A4)
-    [130.81, 196.00, 246.94, 329.63, 440.00]  // C13   (C3, G3, B3, E4, A4)
-  ];
-  private currentChordIndex = 0;
-
-  public toggle(): boolean {
-    if (this.isPlaying) {
-      this.stop();
-      return false;
-    } else {
-      this.start();
-      return true;
-    }
+  toggle(): boolean {
+    if (this.playing) { this.stop(); return false; }
+    return this.start();
   }
 
-  public start() {
-    if (this.isPlaying) return;
-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextClass) return;
-
-    if (!this.ctx) {
-      this.ctx = new AudioContextClass();
-    }
-
-    if (this.ctx.state === 'suspended') {
-      void this.ctx.resume();
-    }
-
-    this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.setValueAtTime(0.18, this.ctx.currentTime);
-    this.masterGain.connect(this.ctx.destination);
-
-    this.startVinylCrackle();
-    this.playChordSequence();
-
-    this.isPlaying = true;
+  private start(): boolean {
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return false;
+    this.ctx ??= new AudioContextClass();
+    void this.ctx.resume();
+    const ctx = this.ctx;
+    const master = ctx.createGain();
+    const tone = ctx.createBiquadFilter();
+    tone.type = 'lowpass';
+    tone.frequency.value = 5500;
+    tone.connect(master);
+    master.gain.setValueAtTime(0.0001, ctx.currentTime);
+    master.gain.linearRampToValueAtTime(0.38, ctx.currentTime + 0.12);
+    master.connect(ctx.destination);
+    this.master = master;
+    this.output = tone;
+    this.noise ??= this.createNoise(ctx);
+    this.step = 0;
+    this.nextTime = ctx.currentTime + 0.07;
+    this.playing = true;
+    this.schedule();
+    this.timer = window.setInterval(() => this.schedule(), 25);
+    return true;
   }
 
-  public stop() {
-    if (!this.isPlaying) return;
-    if (this.timerId) {
-      window.clearTimeout(this.timerId);
-      this.timerId = null;
+  private output: AudioNode | null = null;
+
+  stop() {
+    if (!this.playing || !this.ctx || !this.master) return;
+    this.playing = false;
+    if (this.timer !== null) window.clearInterval(this.timer);
+    this.timer = null;
+    const master = this.master;
+    master.gain.cancelScheduledValues(this.ctx.currentTime);
+    master.gain.setValueAtTime(master.gain.value, this.ctx.currentTime);
+    master.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.16);
+    window.setTimeout(() => master.disconnect(), 400);
+    this.master = null;
+    this.output = null;
+  }
+
+  private createNoise(ctx: AudioContext): AudioBuffer {
+    const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.25), ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    return buffer;
+  }
+
+  private note(midi: number, time: number, length: number, volume: number, type: OscillatorType, cutoff: number) {
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(hz(midi), time);
+    filter.type = 'lowpass';
+    filter.frequency.value = cutoff;
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.exponentialRampToValueAtTime(volume, time + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + length);
+    osc.connect(filter).connect(gain).connect(this.output!);
+    osc.start(time);
+    osc.stop(time + length + 0.02);
+    osc.onended = () => { osc.disconnect(); filter.disconnect(); gain.disconnect(); };
+  }
+
+  private drum(time: number, kind: 'kick' | 'snare' | 'hat', volume = 1) {
+    const ctx = this.ctx!;
+    if (kind === 'kick') {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(145, time);
+      osc.frequency.exponentialRampToValueAtTime(46, time + 0.11);
+      gain.gain.setValueAtTime(0.001, time);
+      gain.gain.exponentialRampToValueAtTime(0.55 * volume, time + 0.005);
+      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.23);
+      osc.connect(gain).connect(this.output!);
+      osc.start(time); osc.stop(time + 0.24);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+      return;
     }
-    if (this.noiseNode) {
-      try {
-        (this.noiseNode as AudioBufferSourceNode).stop();
-      } catch {
-        // The source may already have stopped.
+    const source = ctx.createBufferSource();
+    source.buffer = this.noise!;
+    const filter = ctx.createBiquadFilter();
+    filter.type = kind === 'hat' ? 'highpass' : 'bandpass';
+    filter.frequency.value = kind === 'hat' ? 6800 : 1600;
+    const gain = ctx.createGain();
+    const length = kind === 'hat' ? 0.045 : 0.15;
+    gain.gain.setValueAtTime(0.13 * volume, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + length);
+    source.connect(filter).connect(gain).connect(this.output!);
+    source.start(time); source.stop(time + length);
+    source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
+  }
+
+  private schedule() {
+    if (!this.ctx || !this.playing) return;
+    while (this.nextTime < this.ctx.currentTime + 0.15) {
+      const bar = Math.floor(this.step / 16) % 4;
+      const phrase = Math.floor(this.step / 64) % 2;
+      const beat = this.step % 16;
+      const chord = progression[bar];
+      const time = this.nextTime;
+      if (beat === 0 || beat === 10) this.drum(time, 'kick', beat === 0 ? 1 : 0.72);
+      if (beat === 4 || beat === 12) this.drum(time, 'snare', 0.9);
+      if (phrase === 1 && bar === 3 && beat === 15) this.drum(time, 'snare', 0.28);
+      if (beat % 2 === 0) this.drum(time + (beat % 4 === 2 ? 0.022 : 0), 'hat', beat % 4 === 0 ? 0.62 : 0.36);
+      if ([0, 3, 6, 8, 11, 14].includes(beat)) {
+        const offset = beat === 6 || beat === 14 ? 7 : beat === 11 ? 12 : 0;
+        this.note(chord.bass + offset, time, STEP * 2.5, 0.22, 'triangle', 380);
       }
-      this.noiseNode.disconnect();
-      this.noiseNode = null;
+      if (beat === 0 || beat === 7 || beat === 12) {
+        chord.chord.forEach((pitch, index) => this.note(pitch, time + index * 0.012, STEP * (beat === 0 ? 10 : 4), 0.052, 'sine', 1600));
+      }
+      if ([2, 6, 9, 14].includes(beat)) {
+        const index = [2, 6, 9, 14].indexOf(beat);
+        const pitch = phrase === 1 && index === 3 ? chord.lead[index] + 12 : chord.lead[index];
+        this.note(pitch, time, STEP * (index === 3 ? 1.8 : 2.7), 0.06, 'sine', 2400);
+      }
+      this.step++;
+      this.nextTime += STEP;
     }
-    if (this.masterGain && this.ctx) {
-      this.masterGain.gain.linearRampToValueAtTime(0.001, this.ctx.currentTime + 0.5);
-    }
-    this.isPlaying = false;
   }
-
-  private startVinylCrackle() {
-    if (!this.ctx || !this.masterGain) return;
-
-    const bufferSize = this.ctx.sampleRate * 2;
-    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const output = noiseBuffer.getChannelData(0);
-
-    for (let i = 0; i < bufferSize; i++) {
-      // Soft pink noise with occasional pop/crackle
-      const r = Math.random() * 2 - 1;
-      const isPop = Math.random() < 0.0008;
-      output[i] = (r * 0.04) + (isPop ? (Math.random() * 0.5 - 0.25) : 0);
-    }
-
-    const whiteNoise = this.ctx.createBufferSource();
-    whiteNoise.buffer = noiseBuffer;
-    whiteNoise.loop = true;
-
-    // Filter to warm vinyl frequencies
-    const bandpass = this.ctx.createBiquadFilter();
-    bandpass.type = 'bandpass';
-    bandpass.frequency.value = 1200;
-    bandpass.Q.value = 0.8;
-
-    const crackleGain = this.ctx.createGain();
-    crackleGain.gain.value = 0.12;
-
-    whiteNoise.connect(bandpass);
-    bandpass.connect(crackleGain);
-    crackleGain.connect(this.masterGain);
-
-    whiteNoise.start();
-    this.noiseNode = whiteNoise;
-  }
-
-  private playChordSequence = () => {
-    if (!this.isPlaying && this.timerId !== null) return;
-    if (!this.ctx || !this.masterGain) return;
-
-    const chord = this.chords[this.currentChordIndex];
-    this.currentChordIndex = (this.currentChordIndex + 1) % this.chords.length;
-
-    const now = this.ctx.currentTime;
-    const chordDuration = 3.2;
-
-    chord.forEach((freq, idx) => {
-      if (!this.ctx || !this.masterGain) return;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      const filter = this.ctx.createBiquadFilter();
-
-      // Warm mellow vintage Rhodes / electric piano tone
-      osc.type = idx === 0 ? 'triangle' : 'sine';
-      osc.frequency.setValueAtTime(freq, now);
-
-      // Subtle detune for lo-fi tape flutter
-      osc.detune.setValueAtTime((Math.random() - 0.5) * 8, now);
-
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(650 + idx * 80, now);
-      filter.frequency.exponentialRampToValueAtTime(320, now + chordDuration);
-
-      // Soft ADSR envelope
-      gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.linearRampToValueAtTime(0.07 / chord.length, now + 0.15);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + chordDuration);
-
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.masterGain);
-
-      osc.start(now);
-      osc.stop(now + chordDuration + 0.1);
-    });
-
-    this.timerId = window.setTimeout(this.playChordSequence, (chordDuration - 0.2) * 1000);
-  };
 }
