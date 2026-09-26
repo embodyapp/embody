@@ -3,12 +3,12 @@
   "version": "4.0.0",
   "type": "module",
   "private": true,
-  "description": "Interactive landing page for embdy headless business framework in Rhymezlikedimez visual style.",
+  "description": "Interactive landing page for embody headless business framework in Rhymezlikedimez visual style.",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "deploy": "pnpm build && npx firebase-tools deploy --only hosting:embdy"
+    "deploy": "pnpm build && npx firebase-tools deploy --project nimrod-experiments --only hosting:embody"
   },
   "dependencies": {
     "gsap": "^3.12.5",

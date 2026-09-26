@@ -94,7 +94,7 @@ export const PRIMITIVES: Primitive[] = [
     num: '10',
     name: 'Manifest',
     category: 'Compilation',
-    summary: 'The single serializable contract JSON that hashes into embdy.lock v2 and projects all surfaces.',
+    summary: 'The single serializable contract JSON that hashes into embody.lock v2 and projects all surfaces.',
     codeSnippet: `compile({ entities: [Order, Customer] })`,
     accentColor: '#FDB849',
     accentBg: '#FFFBEA'

@@ -142,7 +142,7 @@ export const CRM_ARCHITECTURE_LAYERS = [
         num: '10',
         layer: 'Compilation',
         badge: 'Anti-Rot Hash Lock',
-        roleInCrm: 'Compiles the CRM contract into embdy.lock v2 for database, CLI, MCP agents & UI.',
+        roleInCrm: 'Compiles the CRM contract into embody.lock v2 for database, CLI, MCP agents & UI.',
         codeSnippet: `compile({ entities: [Deal, Account, Contact] })`,
         accentColor: '#FDB849',
         accentBg: '#FFFBEA'

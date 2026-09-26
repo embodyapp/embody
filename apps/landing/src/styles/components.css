@@ -474,6 +474,280 @@
 }
 
 /* ============================================================
+   AGENT & MCP COMPATIBILITY
+   ============================================================ */
+.integration-strip {
+  padding: 3.5rem 0;
+  background: var(--bg-dark);
+  color: var(--text-inverse);
+  border-block: var(--stroke-width) solid var(--stroke-main);
+}
+
+.integration-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.7fr);
+  align-items: end;
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+
+.integration-eyebrow {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--color-sun-yellow);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.integration-intro h2 {
+  margin: 0;
+  color: var(--text-inverse);
+  font-size: clamp(1.75rem, 4vw, 2.8rem);
+}
+
+.integration-intro p {
+  margin: 0;
+  color: var(--text-inverse-muted);
+  font-weight: 600;
+  line-height: 1.65;
+}
+
+.integration-logos {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.integration-logo-card {
+  min-height: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  padding: 1rem 0.65rem;
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: var(--stroke-width) solid var(--stroke-main);
+  border-radius: var(--radius-lg);
+  box-shadow: 3px 3px 0 var(--color-sun-yellow);
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: 800;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.integration-logo-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 3px 7px 0 var(--color-sun-yellow);
+}
+
+.integration-logo-card img {
+  width: 2.5rem;
+  height: 2.5rem;
+  object-fit: contain;
+}
+
+.integration-logo-card > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.integration-logo-card strong {
+  font: inherit;
+}
+
+.integration-logo-card small {
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.integration-logo-mcp {
+  background: var(--color-mint);
+}
+
+/* ============================================================
+   TESTIMONIAL CAROUSEL
+   ============================================================ */
+.testimonials-section {
+  background: var(--bg-canvas-subtle);
+  overflow: hidden;
+}
+
+.testimonials-heading-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+
+.testimonials-header {
+  margin-bottom: 0;
+  text-align: left;
+}
+
+.testimonial-controls {
+  display: flex;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.testimonial-arrow {
+  width: 3rem;
+  height: 3rem;
+  display: grid;
+  place-items: center;
+  border: var(--stroke-width) solid var(--stroke-main);
+  border-radius: 50%;
+  background: var(--bg-card);
+  color: var(--text-main);
+  box-shadow: var(--shadow-hard-sm);
+  font-size: 1.35rem;
+  font-weight: 900;
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
+
+.testimonial-arrow:hover {
+  background: var(--color-sun-yellow);
+  transform: translate(-2px, -2px);
+}
+
+.testimonial-viewport {
+  overflow: hidden;
+  padding: 0.25rem 0.25rem 0.75rem;
+  margin: -0.25rem;
+}
+
+.testimonial-track {
+  display: flex;
+  gap: 1.5rem;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.testimonial-card {
+  flex: 0 0 calc((100% - 1.5rem) / 2);
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 2rem;
+  background: var(--bg-card);
+  border: var(--stroke-width) solid var(--stroke-main);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-hard);
+}
+
+.testimonial-card:nth-child(2n) {
+  background: #fff9e8;
+}
+
+.testimonial-card blockquote {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.2rem, 2vw, 1.55rem);
+  font-weight: 800;
+  line-height: 1.38;
+  color: var(--text-main);
+}
+
+.testimonial-person {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.testimonial-avatar {
+  width: 3.5rem;
+  height: 3.5rem;
+  display: grid;
+  place-items: center;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 2px solid var(--stroke-main);
+  background: var(--color-sun-yellow);
+  color: var(--text-main);
+  font-family: var(--font-display);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.testimonial-avatar-fallback {
+  background: var(--color-mint);
+}
+
+.testimonial-avatar-fallback.avatar-purple {
+  background: var(--color-twilight-purple);
+}
+
+.testimonial-person-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.testimonial-person-copy strong {
+  font-family: var(--font-display);
+  font-size: 1rem;
+}
+
+.testimonial-person-copy span {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.testimonial-company {
+  width: 2.75rem;
+  height: 2.75rem;
+  display: grid;
+  place-items: center;
+  padding: 0.4rem;
+  border: 1.5px solid var(--stroke-subtle);
+  border-radius: var(--radius-md);
+  background: white;
+}
+
+.testimonial-company img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.testimonial-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.55rem;
+  margin-top: 1.5rem;
+}
+
+.testimonial-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  padding: 0;
+  border: 1.5px solid var(--stroke-main);
+  border-radius: 50%;
+  background: transparent;
+}
+
+.testimonial-dot.active {
+  background: var(--color-sun-yellow);
+}
+
+/* ============================================================
    HERO ARTWORK & TURNTABLE DECK
    ============================================================ */
 .hero-visual {
@@ -495,10 +769,10 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
   border: var(--stroke-width) solid var(--stroke-main);
-  background: #1e1b4b;
-  min-height: 380px;
+  background: #7BB8D4;
+  aspect-ratio: 500 / 360;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
 }
 
@@ -508,13 +782,9 @@
   display: block;
 }
 
-/* Day/Night and Driving SVG Scene Details */
+/* Warm cel-shaded coastal scene */
 .villa-window {
   transition: fill 0.8s ease, filter 0.8s ease;
-}
-
-.car-wheel-hub {
-  transform-origin: 0px 0px;
 }
 
 .canvas-star {
@@ -2156,6 +2426,9 @@
   .pain-solution-diagrams-grid {
     grid-template-columns: 1fr;
   }
+  .integration-logos {
+    grid-template-columns: repeat(3, 1fr);
+  }
   .sandbox-card {
     grid-template-columns: 1fr;
   }
@@ -2201,6 +2474,21 @@
   }
   .section-header {
     margin-bottom: 2rem;
+  }
+  .integration-intro {
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 1rem;
+  }
+  .testimonials-heading-row {
+    align-items: flex-start;
+  }
+  .testimonials-header {
+    margin-bottom: 0;
+  }
+  .testimonial-card {
+    flex-basis: 100%;
+    min-height: 260px;
   }
   .nav-links {
     display: none;
@@ -2279,6 +2567,22 @@
     word-break: break-word;
     white-space: pre-wrap;
     font-size: 0.7rem;
+  }
+  .integration-strip {
+    padding: 2.75rem 0;
+  }
+  .integration-logos {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .integration-logo-card {
+    min-height: 104px;
+  }
+  .testimonials-heading-row {
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+  .testimonial-card {
+    padding: 1.5rem;
   }
   .footer-simple-row {
     flex-direction: column;
