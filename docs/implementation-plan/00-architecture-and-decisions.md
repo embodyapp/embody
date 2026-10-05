@@ -49,7 +49,7 @@ Approved by [ADR 0004](../adr/0004-cross-app-event-delivery.md). Cross-app event
 
 ### D-06: GenUI presentation and renderer boundaries
 
-Approved by [ADR 0005](../adr/0005-generative-ui-presentation.md). Embody applications own trusted static/declarative views and bind them to validated action output. `@embody/genui` includes standard web, Markdown/text, and standalone-browser renderers; MCP hosts retain responsibility for iframe sandboxing; native Pi rendering lives in optional `@embody/genui-pi`. Model-authored executable UI is prohibited, UI actions use normal allowlisted Embody execution, and every view has a non-HTML fallback. Phase 14 contains the implementation and independent release gates.
+Approved by [ADR 0005](../adr/0005-generative-ui-presentation.md). Embody applications own trusted static/declarative views and bind them to validated action output. `@embody/genui` includes standard web, Markdown/text, and standalone-browser renderers; MCP hosts retain responsibility for iframe sandboxing; native Pi rendering lives in optional `@embody/genui-pi`. Model-authored executable UI is prohibited, UI actions use normal allowlisted Embody execution, and every view has a non-HTML fallback. Phase 14 contains the incremental implementation and per-capability release gates. ADR 0005's delivery amendment adds a journey-first interaction-design gate, requires a minimal MCP Apps slice and interactive native Pi subset for version one, and defers browser and broad component/custom-runtime work. Portability preserves semantics rather than visual parity; consequential changes have an explicit conversation visibility and reconciliation policy.
 
 ### Other clarifications to approve
 

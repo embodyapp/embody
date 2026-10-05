@@ -11,6 +11,8 @@ export interface GatewayJwtVerifierOptions {
   readonly jwksUrl?: string | URL;
   readonly algorithms: readonly string[];
   readonly clockTolerance?: number;
+  /** Requires iat and bounds credential age independently of exp (1–300 seconds). */
+  readonly maxTokenAgeSeconds?: number;
 }
 export interface AppAuthVerifier {
   readonly id: string;
@@ -49,6 +51,13 @@ function principalFromClaims(claims: JWTPayload): Principal {
 export function gatewayJwtVerifier(options: GatewayJwtVerifierOptions): AppAuthVerifier {
   if (options.algorithms.length === 0)
     throw new TypeError("At least one JWT algorithm is required");
+  if (
+    options.maxTokenAgeSeconds !== undefined &&
+    (!Number.isInteger(options.maxTokenAgeSeconds) ||
+      options.maxTokenAgeSeconds < 1 ||
+      options.maxTokenAgeSeconds > 300)
+  )
+    throw new TypeError("Maximum token age must be an integer from 1 to 300 seconds");
   if ((options.key === undefined) === (options.jwksUrl === undefined))
     throw new TypeError("Configure exactly one of key or jwksUrl");
   const key = options.key ?? createRemoteJWKSet(new URL(options.jwksUrl!));
@@ -59,6 +68,9 @@ export function gatewayJwtVerifier(options: GatewayJwtVerifierOptions): AppAuthV
         issuer: options.issuer,
         audience: options.audience,
         algorithms: [...options.algorithms],
+        ...(options.maxTokenAgeSeconds === undefined
+          ? {}
+          : { maxTokenAge: options.maxTokenAgeSeconds }),
         ...(options.clockTolerance === undefined ? {} : { clockTolerance: options.clockTolerance }),
       })
         .then(({ payload }) => principalFromClaims(payload))

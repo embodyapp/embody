@@ -1,12 +1,59 @@
 # Phase 14 — Generative UI presentation
 
-**Design:** [ADR 0005](../adr/0005-generative-ui-presentation.md). **Status:** P14-01 to P14-07. **Depends on:** P5-01, P8-01, P9-02, P10-03.
+**Design:** [ADR 0005](../adr/0005-generative-ui-presentation.md). **Status:** P14-00 to P14-07 complete for scoped increments A–B (2026-10-04). **Depends on:** P5-01, P8-01, P9-02, P10-03.
+
+**Completion record:** [reviewed evidence and support matrix](../guides/genui-release-evidence.md). Verified scope is standard MCP Apps reference-host behavior, Pi 1.0.0 and development-loopback browser handoff. Baseline publication/legal gates remain open; no vendor certification, production browser sessions or custom-runtime support is implied. The requirements below remain the contract for future changes.
 
 ## Objective
 
 Allow a human using an agent harness to receive an application-quality UI for an Embody action response while preserving the action as the single source of business behavior. The app owns a trusted view, the action returns validated data, and the client renders the best supported representation: MCP App, standalone browser, native Pi TUI, Markdown, or plain JSON.
 
-This phase is a post-baseline feature track. It may be implemented in parallel with legal/commercial work, but GenUI must satisfy its own P14-07 security, packaging, compatibility, and documentation gates before any release advertises it as supported.
+This phase is a post-baseline, incremental roadmap, not one MVP-sized delivery. It may be implemented in parallel with legal/commercial work. Each advertised capability must pass the applicable P14-07 security, packaging, compatibility, and documentation gates; version one requires both the MCP Apps vertical slice and the native Pi subset to pass their gates. Standalone-browser support is not required. Baseline legal/publication gates still apply.
+
+## Delivery strategy: prove the journey first
+
+Begin with the Kanban journey, not a comprehensive component catalog:
+
+1. A human asks an agent for the current sprint and receives an inline board summary.
+2. The human opens a task and attempts a consequential change.
+3. The UI displays an existing policy veto, preserves the draft, and allows correction.
+4. The human supplies a PR and completes the task through an ordinary action.
+5. The view refreshes from authoritative app data, and the agent can learn the consequential outcome through the supported host mechanism.
+
+The existing Kanban PR guardrail is actor-specific. P14-00 must specify the initiating principal and an applicable veto scenario; do not assume a human click triggers an agent-only hook or change actor identity merely to make the demo pass.
+
+Delivery order:
+
+| Increment | Required work | Support claim |
+|---|---|---|
+| A: version one — MCP Apps + native Pi | P14-00, P14-01, minimal P14-02/P14-03, P14-04, P14-06, applicable P14-07 evidence for both surfaces | Standard Kanban experience on a verified MCP Apps host and in Pi TUI; useful plain-client/noninteractive fallback |
+| B: browser handoff | P14-05 plus browser-specific P14-07 evidence | Secure temporary browser views in explicitly supported deployment modes |
+| Later expansion | Additional components, custom HTML runtime, richer inspector/scaffolder support | Only capabilities with their own reviewed evidence |
+
+Move reference-app fixtures and E2E proof into every increment rather than waiting until the roadmap ends. A reference-host conformance test is not a vendor support claim. Publish a dated support matrix naming host/product/version, supported interactions, limitations, and verified fallback behavior. No support for Claude, ChatGPT, Codex, or Pi is inferred from its name.
+
+## P14-00: reference journey and interaction semantics
+
+This new planning gate precedes renderer work without reopening the implemented P14-01 contracts. Write a reviewed interaction specification and executable fixtures for the journey above before expanding the component vocabulary.
+
+### Required decisions
+
+- **Presentation lifecycle:** choose when a result merits a view, inline versus expanded presentation, how task details open, and what closing/reopening or rerunning a tool does. The first slice is a result-attached view, not a persistent workspace or durable human-input session.
+- **State ownership:** domain state belongs to the app. Filters, selection, expansion, and unsaved drafts are view-local state, never proof that a domain mutation succeeded. Define draft preservation/reset on refresh, failure, closure, and resource-generation change.
+- **Action outcomes:** specify pending/disabled states, prevention of duplicate submissions, inline validation and hook errors, cancellation, and recovery from an ambiguous outcome. Do not blindly retry a mutation when cancellation/disconnect leaves commit status unknown; refetch authoritative state or use an existing domain idempotency mechanism.
+- **Refresh and replacement:** choose whether a successful mutation replaces props directly or invokes an allowlisted read action. Specify result correlation, late/out-of-order result handling, selected-task continuity, and whether the original view updates or a new result is appended. Do not add a special action envelope or output projector to solve renderer state.
+- **Stale data and conflicts:** define snapshot freshness and refresh affordances. Use existing domain revision/conflict checks where available; otherwise document the limitation and refresh-before-edit policy. Do not imply lost-update protection that the domain does not provide. Live subscriptions and optimistic updates are not required for the first slice.
+- **Conversation visibility:** local navigation/filtering need not produce chat messages. A consequential mutation must have a declared, redacted outcome visible to the human and available to the agent through a verified host mechanism. Define whether this is a tool result, supported context update, or explicit follow-up read; audit logging alone is not conversation visibility. If the host cannot provide automatic visibility, show a clear limitation and require an explicit reconciliation path before the agent relies on the changed state.
+- **Identity and policy:** identify the principal/actor for each interaction, permitted actions, and expected veto. UI interactions must not impersonate another actor to obtain or evade a policy outcome.
+
+### Tests and success criteria
+
+- Reviewed fixtures specify initial render, open task, pending mutation, veto, correction, successful mutation, authoritative refresh, and human/agent-visible outcome in both MCP Apps and Pi TUI. Validate Pi tool access and agent visibility early, not after web interaction semantics are finalized.
+- State-transition tests cover duplicate submit, validation error, cancellation with unknown commit status, stale props, conflicting edit where supported, out-of-order results, disconnect, and reopen.
+- Local-only events and consequential events have explicit visibility/redaction assertions; no secret draft fields are copied into conversation context.
+- Record unresolved host limitations and the verified reconciliation path. The journey fails its acceptance gate if the agent can silently rely on stale state after a consequential UI change.
+
+P14-00 passes when renderer and transport implementers can implement the same journey without inventing lifecycle, identity, refresh, or conversation behavior. See the [GenUI glossary](../guides/genui-glossary.md).
 
 ## Product invariants
 
@@ -16,7 +63,9 @@ This phase is a post-baseline feature track. It may be implemented in parallel w
 4. **One business path:** a click or form submission calls an ordinary Embody action through existing authentication, authorization, validation, hooks, transactions, cancellation, and audit.
 5. **Progressive enhancement:** HTML is never the only representation. Unsupported and noninteractive clients retain stable JSON and deterministic Markdown/text.
 6. **Explicit capabilities:** clients and views negotiate MCP Apps/display/tool-call capabilities; no behavior is inferred from a vendor name.
-7. **Bounded content:** documents, props, resources, trees, tables, text, patches, and event rates have configured limits and fail with safe structured errors.
+7. **Semantic portability:** renderers preserve relevant information, policy outcomes, and useful actions, not identical appearance or interaction mechanics. Unsupported rich nodes have documented text/browser degradation.
+8. **State and conversation coherence:** local UI state is distinct from authoritative domain state; consequential changes have a defined human/agent visibility and reconciliation policy.
+9. **Bounded content:** documents, props, resources, trees, tables, text, patches, and event rates have configured limits and fail with safe structured errors.
 
 ## Target experience and data flow
 
@@ -110,7 +159,7 @@ The final spelling may change during P14-01, but these properties may not:
 - app/test code can inspect the same enriched manifest that registration sends;
 - duplicate IDs, missing targets/views, incompatible schemas, and lossy `ui://` mappings fail before the app is ready.
 
-Because exact Zod-schema equivalence is not generally decidable, protocol v1 uses one enforceable rule: the action output and view props must reference the same registered Zod schema object. The validated action output is delivered directly as props. Output projectors and special response envelopes are deferred; do not use unvalidated casts or compare generated JSON text heuristically.
+Because exact Zod-schema equivalence is not generally decidable, protocol v1 uses one enforceable rule: the action output and view props must reference the same registered Zod schema object. The validated action output is delivered directly as props. This is an enforceable first-increment constraint, not a permanent claim that presentation and domain schemas must always coincide. Collect concrete reuse/projection pain points before proposing a versioned alternative. Output projectors and special response envelopes are deferred; do not use unvalidated casts or compare generated JSON text heuristically.
 
 ### MCP Apps dependency decision
 
@@ -130,13 +179,16 @@ P14-01 passes when an implementing agent can build server and renderer independe
 
 ### Standard component model
 
-Implement a discriminated, versioned, immutable document tree. MVP nodes are:
+Implement a discriminated, versioned, immutable document tree after P14-00. The first slice includes only nodes required by the reviewed Kanban journey:
 
-- layout: `stack`, `columns`, `section`, `divider`;
-- content: `text`, `markdown`, `code`, `diff`, `callout`, `image` with safe data/resource references;
-- data: `keyValue`, `list`, `table`, `badge`;
-- state: `progress`, `emptyState`, `errorState`;
-- input: `field`, `select`, `checkbox`, `form`, `actions`.
+- layout: `stack`, `columns`, `section`;
+- content/data: `text`, `callout`, `keyValue`, `list`, `badge`;
+- state: `emptyState`, `errorState` (pending/disabled behavior is part of controls);
+- input: `field`, `select`, `form`, `actions`.
+
+Compose the board from columns and task lists; do not introduce a specialized board language before proving the journey. If a listed node is unnecessary, defer it with an explicit fixture/scope update.
+
+Later candidates, driven by concrete workflows, are `divider`, `markdown`, `code`, `diff`, `image` with safe data/resource references, `table`, `progress`, and `checkbox`. They are not first-release requirements. Schema-driven default views and safe agent-composed documents require separate proposals and are not implied by this component vocabulary.
 
 Every interactive node has a stable node ID, accessible label, declared event schema, and semantic intent. Nodes contain data and action target references, never executable callbacks. Unknown node versions/types fail closed rather than rendering as raw HTML.
 
@@ -158,7 +210,9 @@ Ship a prebuilt, framework-private renderer artifact that:
 
 Provide pure deterministic Markdown and plain-text renderers. Interactive controls become numbered/labeled choices with target and effect descriptions; secrets and fields marked sensitive are redacted. Width-aware plain text must remain valid without ANSI support. JSON remains available as the existing machine fallback and is not reformatted on stdout unexpectedly.
 
-### Trusted custom views
+### Trusted custom views — deferred runtime
+
+P14-01's custom-view contracts and security boundaries remain valid, but custom HTML rendering, its asset pipeline, and custom-view support claims are not required for increment A. Unimplemented custom paths must fail safely or use a verified fallback, never silently claim runtime support. Add the following proof when a concrete use case justifies this escape hatch.
 
 Support bundled HTML only from application build artifacts registered before boot. Compute an integrity digest, validate MIME type `text/html;profile=mcp-app`, and reject runtime URLs or tenant-specific bytes. Custom views use the same bridge helper, props validation, call allowlist, CSP declaration, and mandatory fallback contract as standard views.
 
@@ -173,7 +227,7 @@ Support bundled HTML only from application build artifacts registered before boo
 - Renderer reconnect, duplicate result, out-of-order revision, malformed bridge message, unavailable tool call, cancellation, and disposal leave a stable recoverable state without leaked listeners/timers.
 - Packed `@embody/genui` contains its renderer assets and can render them from an external consumer without source aliases.
 
-P14-02 passes when one validated standard document renders equivalently as accessible web UI, Markdown, and plain text, and hostile content remains inert.
+P14-02's first increment passes when the journey's validated standard document renders semantically equivalent information as accessible web UI, Markdown, and plain text, and hostile content remains inert. Tests referring to every node mean every shipped node; custom-runtime tests gate that later capability, not increment A.
 
 ## P14-03: app host, manifest, resources, and execution integration
 
@@ -182,7 +236,7 @@ P14-02 passes when one validated standard document renders equivalently as acces
 - Register immutable resources by canonical URI and manifest generation. Serve standard renderer/custom bundles through a provider interface, not arbitrary filesystem paths.
 - Add an authenticated internal app resource route only if the gateway cannot serve a resource locally. It must use short-lived audience-bound gateway credentials, body/time limits, immutable ETag, exact MIME type, and no path-derived file access.
 - Ensure HTML/resource bytes never enter app registration manifests, logs, audit payloads, CLI output, or model context.
-- Add development-only inspector endpoints for view catalog, validated fixture props, web preview, and fallback preview. Production retains the existing inspector prohibition.
+- For increment A, provide minimal development-only fixture preview and resource/binding diagnostics needed to debug the journey. Rich view catalogs, interactive inspector tooling, and accessibility warnings are later DX work. Production retains the existing inspector prohibition.
 - Support cache invalidation by manifest generation/integrity. In-flight MCP sessions may finish on their pinned generation; a new resource under old bytes must never reuse the same URI plus integrity value.
 
 ### P14-03 tests and success criteria
@@ -196,7 +250,7 @@ P14-02 passes when one validated standard document renders equivalently as acces
 - Hot reload publishes a new generation, invalidates the old development preview, and does not mix old HTML with new props metadata.
 - Inspector browser tests render malicious fixture values inert and are unavailable in production.
 
-P14-03 passes when a real app can register one standard and one custom view without changing ordinary HTTP/CLI execution results or weakening tenant isolation.
+P14-03's first increment passes when the real Kanban app registers and serves its standard view without changing ordinary HTTP/CLI execution results or weakening tenant isolation. Custom-resource serving receives the same tests before that capability ships.
 
 ## P14-04: MCP Apps catalog, resources, results, and interactions
 
@@ -209,6 +263,7 @@ Extend `@embody/mcp` and gateway integration using the stable official extension
 - pin resource lookup, app identity, principal identity, scoped/global endpoint, and manifest generation to the MCP session;
 - proxy view `tools/call` only to same-app `callableTargets`, only when visibility includes `app`, and under the session's current verified principal and normal gateway dispatch limits;
 - forward cancellation, progress, structured safe errors, and request correlation without exposing gateway credentials to the iframe;
+- implement P14-00's refresh/replacement and conversation visibility policy using verified host mechanisms; test consequential UI actions separately from local-only events and document any explicit reconciliation requirement;
 - deny cross-server tools, stale/removed targets, confused-deputy app IDs, and calls not associated with the initialized view.
 
 Do not detect support from `clientInfo.name`. Use negotiated capabilities and produce a normal text tool result when the extension is absent or partially supported.
@@ -221,7 +276,7 @@ Do not detect support from `clientInfo.name`. Use negotiated capabilities and pr
 - Resource reads and app-originated tool calls fail for wrong identity/session/app/generation, missing capability, absent `app` visibility, undeclared target, cross-app target, unhealthy app, revoked scope, and expired session.
 - A UI action invokes the canonical downstream target once with the same org/actor, records the normal audit event, observes a hook veto, and presents its safe error.
 - Two concurrent sessions/tenants never cross results, props, resource authorization, progress, or events.
-- Cancellation from a closing view aborts downstream execution where supported; no terminal success is delivered afterward.
+- Cancellation from a closing view aborts downstream execution where supported and does not update a disposed view. If commit status is unknown, mark the outcome uncertain and use P14-00's reconciliation path; do not claim cancellation guarantees rollback.
 - Malformed JSON-RPC/postMessage-shaped values, oversized props/results, slow resource provider, and disconnect produce bounded cleanup and compliant errors.
 - Existing Phase-8 MCP fixture and official-client tests pass unchanged for unbound tools.
 
@@ -235,8 +290,8 @@ Provide a browser fallback for harnesses without embedded Apps support, reusing 
 - The URL fragment should carry bearer material where practical so it is not sent in referrers/access logs. Responses set `Cache-Control: no-store`, restrictive CSP, `Referrer-Policy: no-referrer`, frame policy, and no permissive CORS.
 - A session is bound to app/view/result/principal purpose, expires deterministically, can be revoked, and cannot be upgraded into a general API credential.
 - Production browser fallback is disabled until an authenticated deployment policy is explicitly configured; never silently expose a loopback development principal on a non-loopback listener.
-- Add scaffold/build support for standard views and an optional custom-view asset pipeline. A generated app without GenUI remains unchanged.
-- Inspector shows web and Markdown previews from the same fixture, resource metadata/CSP, callable targets, validation failures, and accessibility warnings.
+- Start with a documented manual author/build/browser workflow. Scaffold/build automation and rich inspector support are follow-ups, not prerequisites for secure browser handoff. A generated app without GenUI remains unchanged.
+- Before DX automation ships, prove its web and Markdown previews use the same fixture and expose resource metadata/CSP, callable targets, validation failures, and accessibility warnings. Custom-view asset pipelines remain deferred until custom runtime support is justified.
 
 ### P14-05 tests and success criteria
 
@@ -245,20 +300,24 @@ Provide a browser fallback for harnesses without embedded Apps support, reusing 
 - Server binds loopback by default and production/non-loopback negative tests fail closed without approved auth configuration.
 - Headers, CSP, no-store, referrer behavior, origin checks, WebSocket/SSE cleanup if used, and shutdown cleanup have automated assertions.
 - The browser and MCP Apps paths use the same renderer build digest and pass the same semantic view fixture suite.
-- Scaffolder packed-artifact test creates, builds, tests, and previews a GenUI-enabled app without importing monorepo source paths.
+- A documented manual browser workflow works from packed artifacts without monorepo source paths. When scaffolder automation is added, its packed-artifact test creates, builds, tests, and previews a GenUI-enabled app.
 
 P14-05 passes when a non-MCP-Apps client can direct a human to a secure, temporary view without granting a general Embody credential.
 
 ## P14-06: `@embody/genui-pi` native adapter
 
-Build an optional Pi package following Pi's extension and TUI APIs.
+Build an optional-to-install Pi package as a required version-one deliverable. Its native subset must complete the Kanban journey without a browser: show the board as a task list or grouped list, open task details, edit the required fields, submit an action, display pending/veto/error states, and refresh authoritative data. Text-only output is not sufficient for the TUI acceptance gate.
+
+P14-06 depends on P14-00/01/02/03, not completion of P14-04 or P14-05. Develop it alongside MCP integration using shared journey fixtures. Specify and test how the extension discovers bindings, obtains validated props, and dispatches authorized actions through public Embody interfaces; do not assume Pi includes an MCP client or an MCP Apps renderer. Settle the supported connection/authentication path in P14-00 before implementation. No separate UI execution path or Pi dependency is introduced into server packages.
+
+Before implementation, read Pi's current extension, package, SDK/TUI, and mode documentation and verify any proposed host mechanism. Use documented APIs rather than patching internals.
 
 - Load only as an installed Pi extension; never patch Pi internals.
-- Render standard nodes natively with terminal-width-safe components, host theme colors, keyboard navigation, expansion, and cancellation. Reuse Pi's existing selection/input/settings components where applicable.
+- Publish a node/capability support matrix. Render the useful native subset with terminal-width-safe components, host theme colors, keyboard navigation, expansion, and cancellation; degrade other nodes to a documented list/summary or browser handoff. Preserve semantic information and useful actions, not browser layout parity. Reuse Pi's existing selection/input/settings components where applicable.
 - Persist only safe presentation references/state needed for session restore; do not copy secrets or full sensitive props into extra session entries.
 - For a custom HTML view or unsupported standard node, show the deterministic text fallback and optionally open the P14-05 browser session after explicit user action.
 - Guard behavior by Pi mode: full native UI in `tui`, supported notifications/dialogs in `rpc`, and pure text/JSON with no prompt in `print`/`json`.
-- UI actions use the same normalized GenUI event/action contract and produce an ordinary result visible to both the human and agent where appropriate.
+- UI actions use the same normalized GenUI event/action contract. Version one must prove consequential action outcomes are available to the Pi agent as well as visible to the human; choose and test a supported context/tool-result mechanism in P14-00, including ordering and redaction. Audit-only visibility does not pass.
 - Clean up overlays, listeners, browser sessions, and pending requests on cancellation, session switch, reload, and shutdown.
 
 ### P14-06 tests and success criteria
@@ -271,39 +330,36 @@ Build an optional Pi package following Pi's extension and TUI APIs.
 - Session reload/switch/shutdown tests leave no active timer, overlay, request, or browser capability session and do not restore stale revision state.
 - Package installation test loads the built extension through Pi's documented package mechanism with dependencies present in production installation.
 
-P14-06 passes when the same standard document and user action used by the MCP Apps E2E work in Pi TUI, while all non-TUI modes remain deterministic and noninteractive.
+P14-06 passes when the reference journey's information and useful actions are accessible through the documented Pi native/degradation paths, with the same identity and policy outcome as MCP Apps. Non-TUI modes remain deterministic and noninteractive. Unsupported layouts need not be reimplemented natively, and browser handoff is optional unless advertised.
 
-## P14-07: reference proof, hardening, documentation, and release gate
+## P14-07: per-increment reference proof, hardening, docs, and release gates
 
-Extend the Kanban reference application with one standard response view and one custom view only if the custom path adds clear proof. Recommended journey:
+This is a recurring gate. Version one requires completion of both the MCP Apps slice and Pi native subset, but not browser or custom HTML work. Execute it for increment A and again for every additional advertised capability. Keep the original work item open until all planned increments are complete; record each passed increment separately in `STATUS.md`.
 
-1. human asks an agent for the current sprint;
-2. agent calls `kanban.cards.board`;
-3. agent receives valid structured output and concise fallback;
-4. Apps host renders columns/cards;
-5. human attempts to complete a card without a PR and sees the existing hook veto;
-6. human adds a PR and completes the card through the UI;
-7. plain MCP, CLI, browser fallback, and Pi show equivalent final domain state.
+Build and test the Kanban journey from P14-00 throughout implementation. Increment A proves equivalent final domain state via HTTP, CLI, plain MCP, MCP Apps, and Pi TUI, plus the human/agent visibility contract on both interactive surfaces. Pi print/JSON/RPC mode behavior and production package installation are also version-one gates. Browser joins this proof in increment B. Add a custom view only when it proves a justified use case.
 
-Documentation must cover view authoring, standard components, custom bundles, build output, props, action allowlists, accessibility, CSP, browser fallback, Pi installation, testing, compatibility, and troubleshooting. Clearly distinguish supported hosts from protocol conformance; vendor smoke tests are dated evidence, not permanent capability assumptions.
+Documentation must cover the shipped subset's view authoring, components, build output, props, action allowlists, interaction lifecycle, freshness/conflict limitations, conversation visibility, accessibility, CSP, testing, compatibility, and troubleshooting. Document browser fallback, Pi installation, and custom bundles only as supported when their gates pass; otherwise mark them planned. Clearly distinguish supported hosts from protocol conformance; vendor smoke tests are dated evidence, not permanent capability assumptions.
 
 ### P14-07 security and non-functional tests
 
 - Fuzz document/result/resource/bridge parsers for a fixed CI budget with no crash, hang, stack exhaustion, or unbounded allocation; retain discovered seeds.
-- Soak repeated mount/update/unmount and session creation/expiry with bounded DOM nodes, listeners, timers, sessions, and memory.
-- Record renderer asset size, cold resource-read latency, first render, update render, Markdown render, and 100 concurrent presentation-session memory baselines. Approve budgets before release claims.
+- Soak repeated mount/update/unmount with bounded DOM nodes, listeners, timers, and memory. Add session creation/expiry bounds when browser sessions ship; test equivalent disposal bounds for native adapters.
+- Record renderer asset size, cold resource-read latency, first render, update render, and Markdown render baselines for increment A. Approve budgets before release claims. Add 100 concurrent presentation-session memory baselines when browser sessions ship; include native Pi lifecycle/render measurements in increment A.
 - Verify dependency licenses/SBOM, package boundaries, API report, tarball contents, source maps, notices, and no fixture secrets or unpublished custom source in artifacts.
 - Run Node/version compatibility and the existing full workspace suite. Browser tests run from packed artifacts and built assets, not dev-source aliases.
 - Manual smoke against each advertised vendor host verifies render, theme, resize, one allowed interaction, one veto, fallback, and disconnect. Record product/version/date; failure removes the support claim rather than weakening automated conformance.
 
-### Phase success criteria
+### Increment release and roadmap completion criteria
 
-Phase 14 is complete only when:
+An increment is releasable only when:
 
-- the same Kanban action remains correct through HTTP, CLI, plain MCP, MCP Apps, standalone browser, and Pi;
-- Apps/browser/Pi render the same standard semantic content and an interaction reaches the same canonical action with the same principal and policy outcome;
+- the Kanban action remains correct through HTTP, CLI, plain MCP, and every UI surface advertised by that increment;
+- shipped renderers preserve relevant semantic content, and interactions reach the canonical action under the intended principal with the same policy outcome;
+- lifecycle, stale/conflict handling, mutation recovery, and human/agent visibility satisfy the reviewed P14-00 contract;
 - a client with no UI support loses no domain capability and receives useful deterministic output;
-- malicious content and undeclared actions remain inert/denied across web, text, and terminal renderers;
-- resources and sessions are bounded, authenticated, generation-safe, and cleaned up under cancellation/restart;
-- public API/protocol fixtures, package artifacts, user documentation, compatibility matrix, performance evidence, and `STATUS.md` command results are reviewed;
-- no README or marketing material claims GenUI support for a harness that has only an unrecorded manual assumption.
+- malicious content and undeclared actions remain inert/denied across all shipped paths;
+- resources and any shipped sessions are bounded, authenticated, generation-safe, and cleaned up under cancellation/restart;
+- applicable public API/protocol fixtures, package artifacts, user documentation, compatibility matrix, performance evidence, and `STATUS.md` command results are reviewed;
+- no README or marketing material claims support for an unverified host, component, deployment mode, or interaction.
+
+Phase 14's planned roadmap is complete when increments A–B pass their respective gates. Later component/custom-runtime expansion is not a prerequisite for that milestone. Passing increment A permits narrowly scoped MCP Apps and native Pi claims for the verified subset; it does not imply browser support. Do not mark version one releasable while either required interactive surface is missing its evidence.

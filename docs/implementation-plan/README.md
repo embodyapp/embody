@@ -22,7 +22,7 @@ This directory is the execution source of truth for agents implementing the spec
 | 13 | [Commercial and source-available licensing](./13-commercial-licensing.md) | 12 |
 | 14 | [Generative UI presentation](./14-generative-ui.md) | 5, 8–10; post-baseline feature track |
 
-Phase 13 remains the final gate for the baseline release train. Phase 14 is a separately gated feature track: it may proceed in parallel where its dependencies are complete, but it must pass P14-07 before any release or documentation advertises GenUI support.
+Phase 13 remains the final gate for the baseline release train. Phase 14 is an incremental, separately gated feature roadmap: it may proceed in parallel where its dependencies are complete. Start with P14-00's reference journey and interaction semantics, then a minimal MCP Apps slice and native Pi subset developed in parallel. Both interactive surfaces are required for version one and must pass applicable P14-07 evidence gates. Browser handoff is a later increment, not a prerequisite for version one.
 
 Also read [the cross-cutting test strategy](./TEST-STRATEGY.md) and [specification traceability matrix](./SPEC-TRACEABILITY.md). Each phase contains its own executable success criteria; a phase is not complete merely because code exists.
 
@@ -82,4 +82,4 @@ For every phase:
 
 ## Scope rule
 
-The specifications are authoritative for baseline product behavior. The architecture decision document supplies implementation detail where the specs are silent. Items explicitly deferred by an approved ADR (for example provider-specific Clerk integration) must not be presented as implemented. ADR 0003 includes durable workflows in MVP, so phase 11 must pass before phase 12. Phase 13 establishes source-available and commercial licensing and is the final baseline public-release gate. ADR 0005 and phase 14 define the post-baseline GenUI feature; it has an independent hardening/release gate and must not be advertised before that gate passes.
+The specifications are authoritative for baseline product behavior. The architecture decision document supplies implementation detail where the specs are silent. Items explicitly deferred by an approved ADR (for example provider-specific Clerk integration) must not be presented as implemented. ADR 0003 includes durable workflows in MVP, so phase 11 must pass before phase 12. Phase 13 establishes source-available and commercial licensing and is the final baseline public-release gate. ADR 0005 and phase 14 define the post-baseline GenUI roadmap; each capability has an independent hardening/release gate and must not be advertised before its applicable gate passes. Partial releases must name their verified surfaces and limitations rather than imply full roadmap support.

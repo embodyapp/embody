@@ -72,6 +72,7 @@ try {
   // tarball arguments. Install in dependency order, as a registry exposes each package.
   const installOrder = [
     "@embody/core",
+    "@embody/genui",
     "@embody/storage",
     "@embody/auth",
     "@embody/mcp",

@@ -4,10 +4,13 @@
   "version": "1.0.0",
   "type": "module",
   "exports": {
-    "./plugin": "./src/plugin.ts"
+    "./plugin": "./src/plugin.ts",
+    "./presentation": "./dist/src/presentation.js",
+    "./native-provider": "./dist/src/native-provider.js",
+    "./apps-resource.html": "./dist/kanban-app.html"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-presentation.mjs",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "dev": "embody dev",
     "prestart": "pnpm build",
@@ -18,10 +21,20 @@
   "dependencies": {
     "@embody/cli": "workspace:*",
     "@embody/core": "workspace:*",
-    "@embody/host": "workspace:*"
+    "@embody/genui": "workspace:*",
+    "@embody/host": "workspace:*",
+    "@modelcontextprotocol/ext-apps": "1.7.5",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.0.0",
+    "@embody/genui-pi": "workspace:*",
     "@embody/testing": "workspace:*",
+    "@embody/auth": "workspace:*",
+    "@embody/gateway": "workspace:*",
+    "playwright": "1.58.2",
+    "esbuild": "0.28.2",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@types/node": "^22.20.1"
   }
 }

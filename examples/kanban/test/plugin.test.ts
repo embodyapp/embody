@@ -112,6 +112,7 @@ describe("Kanban reference plugin", () => {
   it("advertises generated CRUD actions and bulkMove", async () => {
     const h = await harness();
     expect(Object.keys(h.kernel.manifest.actions)).toEqual([
+      "kanban.board",
       "kanban.bulkMove",
       "kanban.card.create",
       "kanban.card.delete",

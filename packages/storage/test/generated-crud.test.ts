@@ -92,10 +92,11 @@ describe("generated entity CRUD", () => {
       "afterDelete",
     ]);
     const events = await storage.transaction("org-a", (tx) => tx.outbox.list());
-    expect(events.map(({ eventName }) => eventName)).toEqual([
+    // Transactions can share a millisecond; outbox list has no insertion-order contract.
+    expect(events.map(({ eventName }) => eventName).sort()).toEqual([
       "kanban.card.created",
-      "kanban.card.updated",
       "kanban.card.deleted",
+      "kanban.card.updated",
     ]);
     await kernel.stop();
   });

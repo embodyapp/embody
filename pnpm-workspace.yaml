@@ -5,6 +5,7 @@ packages:
   - "test/fixtures/*"
 
 allowBuilds:
+  "@google/genai": false
   better-sqlite3: true
   core-js: false
   cpu-features: false

@@ -15,7 +15,13 @@ import {
   type AppManifest,
   type Principal,
 } from "@embody/core";
-import { DirectEventTransport, type EventDestination, type EventDirectory } from "@embody/host";
+import {
+  DirectEventTransport,
+  GENUI_RESOURCE_READ_SCOPE,
+  type EventDestination,
+  type EventDirectory,
+} from "@embody/host";
+import { GENUI_MIME_TYPE, genUiResourceIntegrity, parseGenUiResourceJson } from "@embody/genui";
 import {
   createMcpCatalog,
   McpHttpHandler,
@@ -279,6 +285,7 @@ export function scopeAllows(principal: Principal, app: string, target: string): 
   );
 }
 export interface GatewayTokenOptions {
+  readonly ttlSeconds?: number;
   readonly issuer: string;
   readonly key: Uint8Array;
   readonly kid?: string;
@@ -290,6 +297,9 @@ export async function issueGatewayToken(
   requestId: string,
   options: GatewayTokenOptions,
 ): Promise<string> {
+  const ttl = options.ttlSeconds ?? 300;
+  if (!Number.isInteger(ttl) || ttl < 1 || ttl > 300)
+    throw new Error("Gateway token lifetime is invalid");
   const now = Math.floor((options.clock ?? { now: () => new Date() }).now().getTime() / 1000);
   return new SignJWT({ ...principal, requestId })
     .setProtectedHeader({ alg: "HS256", ...(options.kid ? { kid: options.kid } : {}) })
@@ -297,7 +307,7 @@ export async function issueGatewayToken(
     .setAudience(app)
     .setJti(randomUUID())
     .setIssuedAt(now)
-    .setExpirationTime(now + 300)
+    .setExpirationTime(now + ttl)
     .sign(options.key);
 }
 export interface AuditRecord {
@@ -334,6 +344,8 @@ export class FixedWindowRateLimiter {
 }
 
 export interface GatewayOptions {
+  /** Bounded static-resource fetch deadline; default 10 seconds, maximum 30 seconds. */
+  readonly resourceTimeoutMs?: number;
   readonly registry: GatewayRegistry;
   readonly auth: AuthChain;
   readonly token: GatewayTokenOptions;
@@ -347,9 +359,49 @@ function bearer(value: string | undefined): string {
   if (!match?.[1]) throw new UnauthenticatedError();
   return match[1];
 }
+async function boundedResourceText(response: Response, signal: AbortSignal): Promise<string> {
+  const maximum = 8 * 1024 * 1024;
+  if (!response.body) throw new UnavailableError();
+  if (Number(response.headers.get("content-length")) > maximum) {
+    await response.body.cancel();
+    throw new UnavailableError();
+  }
+  const reader = response.body.getReader();
+  // A fetch implementation may resolve headers before a stalled body. Keep the deadline
+  // and client cancellation active for the entire read, not only the initial fetch.
+  const cancel = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal.addEventListener("abort", cancel, { once: true });
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      signal.throwIfAborted();
+      const part = await reader.read();
+      signal.throwIfAborted();
+      if (part.done) break;
+      const chunk: unknown = part.value;
+      if (!(chunk instanceof Uint8Array)) throw new UnavailableError();
+      bytes += chunk.byteLength;
+      if (bytes > maximum) throw new UnavailableError();
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    reader.releaseLock();
+  }
+}
 /** Fastify gateway control-plane server. */
 export function createGateway(options: GatewayOptions): FastifyInstance {
-  const app = Fastify({ bodyLimit: 1_048_576 });
+  const resourceTimeoutMs = options.resourceTimeoutMs ?? 10_000;
+  if (!Number.isInteger(resourceTimeoutMs) || resourceTimeoutMs < 1 || resourceTimeoutMs > 30_000)
+    throw new Error("Gateway resource timeout is invalid");
+  const app = Fastify({ bodyLimit: 1_048_576, forceCloseConnections: true });
   const audit = options.audit ?? new MemoryAuditLog();
   const fetcher = options.fetch ?? fetch;
   app.setErrorHandler((error, request, reply) => {
@@ -392,17 +444,36 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     const catalog = options.registry
       .snapshot()
       .filter((entry) => entry.status === "healthy")
-      .map((entry) => ({
-        ...entry,
-        manifest: {
-          ...entry.manifest,
-          actions: Object.fromEntries(
-            Object.entries(entry.manifest.actions).filter(([target]) =>
-              scopeAllows(principal, entry.appId, target),
-            ),
+      .map((entry) => {
+        const actions = Object.fromEntries(
+          Object.entries(entry.manifest.actions).filter(([target]) =>
+            scopeAllows(principal, entry.appId, target),
           ),
-        },
-      }))
+        );
+        const visibleViews = new Set(
+          Object.values(actions).flatMap((action) =>
+            action.presentation ? [action.presentation.view] : [],
+          ),
+        );
+        const views =
+          entry.manifest.views === undefined
+            ? undefined
+            : Object.fromEntries(
+                Object.entries(entry.manifest.views)
+                  .filter(([id]) => visibleViews.has(id))
+                  .map(([id, view]) => [
+                    id,
+                    {
+                      ...view,
+                      callableTargets: view.callableTargets.filter((target) => target in actions),
+                    },
+                  ]),
+              );
+        return {
+          ...entry,
+          manifest: { ...entry.manifest, actions, ...(views === undefined ? {} : { views }) },
+        };
+      })
       .filter((entry) => Object.keys(entry.manifest.actions).length > 0);
     const etag = `"${createHash("sha256").update(stableStringify(catalog)).digest("hex")}"`;
     reply.header("etag", etag).header("cache-control", "private, max-age=30");
@@ -415,7 +486,11 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         .snapshot()
         .filter((entry) => entry.status === "healthy")
         .filter((entry) => scoped === undefined || entry.appId === scoped)
-        .map((entry) => ({ appId: entry.appId, manifest: entry.manifest })),
+        .map((entry) => ({
+          appId: entry.appId,
+          manifest: entry.manifest,
+          generation: entry.generation,
+        })),
       scoped,
     ).filter((entry) => scopeAllows(principal, entry.appId, entry.target));
   const remoteEvents = async function* (
@@ -478,11 +553,104 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
               },
             };
         } else if (event === "result") yield { type: "result", value };
-        else if (event === "error") yield { type: "error", message: "Tool execution failed" };
+        else if (event === "error") {
+          const envelope =
+            value !== null && typeof value === "object" && "error" in value
+              ? value.error
+              : undefined;
+          const code =
+            envelope !== null && typeof envelope === "object" && "code" in envelope
+              ? envelope.code
+              : undefined;
+          const safeCode =
+            typeof code === "string" &&
+            ["HOOK_VETO", "VALIDATION_ERROR", "FORBIDDEN", "NOT_FOUND"].includes(code)
+              ? code
+              : undefined;
+          yield {
+            type: "error",
+            message: "Tool execution failed",
+            ...(safeCode === undefined ? {} : { code: safeCode }),
+          };
+        }
       }
     }
   };
-  const mcp = new McpHttpHandler<Principal>({ catalog: catalogFor, execute: remoteEvents });
+  const mcp = new McpHttpHandler<Principal>({
+    catalog: catalogFor,
+    execute: remoteEvents,
+    readResource: async (principal, entry, signal) => {
+      const view = entry.view;
+      if (!view || !entry.generation) throw new NotFoundError();
+      const authorize = () => {
+        const registered = options.registry.get(entry.appId);
+        const current = catalogFor(principal, entry.appId).find(
+          (candidate) =>
+            candidate.target === entry.target &&
+            candidate.generation === entry.generation &&
+            candidate.view?.resourceUri === view.resourceUri &&
+            candidate.view.integrity === view.integrity,
+        );
+        if (
+          !registered ||
+          registered.status !== "healthy" ||
+          registered.generation !== entry.generation ||
+          !current
+        )
+          throw new NotFoundError();
+        return registered;
+      };
+      const registered = authorize();
+      const token = await issueGatewayToken(
+        {
+          ...principal,
+          roles: [],
+          scopes: [GENUI_RESOURCE_READ_SCOPE],
+          metadata: { genuiResource: { uri: view.resourceUri, generation: entry.generation } },
+        },
+        entry.appId,
+        randomUUID(),
+        { ...options.token, ttlSeconds: Math.min(options.token.ttlSeconds ?? 60, 60) },
+      );
+      const readSignal = AbortSignal.any([signal, AbortSignal.timeout(resourceTimeoutMs)]);
+      const response = await fetcher(new URL("/genui/resources/read", registered.endpoint), {
+        method: "POST",
+        redirect: "error",
+        signal: readSignal,
+        headers: {
+          "x-gateway-auth": `Bearer ${token}`,
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify({
+          protocolVersion: 1,
+          uri: view.resourceUri,
+          generation: entry.generation,
+        }),
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new UnavailableError();
+      }
+      const value: unknown = JSON.parse(await boundedResourceText(response, readSignal));
+      if (
+        value === null ||
+        typeof value !== "object" ||
+        Array.isArray(value) ||
+        !("uri" in value) ||
+        !("mimeType" in value) ||
+        value.mimeType !== GENUI_MIME_TYPE
+      )
+        throw new UnavailableError();
+      const { uri, ...artifact } = value;
+      if (uri !== view.resourceUri) throw new UnavailableError();
+      const resource = parseGenUiResourceJson(JSON.stringify(artifact));
+      if (readSignal.aborted || genUiResourceIntegrity(resource) !== view.integrity)
+        throw new UnavailableError();
+      authorize();
+      return resource;
+    },
+  });
   const mcpRoute = async (request: FastifyRequest, reply: FastifyReply) => {
     const principal = await options.auth.authenticate(
       bearer(
@@ -498,13 +666,35 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       response: reply.raw,
       ...(request.body === undefined ? {} : { body: request.body }),
       ...(scoped === undefined ? {} : { scopedAppId: scoped }),
-      identity: `${principal.orgId}:${principal.actorId}`,
+      identity: stableStringify({
+        orgId: principal.orgId,
+        actorId: principal.actorId,
+        actorType: principal.actorType,
+      }),
       context: principal,
     });
   };
   for (const url of ["/mcp", "/mcp/:appId"])
     app.route({ method: ["GET", "POST", "DELETE"], url, handler: mcpRoute });
-  app.addHook("onClose", async () => mcp.close());
+  // MCP owns hijacked SSE responses. Close them before Fastify waits for active
+  // connections; onClose is too late and can deadlock shutdown after resource reads.
+  app.addHook("preClose", async () => mcp.close());
+  function assertPresentationBinding(
+    request: FastifyRequest,
+    registered: RegisteredApp,
+    target: string,
+  ): void {
+    const generation = request.headers["x-embody-genui-generation"];
+    const viewId = request.headers["x-embody-genui-view"];
+    if (generation === undefined && viewId === undefined) return;
+    if (
+      typeof generation !== "string" ||
+      typeof viewId !== "string" ||
+      generation !== registered.generation ||
+      !registered.manifest.views?.[viewId]?.callableTargets.includes(target)
+    )
+      throw new ForbiddenError("Presentation binding is unavailable");
+  }
   app.post("/api/execute/stream/:appId/:target", async (request, reply) => {
     const principal = await options.auth.authenticate(
       bearer(
@@ -520,6 +710,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     if (!(target in registered.manifest.actions))
       throw new NotFoundError("Target is not advertised");
     if (!scopeAllows(principal, appId, target)) throw new ForbiddenError();
+    assertPresentationBinding(request, registered, target);
     const requestId = String(reply.getHeader("x-request-id"));
     const controller = new AbortController();
     request.raw.once("aborted", () => controller.abort());
@@ -578,6 +769,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       if (!(target in registered.manifest.actions))
         throw new NotFoundError("Target is not advertised");
       if (!scopeAllows(principal, appId, target)) throw new ForbiddenError();
+      assertPresentationBinding(request, registered, target);
       const retry = options.limiter?.check(
         `${principal.orgId}:${principal.actorId}:${appId}:${target}`,
       );

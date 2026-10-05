@@ -4,6 +4,8 @@ import { dirname, resolve } from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
   BadRequestError,
+  ForbiddenError,
+  NotFoundError,
   RateLimitedError,
   UnauthenticatedError,
   UnavailableError,
@@ -18,6 +20,15 @@ import {
 import type { EventEnvelope } from "@embody/core";
 import { gatewayJwtVerifier, localDevVerifier, type AppAuthVerifier } from "@embody/auth";
 import { PostgresStorage, SqliteStorage, type StorageConnection } from "@embody/storage";
+import { GENUI_MIME_TYPE, genUiResourceIntegrity, type GenUiDefinition } from "@embody/genui";
+import { compileHostPresentation, type HostPresentation } from "./presentation.js";
+
+export {
+  compileHostPresentation,
+  type HostPresentation,
+  type HostedGenUiResource,
+} from "./presentation.js";
+export const GENUI_RESOURCE_READ_SCOPE = "@embody/genui:resource:read";
 import { WorkflowWorker } from "./workflows.js";
 import {
   DeliveryWorker,
@@ -58,6 +69,7 @@ export interface HostOptions {
   readonly concurrency?: number;
   readonly sseBufferBytes?: number;
   readonly sseKeepaliveMs?: number;
+  readonly presentation?: HostPresentation;
   /** Enables authenticated direct event reception. The shared secret is per producer deployment. */
   readonly eventDelivery?: {
     readonly storage: StorageConnection;
@@ -211,6 +223,59 @@ export function createHost(options: HostOptions): EmbodyHost {
       bearer(typeof gatewayAuth === "string" ? gatewayAuth : undefined),
     );
   };
+  const presentation = options.presentation;
+  if (presentation?.manifest.views !== undefined) {
+    const resourceRequest = z.strictObject({
+      protocolVersion: z.literal(1),
+      uri: z.string().min(1).max(256),
+      generation: z.string().regex(/^[a-f0-9]{64}$/),
+    });
+    app.post("/genui/resources/read", async (request, reply) => {
+      if (!accepting || options.kernel.state !== "ready") throw new UnavailableError();
+      const principal = await authenticateExecution(request);
+      if (!principal.scopes.includes(GENUI_RESOURCE_READ_SCOPE)) throw new ForbiddenError();
+      const parsed = resourceRequest.safeParse(request.body);
+      if (!parsed.success) throw new BadRequestError();
+      const purpose = z
+        .strictObject({ uri: z.string(), generation: z.string() })
+        .safeParse(principal.metadata?.["genuiResource"]);
+      if (
+        !purpose.success ||
+        purpose.data.uri !== parsed.data.uri ||
+        purpose.data.generation !== parsed.data.generation
+      )
+        throw new ForbiddenError();
+      if (parsed.data.generation !== presentation.generation) throw new NotFoundError();
+      const view = Object.values(presentation.manifest.views ?? {}).find(
+        (candidate) => candidate.resourceUri === parsed.data.uri,
+      );
+      if (!view) throw new NotFoundError();
+      let resource;
+      try {
+        const provided = presentation.readResource(parsed.data.uri, parsed.data.generation);
+        if (provided === undefined) throw new Error();
+        const metadata = provided.metadata;
+        resource = structuredClone({
+          uri: provided.uri,
+          mimeType: provided.mimeType,
+          text: provided.text,
+          ...(metadata === undefined ? {} : { metadata }),
+        });
+        if (
+          resource.uri !== parsed.data.uri ||
+          resource.mimeType !== GENUI_MIME_TYPE ||
+          genUiResourceIntegrity(resource) !== view.integrity
+        )
+          throw new Error();
+      } catch {
+        throw new UnavailableError("Presentation resource is unavailable");
+      }
+      const etag = `"${view.integrity}"`;
+      reply.header("etag", etag).header("cache-control", "private, max-age=31536000, immutable");
+      if (request.headers["if-none-match"] === etag) return reply.status(304).send();
+      return resource;
+    });
+  }
   app.post("/execute", async (request, reply) => {
     if (!accepting || options.kernel.state !== "ready") throw new UnavailableError();
     if (active >= maximum) {
@@ -222,6 +287,9 @@ export function createHost(options: HostOptions): EmbodyHost {
     const principal = await authenticateExecution(request);
     const controller = new AbortController();
     request.raw.once("aborted", () => controller.abort());
+    reply.raw.once("close", () => {
+      if (!reply.raw.writableEnded) controller.abort();
+    });
     active++;
     try {
       return await options.kernel.execute(parsed.data.target, parsed.data.input, {
@@ -360,6 +428,7 @@ export interface AppDefinition {
   readonly appId: string;
   readonly version: string;
   readonly plugins: readonly EmbodyPlugin[];
+  readonly genui?: GenUiDefinition;
 }
 
 /** Preserves literal app configuration while checking the public host contract. */
@@ -396,6 +465,9 @@ export interface AppHostRuntimeOptions {
 export interface AppHostRuntime {
   readonly app: FastifyInstance;
   readonly kernel: Kernel;
+  /** Authoritative metadata used for gateway registration; contains no resource or action data. */
+  readonly manifest: Kernel["manifest"];
+  readonly generation: string;
   readonly environment: AppEnvironment;
   readonly url: string | undefined;
   /** Deterministic worker hooks for tests and operational drains. */
@@ -506,6 +578,14 @@ export async function createAppHost(
   }
   const kernel = new Kernel({ plugins: definition.plugins, storage });
   await kernel.boot();
+  let presentation: HostPresentation;
+  try {
+    presentation = compileHostPresentation(definition, kernel.manifest);
+  } catch (error) {
+    await kernel.stop();
+    throw error;
+  }
+  const { manifest, generation } = presentation;
   let verifier = options.verifier;
   if (verifier === undefined && environment.NODE_ENV === "development") {
     verifier = localDevVerifier({
@@ -528,6 +608,7 @@ export async function createAppHost(
       audience: definition.appId,
       key: new TextEncoder().encode(secret),
       algorithms: ["HS256"],
+      ...(definition.genui === undefined ? {} : { maxTokenAgeSeconds: 60 }),
     });
   }
   const eventDestinations = parseEventDestinations(environment.EMBODY_EVENT_DESTINATIONS);
@@ -543,6 +624,7 @@ export async function createAppHost(
     appId: definition.appId,
     version: definition.version,
     environment: environment.NODE_ENV,
+    ...(definition.genui === undefined ? {} : { presentation }),
     ...(environment.EMBODY_EVENT_SECRET
       ? { eventDelivery: { storage, secret: environment.EMBODY_EVENT_SECRET } }
       : {}),
@@ -566,7 +648,7 @@ export async function createAppHost(
           version: definition.version,
           endpoint: environment.PUBLIC_URL,
           healthCheckUrl: new URL("/health", environment.PUBLIC_URL).toString(),
-          manifest: kernel.manifest,
+          manifest,
           heartbeatIntervalMs: environment.GATEWAY_HEARTBEAT_INTERVAL_MS,
           secret: environment.GATEWAY_REGISTRATION_SECRET,
         })
@@ -589,6 +671,8 @@ export async function createAppHost(
   return {
     app: host.app,
     kernel,
+    manifest,
+    generation,
     environment,
     get url() {
       return address;

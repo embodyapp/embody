@@ -48,9 +48,25 @@ References:
 - [Stable MCP Apps specification](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx)
 - [MCP Apps SDK and migration documentation](https://github.com/modelcontextprotocol/ext-apps)
 
+## Delivery amendment — 2026-10-02
+
+The ownership, execution, and security boundaries above remain accepted. Phase 14 is an incremental roadmap rather than a single all-renderers MVP:
+
+- Prove the Kanban reference journey first: open task, attempt mutation, encounter an applicable policy veto, correct it, and refresh authoritative state. Specify principal/actor behavior rather than assuming the agent-only PR hook applies to every human interaction.
+- Add P14-00 as the interaction-design gate for lifecycle, local versus domain state, refresh/result replacement, stale/conflicting data, ambiguous mutation outcomes, and consequential-change visibility to the human and agent.
+- Version one requires both a minimal standard-component MCP Apps vertical slice and an interactive native Pi subset, with deterministic text fallback. Develop them in parallel and prove the Kanban journey without browser handoff on both surfaces. Pi remains optional to install, not optional to the version-one release gate. Browser sessions remain a later increment. P14-07 security, artifact, compatibility, documentation, and performance evidence apply to both version-one surfaces; baseline publication gates are unchanged.
+- Native portability means semantic information and useful actions, not visual or component-by-component parity. Document native subsets and intentional degradation.
+- Defer custom HTML runtime support, a broad component catalog, and rich scaffolder/inspector automation until concrete workflows justify them. Existing custom-view contracts do not constitute a runtime support claim.
+- Retain schema-object identity for v1 as a provisional, enforceable constraint. Gather concrete projection/reuse pain points before proposing a protocol change.
+
+Conversation visibility must use verified host mechanisms; app audit records alone do not keep the agent informed. Hosts without automatic context updates need an explicit, documented reconciliation path. No private bridge protocol or new result envelope is authorized by this amendment.
+
+Execution details and per-increment release criteria are in [Phase 14](../implementation-plan/14-generative-ui.md); terminology is in the [GenUI glossary](../guides/genui-glossary.md).
+
 ## Deferred decisions
 
 - Output projectors, special `{ data, presentation }` response envelopes, and UI-private data hidden from the model are not part of the first increment; initially the UI renders the same validated result available to the calling client.
 - Durable, reconnectable human-input sessions and an action that blocks while awaiting a user are deferred. Interactive views issue normal actions and receive normal results.
 - Arbitrary remote view URLs, runtime-downloaded scripts, and model-authored component definitions are deferred.
+- Schema-driven default views and safe agent-composed documents require separate product/protocol proposals; neither is implied by the standard component model.
 - Additional native adapters are added only after their host APIs and maintenance ownership are explicit.

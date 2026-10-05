@@ -1,19 +1,17 @@
 import { definePlugin, HookVetoError, z } from "@embody/core";
 
-export const CardStatusSchema = z.enum(["todo", "in_progress", "in_review", "done"]);
-export const CardPrioritySchema = z.enum(["low", "medium", "high", "urgent"]);
-export const KanbanCardSchema = z.object({
-  title: z.string().min(1, "Title is required"),
-  description: z.string().optional(),
-  status: CardStatusSchema.default("todo"),
-  priority: CardPrioritySchema.default("medium"),
-  assigneeId: z.string().optional(),
-  prUrl: z.string().url().optional(),
-});
-
-export type CardStatus = z.output<typeof CardStatusSchema>;
-export type CardPriority = z.output<typeof CardPrioritySchema>;
-export type KanbanCard = z.output<typeof KanbanCardSchema>;
+import { CardStatusSchema, KanbanCardSchema, KanbanBoardSchema } from "./schemas.js";
+export {
+  CardStatusSchema,
+  CardPrioritySchema,
+  KanbanCardSchema,
+  KanbanBoardCardSchema,
+  KanbanBoardSchema,
+  type KanbanBoard,
+  type CardStatus,
+  type CardPriority,
+  type KanbanCard,
+} from "./schemas.js";
 
 const bulkMoveInput = z.object({
   cardIds: z
@@ -39,6 +37,19 @@ export const kanbanPlugin = definePlugin(
   },
   (define) => ({
     actions: {
+      board: define.action({
+        description: "Read a bounded page of the authoritative Kanban board",
+        input: z.object({ offset: z.number().int().min(0).max(1_000_000).default(0) }),
+        output: KanbanBoardSchema,
+        handler: async ({ offset }, context) => {
+          const records = await context.entities.card.list({ limit: 21, offset });
+          return {
+            title: "Kanban board",
+            cards: records.slice(0, 20).map(({ id, data }) => ({ id, data })),
+            nextOffset: records.length > 20 ? offset + 20 : null,
+          };
+        },
+      }),
       bulkMove: define.action({
         description: "Move multiple cards to a new status atomically",
         input: bulkMoveInput,
