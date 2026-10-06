@@ -26,6 +26,10 @@ Phase 13 remains the final gate for the baseline release train. Phase 14 is a se
 
 Also read [the cross-cutting test strategy](./TEST-STRATEGY.md) and [specification traceability matrix](./SPEC-TRACEABILITY.md). Each phase contains its own executable success criteria; a phase is not complete merely because code exists.
 
+## Managed hosting track
+
+The [hosting implementation plan](../hosting/implementation-plan/README.md) is a separate execution track. [ADR 0006](../adr/0006-cloud-run-stateless-hosting.md) selects Cloud Run first and requires stateless, sleep-capable hosted apps. Hosting CH9 adds request-driven host execution, external scheduling/wake and durable catalogs without removing local/self-hosted mode or waiving this framework's workflow/GenUI release gates. Changes to shared host/storage/gateway packages must run both applicable verification tracks. No hosting implementation is claimed by this cross-reference.
+
 ## Intended repository shape
 
 ```text
