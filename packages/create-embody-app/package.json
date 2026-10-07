@@ -41,7 +41,7 @@
     "access": "public"
   },
   "devDependencies": {
-    "@types/node": "^22.20.1",
-    "vitest": "^4.1.11"
+    "@types/node": "^26.6.4",
+    "vitest": "^5.0.3"
   }
 }
