@@ -7,7 +7,7 @@
     "test:e2e": "node journey.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "jose": "^6.1.3"
   }
 }
