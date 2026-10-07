@@ -33,10 +33,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "zod": "^4.3.6"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@types/node": "^22.19.11"
+    "@types/node": "^22.20.1"
   },
   "engines": {
     "node": "^22.0.0 || ^24.0.0"

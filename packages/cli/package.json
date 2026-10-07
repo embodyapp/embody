@@ -45,10 +45,10 @@
     "@embody/core": "workspace:*",
     "@embody/host": "workspace:*",
     "@embody/storage": "workspace:*",
-    "@modelcontextprotocol/sdk": "1.30.0"
+    "@modelcontextprotocol/sdk": "1.32.1"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.11"
   }
 }
