@@ -35,7 +35,7 @@
     "@embody/host": "workspace:*",
     "@embody/mcp": "workspace:*",
     "fastify": "^5.12.5",
-    "jose": "^6.2.10"
+    "jose": "^6.2.12"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

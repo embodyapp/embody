@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "gsap": "^3.15.0",
-    "posthog-js": "^1.434.2"
+    "posthog-js": "^1.435.8"
   },
   "devDependencies": {
     "typescript": "^5.9.3",
