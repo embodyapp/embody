@@ -39,13 +39,13 @@
     "verify": "pnpm lint && pnpm license:check && pnpm typecheck && pnpm test && pnpm build && pnpm api-report && pnpm format:check"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.29.8",
-    "@eslint/js": "^9.39.2",
-    "@microsoft/api-extractor": "^7.59.0",
-    "eslint": "^9.39.2",
-    "prettier": "^3.8.1",
+    "@changesets/cli": "^2.31.1",
+    "@eslint/js": "^9.39.5",
+    "@microsoft/api-extractor": "^7.59.3",
+    "eslint": "^9.39.5",
+    "prettier": "^3.9.9",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.53.1",
-    "vitest": "^4.0.18"
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^4.1.11"
   }
 }

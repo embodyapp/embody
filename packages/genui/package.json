@@ -81,7 +81,7 @@
     "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.30.0",
     "string-width": "^7.2.0",
-    "zod": "^4.3.6"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.11.1",

@@ -14,3 +14,12 @@ allowBuilds:
   ssh2: false
 
 onlyBuiltDependencies: []
+
+overrides:
+  source-map-js: ^1.2.2
+
+auditConfig:
+  ignoreGhsas:
+    # No patched release exists; both are only reachable through build tooling.
+    - GHSA-vfj7-8cjw-p6xm # braces via Changesets
+    - GHSA-hp3w-g68c-fv3c # sprintf-js via Changesets/API Extractor
