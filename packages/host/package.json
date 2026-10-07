@@ -40,7 +40,7 @@
     "@embody/auth": "workspace:*",
     "@embody/core": "workspace:*",
     "@embody/storage": "workspace:*",
-    "fastify": "^5.12.1"
+    "fastify": "^5.12.5"
   },
   "devDependencies": {
     "@types/node": "^22.20.1"
