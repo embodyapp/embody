@@ -6,7 +6,9 @@
 
 This directory turns the [hosting service plan](../PLAN.md) into **42 dependency-tracked work items**, each with verification first, implementation steps, acceptance cases and required evidence. It does not implement the hosting service or claim any tests have passed.
 
-**Accepted direction:** [ADR 0006](../../adr/0006-cloud-run-stateless-hosting.md) selects Cloud Run first and requires all hosted apps to be stateless/sleep-capable. Read the [Cloud Run architecture](../CLOUD-RUN-ARCHITECTURE.md) for service mapping and request/event/schedule wake paths. Sleep is launch-critical, not a deferred optimization. [ADR 0007](../../adr/0007-gateway-scale-to-zero.md) adds gateway scale-to-zero capability: CH9-07 must prove correct cold HTTP/CLI/MCP behavior, not merely app sleep.
+**Accepted direction:** [ADR 0007](../../adr/0007-cloud-run-stateless-hosting.md) selects Cloud Run first and requires all hosted apps to be stateless/sleep-capable. Read the [Cloud Run architecture](../CLOUD-RUN-ARCHITECTURE.md) for service mapping and request/event/schedule wake paths. Sleep is launch-critical, not a deferred optimization. [ADR 0008](../../adr/0008-gateway-scale-to-zero.md) adds gateway scale-to-zero capability: CH9-07 must prove correct cold HTTP/CLI/MCP behavior, not merely app sleep.
+
+**Shared framework work:** gateway, catalog, identity and the first slice of sleep support are implemented once, in framework [Phase 15](../../implementation-plan/15-central-mcp-gateway.md) (central MCP gateway, [ADR 0006](../../adr/0006-central-mcp-gateway.md) with Amendment 1). This plan consumes them and owns everything provider-specific. Ownership is listed in [HD23](./DECISIONS.md#hd23--alignment-with-the-central-mcp-gateway-phase-15) and in the [Phase 15 design plan](../../plans/central-mcp-gateway.md#8-relationship-to-the-hosting-plan).
 
 Read next:
 
@@ -100,7 +102,7 @@ Extend existing `auth`, `gateway`, `host`, `storage`, `cli`, `testing`, scaffold
 
 - Existing workflow ADR 0003 and security/release/legal blockers remain binding. This plan creates evidence dependencies; it does not mark those tasks finished.
 - Existing GenUI P14-07 gate remains binding unless explicitly superseded by an approved ADR. Optional-client scope reduction must not happen implicitly.
-- Cloud Run first and mandatory app sleep/statelessness are ACCEPTED-USER decisions in ADR 0006; gateway scale-to-zero capability is accepted in ADR 0007. Optional warm gateway capacity cannot substitute for min-zero correctness verification. BASELINE implementation details still require verification; OPEN region/security/configuration/legal choices block dependent completion.
+- Cloud Run first and mandatory app sleep/statelessness are ACCEPTED-USER decisions in ADR 0007; gateway scale-to-zero capability is accepted in ADR 0008. Optional warm gateway capacity cannot substitute for min-zero correctness verification. BASELINE implementation details still require verification; OPEN region/security/configuration/legal choices block dependent completion.
 - Pricing, recovery targets and availability are internal hypotheses/targets until measured and approved. Never publish them merely because they appear here.
 - Infrastructure limits and verification govern readiness. The previous 16–24-week estimate preceded mandatory sleep; re-estimate after CH1-03 and initial CH9-01/02 evidence rather than absorbing the new critical path invisibly.
 

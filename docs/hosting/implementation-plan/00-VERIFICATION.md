@@ -15,7 +15,7 @@ For each work item define, before implementation:
 
 Example: “App A cannot access B” is incomplete. A verifiable statement is: “From an isolated runtime using A's actual database credential, connecting to B's database is denied; changing `app.current_org` does not change that; B's canary rows are unchanged; the same runtime successfully reads its own canary, proving the test did not merely lose connectivity.”
 
-This contract precedes the implementation steps in this directory. Task-specific criteria add to it; they do not replace it. [ADR 0006](../../adr/0006-cloud-run-stateless-hosting.md) makes Cloud Run, stateless execution and scale-to-zero mandatory at launch; V19–V21 cannot be deferred. [ADR 0007](../../adr/0007-gateway-scale-to-zero.md) adds mandatory gateway scale-to-zero capability and V22; optional warm capacity cannot replace min-zero verification.
+This contract precedes the implementation steps in this directory. Task-specific criteria add to it; they do not replace it. [ADR 0007](../../adr/0007-cloud-run-stateless-hosting.md) makes Cloud Run, stateless execution and scale-to-zero mandatory at launch; V19–V21 cannot be deferred. [ADR 0008](../../adr/0008-gateway-scale-to-zero.md) adds mandatory gateway scale-to-zero capability and V22; optional warm capacity cannot replace min-zero verification.
 
 ## 1. Required fixture topology
 

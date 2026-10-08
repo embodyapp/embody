@@ -1,6 +1,6 @@
 # Hosting implementation status
 
-**State: planning only. Cloud Run first and mandatory stateless/sleep-capable apps are accepted by user instruction (ADR 0006); no implementation or verification is claimed.** Gateway scale-to-zero capability is additionally accepted in ADR 0007. There are now 42 work items; CH9 is launch-critical, not a later optimization. Existing framework completion states live in their own [tracker](../../implementation-plan/STATUS.md); do not copy DONE labels without checking the hosting requirements.
+**State: planning only. Cloud Run first and mandatory stateless/sleep-capable apps are accepted by user instruction (ADR 0007); no implementation or verification is claimed.** Gateway scale-to-zero capability is additionally accepted in ADR 0008. There are now 42 work items; CH9 is launch-critical, not a later optimization. Existing framework completion states live in their own [tracker](../../implementation-plan/STATUS.md); do not copy DONE labels without checking the hosting requirements.
 
 ## State and evidence rules
 
@@ -66,9 +66,9 @@ Dependencies name completed tasks unless an entry explicitly permits parallel sl
 | Dependency | State | Owner | Required evidence |
 | --- | --- | --- | --- |
 | HD01–HD22 implementation baseline review | OPEN | — | CH1-02 reviews detailed selections/consequences; accepted direction below is not reopened |
-| Cloud Run first (HD04) | ACCEPTED-USER | User | Explicit instruction; ADR 0006; implementation qualification remains CH1-03 |
-| Stateless/sleep mandatory (HD13/HD20) | ACCEPTED-USER | User | Explicit instruction; ADR 0006; no passing V19–V21 evidence yet |
-| Gateway zero capability (HD22) | ACCEPTED-USER | User | Explicit instruction; ADR 0007; CH9-07/V22 not implemented or verified |
+| Cloud Run first (HD04) | ACCEPTED-USER | User | Explicit instruction; ADR 0007; implementation qualification remains CH1-03 |
+| Stateless/sleep mandatory (HD13/HD20) | ACCEPTED-USER | User | Explicit instruction; ADR 0007; no passing V19–V21 evidence yet |
+| Gateway zero capability (HD22) | ACCEPTED-USER | User | Explicit instruction; ADR 0008; CH9-07/V22 not implemented or verified |
 | Region/network/IAM/budget configuration | OPEN | — | CH1-03 real GCP security/cost report and approval |
 | Durable wake/scanner/queue limits (HD21) | BASELINE_TO_VERIFY | — | CH9-02/03 transaction-gap, role, lag/connection and provider-limit proof |
 | Login provider/recovery/MFA (HD06) | OPEN | — | CH2-01 selected configuration, threat review and tests |
@@ -96,6 +96,7 @@ Dependencies name completed tasks unless an entry explicitly permits parallel sl
 ## Activity log
 
 - Initial planning: defined verification, decisions, 35 tasks and gates. No implementation, cloud provisioning, product test execution or task completion claimed.
-- User-directed revision: accepted Cloud Run first and mandatory stateless/sleep-capable apps in ADR 0006; superseded AWS/Fargate-first and deferred sleep. Added CH9-01…06, V19–V21 and updated launch dependencies (41 total tasks). No runtime or cloud tests executed by this documentation revision.
-- User-directed extension: accepted gateway scale-to-zero capability in ADR 0007/HD22; added CH9-07 and V22, cold-session/idle-connection tests, optional warm-capacity distinction and updated dependencies (42 tasks). Documentation only; no gateway/cloud tests executed.
+- User-directed revision: accepted Cloud Run first and mandatory stateless/sleep-capable apps in ADR 0007; superseded AWS/Fargate-first and deferred sleep. Added CH9-01…06, V19–V21 and updated launch dependencies (41 total tasks). No runtime or cloud tests executed by this documentation revision.
+- User-directed extension: accepted gateway scale-to-zero capability in ADR 0008/HD22; added CH9-07 and V22, cold-session/idle-connection tests, optional warm-capacity distinction and updated dependencies (42 tasks). Documentation only; no gateway/cloud tests executed.
+- 2026-10-08 claude — alignment with framework Phase 15: renumbered the hosting ADRs to 0007 (Cloud Run, stateless, sleep-capable apps) and 0008 (gateway scale-to-zero) because ADR 0006 on `main` is the central MCP gateway; added HD23 (shared work implemented once in Phase 15; workspace = company account, teams inside workspaces) and ownership notes on HD05, HD15 and the CH9 track. Documentation only; no tests executed.
 - Append future entries as: `YYYY-MM-DD owner — task, state change, exact commands/run ID, result, review or blocker`.

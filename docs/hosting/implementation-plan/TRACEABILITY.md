@@ -33,7 +33,7 @@ Every launch requirement below is traced to a task and invariant. [Verification]
 | Customer privacy/legal/support/abuse and billing terms | CH1-02, CH8-01/03/04 | V16, V18; counsel/owner review, support and signup-pause drills | Before customer data / G3 |
 | Sustainable unit economics and retained customer value | CH1-03, CH8-01/04 | V15, V18; cost reconciliation and design-partner cohort evidence | G3 |
 | Local and self-hosted compatibility | CH1-04, CH2-04, CH6-02, CH7-04, CH8-02, CH9-01 | V16, V17; packed consumers, local no-login, export/import | G1/G3 |
-| Cloud Run first, request-based min-zero runtime | CH1-03, CH3-01, CH9-06 | ADR 0006; V05, V19, V21; actual provider configuration/instance evidence | G0/G1/G2 |
+| Cloud Run first, request-based min-zero runtime | CH1-03, CH3-01, CH9-06 | ADR 0007; V05, V19, V21; actual provider configuration/instance evidence | G0/G1/G2 |
 | Every hosted app stateless across replacement/concurrency | CH9-01/06, CH6-02 | V19; wiped scratch, no boot effects, no detached work, incompatible fixture rejection | G1/G2 |
 | Events/schedules/retries wake from zero without user traffic | CH9-02/03 | V20; real Tasks/Scheduler, independent due-work sweep, source/intent/queue/ACK crash matrix | G1/G2 |
 | Discovery/idle MCP do not pin app instances | CH9-04 | V13, V19, V21; idle client with zero app requests/instances | G1/G2 |

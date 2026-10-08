@@ -1,10 +1,10 @@
 # Embody Cloud: managed hosting service plan
 
-**Status:** Product/implementation plan with **Cloud Run first and mandatory stateless, sleep-capable hosted apps accepted by user direction** in [ADR 0006](../adr/0006-cloud-run-stateless-hosting.md). Other baseline choices require verification/approval. Not an announcement or an approved SLA/pricing commitment.
+**Status:** Product/implementation plan with **Cloud Run first and mandatory stateless, sleep-capable hosted apps accepted by user direction** in [ADR 0007](../adr/0007-cloud-run-stateless-hosting.md). Other baseline choices require verification/approval. Not an announcement or an approved SLA/pricing commitment.
 
 **Implementation:** Start with the [verification contract](./implementation-plan/00-VERIFICATION.md), then the [detailed implementation plan](./implementation-plan/README.md), [decision register](./implementation-plan/DECISIONS.md), and [task tracker](./implementation-plan/STATUS.md).
 
-**Updated runtime architecture:** [Cloud Run, external durable state, and wake-on-work](./CLOUD-RUN-ARCHITECTURE.md). Sleep is a launch requirement, not a future optimization; [CH9-01…07](./implementation-plan/09-sleep-and-stateless-execution.md) define its implementation and tests. [ADR 0007](../adr/0007-gateway-scale-to-zero.md) also requires the gateway itself to support zero instances and correct cold-session recovery.
+**Updated runtime architecture:** [Cloud Run, external durable state, and wake-on-work](./CLOUD-RUN-ARCHITECTURE.md). Sleep is a launch requirement, not a future optimization; [CH9-01…07](./implementation-plan/09-sleep-and-stateless-execution.md) define its implementation and tests. [ADR 0008](../adr/0008-gateway-scale-to-zero.md) also requires the gateway itself to support zero instances and correct cold-session recovery.
 
 **Business direction:** Embody's primary business is hosting Embody applications. The framework is the creation and portability layer; the paid product is deploying, sharing, securing, and operating those applications without becoming an infrastructure engineer.
 
@@ -162,7 +162,7 @@ An outage of the console or deploy API should not stop healthy apps. The data pl
 
 ### 5.2 Selected provider and sleep-first architecture
 
-**Use GCP Cloud Run first**, in one launch region. This is accepted in ADR 0006, superseding the AWS/Fargate-first and always-on-first proposals. Region, exact configuration, security qualification and budgets remain to verify. No second provider or custom compute scheduler for MVP.
+**Use GCP Cloud Run first**, in one launch region. This is accepted in ADR 0007, superseding the AWS/Fargate-first and always-on-first proposals. Region, exact configuration, security qualification and budgets remain to verify. No second provider or custom compute scheduler for MVP.
 
 - **Cloud Run second-generation services:** isolated app/environment instances, request-based billing, minimum instances zero; no correctness reliance on process memory, disk, sticky sessions or post-response work.
 - **Cloud SQL PostgreSQL:** externally durable entities, outbox/inbox, schedules/workflows and idempotency; separate app databases/roles and protected platform state.
@@ -527,5 +527,5 @@ Suggested beta decision thresholds: ≥80% of supported deploy attempts complete
 - [Current self-hosted gateway behavior and limitations](../production/07-self-hosting-the-gateway.md).
 - [Durable workflows ADR](../adr/0003-durable-workflows.md).
 - [GenUI ownership ADR](../adr/0005-generative-ui-presentation.md).
-- [Cloud Run/stateless/sleep ADR](../adr/0006-cloud-run-stateless-hosting.md), [gateway scale-to-zero ADR](../adr/0007-gateway-scale-to-zero.md) and [runtime architecture](./CLOUD-RUN-ARCHITECTURE.md).
+- [Cloud Run/stateless/sleep ADR](../adr/0007-cloud-run-stateless-hosting.md), [gateway scale-to-zero ADR](../adr/0008-gateway-scale-to-zero.md) and [runtime architecture](./CLOUD-RUN-ARCHITECTURE.md).
 - [Commercial decisions](../commercial/DECISIONS.md) — deferred commercial choices remain unapproved until recorded there.

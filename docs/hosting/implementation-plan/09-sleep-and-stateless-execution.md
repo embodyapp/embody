@@ -1,6 +1,8 @@
 # 09 — Mandatory Cloud Run sleep and stateless execution
 
-**This is a launch-critical parallel track, not post-launch work.** The number preserves existing task IDs; implement early slices alongside phases 2–5. [ADR 0006](../../adr/0006-cloud-run-stateless-hosting.md) supersedes always-on-first hosting. [ADR 0007](../../adr/0007-gateway-scale-to-zero.md) additionally requires gateway scale-to-zero capability. Read the [architecture](../CLOUD-RUN-ARCHITECTURE.md) and [V19–V22 verification](./00-VERIFICATION.md) first.
+**This is a launch-critical parallel track, not post-launch work.** The number preserves existing task IDs; implement early slices alongside phases 2–5. [ADR 0007](../../adr/0007-cloud-run-stateless-hosting.md) supersedes always-on-first hosting. [ADR 0008](../../adr/0008-gateway-scale-to-zero.md) additionally requires gateway scale-to-zero capability. Read the [architecture](../CLOUD-RUN-ARCHITECTURE.md) and [V19–V22 verification](./00-VERIFICATION.md) first.
+
+**Shared with framework Phase 15 ([HD23](./DECISIONS.md#hd23--alignment-with-the-central-mcp-gateway-phase-15)).** Phase 15 implements the framework parts once: the host `sleep` mode and bounded wake endpoint (first slice of CH9-01, [P15-15](../../implementation-plan/15-central-mcp-gateway.md)), the persistent catalog, app status and wake-tolerant calls (CH9-04, P15-05/P15-14), and the stateless, cold-start-safe gateway (CH9-07 framework parts, P15-04/P15-05/P15-08). Its MVP once-a-minute wake sweep is the first implementation of the wake path; CH9-02/CH9-03 replace it behind the same `POST /embody/wake` contract. Items below keep their provider-specific scope and evidence requirements.
 
 ## CH9-01 — Stateless hosted runtime and bounded worker invocation
 

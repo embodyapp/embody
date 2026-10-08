@@ -1,6 +1,6 @@
 # 03 — Isolated runtime, storage and configuration
 
-**Entry:** Cloud Run is selected by ADR 0006; its security/configuration spike and real-cloud harness must pass. Tests in this phase run customer-controlled JS/SQL under the exact credentials/network policies to be deployed.
+**Entry:** Cloud Run is selected by ADR 0007; its security/configuration spike and real-cloud harness must pass. Tests in this phase run customer-controlled JS/SQL under the exact credentials/network policies to be deployed.
 
 ## CH3-01 — Runtime provider and resource containment
 

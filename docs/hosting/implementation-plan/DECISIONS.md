@@ -2,7 +2,7 @@
 
 Read [verification](./00-VERIFICATION.md) first. This register records the engineering baseline used to make the plan executable, alternatives rejected, consequences and approval gates.
 
-**Status meanings:** `BASELINE` = selected in this implementation proposal, not evidence of deployment or owner approval; `ACCEPTED-EXISTING` = already required by an existing accepted framework ADR/business direction; `ACCEPTED-USER` = explicitly directed by the user and recorded in ADR 0006 or ADR 0007; `OPEN` = must be resolved before the named dependent work can finish; `DEFERRED` = explicitly outside launch. A BASELINE security/product boundary must be reviewed in CH1-02. Approval must name a reviewer/date/evidence; do not invent approvals. Material changes supersede entries rather than erasing history.
+**Status meanings:** `BASELINE` = selected in this implementation proposal, not evidence of deployment or owner approval; `ACCEPTED-EXISTING` = already required by an existing accepted framework ADR/business direction; `ACCEPTED-USER` = explicitly directed by the user and recorded in ADR 0007 or ADR 0008; `OPEN` = must be resolved before the named dependent work can finish; `DEFERRED` = explicitly outside launch. A BASELINE security/product boundary must be reviewed in CH1-02. Approval must name a reviewer/date/evidence; do not invent approvals. Material changes supersede entries rather than erasing history.
 
 ## Summary
 
@@ -11,7 +11,7 @@ Read [verification](./00-VERIFICATION.md) first. This register records the engin
 | HD01 | Hosting is the business; private team apps are the initial wedge | BASELINE; hosting direction supplied by user | V17; CH1-02 product review |
 | HD02 | Separate control, build, app and operations trust domains | BASELINE | V04–V06; CH1-03 |
 | HD03 | App/environment is runtime and database isolation unit | BASELINE | V05, V06; CH3-01/02 |
-| HD04 | GCP Cloud Run first; one launch region; no custom compute scheduler | ACCEPTED-USER for provider; region/configuration OPEN | ADR 0006; V05, V11, V13, V21; CH1-03 |
+| HD04 | GCP Cloud Run first; one launch region; no custom compute scheduler | ACCEPTED-USER for provider; region/configuration OPEN | ADR 0007; V05, V11, V13, V21; CH1-03 |
 | HD05 | Asymmetric downstream identity; no tenant-held minting keys | BASELINE | V02; CH2-04 |
 | HD06 | Own authorization; buy login; least privilege across all surfaces | BASELINE; login provider OPEN | V01–V03; CH2-01/03 |
 | HD07 | App-specific PostgreSQL DB/role; RLS is defense in depth | BASELINE | V06, V11; CH3-02 |
@@ -20,16 +20,17 @@ Read [verification](./00-VERIFICATION.md) first. This register records the engin
 | HD10 | At-least-once, version-pinned workflows stay launch-critical | ACCEPTED-EXISTING; hosted adaptation BASELINE | ADR 0003; V10; CH7-01 |
 | HD11 | Private previews; explicit production promotion | BASELINE | V09; CH4-02, CH6-04 |
 | HD12 | Separate customer-view site; no bypass of GenUI release gate | BASELINE; gate adjustment OPEN if requested | ADR 0005; V12; CH6-03 |
-| HD13 | All hosted apps sleep-capable; min-zero at launch | ACCEPTED-USER | ADR 0006; V19–V21; CH9-01…06 |
+| HD13 | All hosted apps sleep-capable; min-zero at launch | ACCEPTED-USER | ADR 0007; V19–V21; CH9-01…06 |
 | HD14 | Restore into new binding; rollback is not data undo | BASELINE | V07, V11; CH5-04, CH7-03 |
 | HD15 | Durable PostgreSQL platform state and fenced jobs; shared rate-limit store chosen explicitly | BASELINE; quota/session implementation OPEN | V07, V13; CH1-04, CH5-05 |
 | HD16 | Verification gates outweigh dates; real boundary proof mandatory | BASELINE | All V IDs; all gates |
 | HD17 | Workspace pricing; basic security in every paid tier | BASELINE; actual prices/limits OPEN | V15; CH8-01 |
 | HD18 | Preserve framework portability and current license model | ACCEPTED-EXISTING | V16, V17; CH1-04, CH8-03 |
 | HD19 | Strong external-effect enforcement requires a connector broker | BASELINE; broker DEFERRED | V03, V05; product claim review |
-| HD20 | Stateless hosted execution; durable state external; no process-affinity correctness | ACCEPTED-USER | ADR 0006; V19; CH9-01/06 |
+| HD20 | Stateless hosted execution; durable state external; no process-affinity correctness | ACCEPTED-USER | ADR 0007; V19; CH9-01/06 |
 | HD21 | PostgreSQL due-work truth + Cloud Tasks delivery + external reconciliation | BASELINE implementation of accepted sleep requirement | V20, V21; CH9-02…05 |
-| HD22 | Gateway supports actual zero and cold session recovery; warm capacity optional | ACCEPTED-USER | ADR 0007; V22; CH9-07 |
+| HD22 | Gateway supports actual zero and cold session recovery; warm capacity optional | ACCEPTED-USER | ADR 0008; V22; CH9-07 |
+| HD23 | Shared framework work lives in Phase 15; workspace = company account; teams inside workspaces | ACCEPTED-USER | ADR 0006 Amendment 1; Phase 15 |
 
 ## HD01 — Product boundary
 
@@ -53,7 +54,7 @@ Read [verification](./00-VERIFICATION.md) first. This register records the engin
 
 ## HD04 — Provider and region
 
-**Decision:** use **GCP Cloud Run first**, as explicitly directed by the user and recorded in [ADR 0006](../../adr/0006-cloud-run-stateless-hosting.md). Cloud Run second-generation min-zero services, Cloud SQL PostgreSQL, Cloud Tasks/Scheduler, Artifact Registry, Cloud Storage, Secret Manager and Cloud KMS form the [new baseline](../CLOUD-RUN-ARCHITECTURE.md). The provider is selected; region/configuration/security qualification are not complete.
+**Decision:** use **GCP Cloud Run first**, as explicitly directed by the user and recorded in [ADR 0007](../../adr/0007-cloud-run-stateless-hosting.md). Cloud Run second-generation min-zero services, Cloud SQL PostgreSQL, Cloud Tasks/Scheduler, Artifact Registry, Cloud Storage, Secret Manager and Cloud KMS form the [new baseline](../CLOUD-RUN-ARCHITECTURE.md). The provider is selected; region/configuration/security qualification are not complete.
 
 **Superseded alternative:** AWS/Fargate-first and an always-on-first MVP. Do not build a second provider or re-open selection by default. Custom compute scheduling/Kubernetes remain out of scope; a small trusted durable-work scheduler is required and is not a custom container orchestrator.
 
@@ -66,6 +67,8 @@ Read [verification](./00-VERIFICATION.md) first. This register records the engin
 **Decision:** hosted downstream JWTs use an explicitly allowed asymmetric algorithm, short lifetime (initial design ceiling: 60 seconds), issuer/audience/environment binding and `kid` rotation. Gateway/signing service holds private key material; app hosts receive only verification keys. Select the concrete algorithm/key service combination in CH2-04 after provider support review.
 
 **Alternative rejected:** shared HS256 gateway/app secret lets hostile apps mint accepted identities. Merely choosing a random stronger shared secret does not solve this.
+
+**Implemented by:** framework Phase 15 P15-09 (workspace-bound ES256 tokens with JWKS), so it is not built twice.
 
 **Consequences:** add an explicit hosted verifier configuration without silently breaking self-hosted HS256 compatibility. Hosted mode rejects HS256. Key rotation, bounded JWKS caching and unknown-key refresh are tested. JWT expiry alone cannot meet 30-second revocation with a 60-second token: policy/session invalidation and freshness checks are also required.
 
@@ -133,6 +136,8 @@ Read [verification](./00-VERIFICATION.md) first. This register records the engin
 
 **Decision:** use Cloud SQL PostgreSQL for durable control-plane resources, deployment jobs, idempotency, policy revisions, wake intents and transactional audit outbox. Use **Cloud Tasks as the managed invocation/delivery layer**, with Cloud Scheduler driving bounded reconciliation. PostgreSQL remains work truth; queue ACKs do not replace transactional completion. Provider calls and control-plane steps are bounded, persisted and externally resumed, not detached post-response loops. Trusted platform services—not customer apps—own cross-workspace scheduling.
 
+**Phase 15 alignment:** the persistent registry and catalog are Phase 15 P15-05/P15-08 (PostgreSQL `GatewayStore`); MCP is stateless (P15-04), so there is no gateway session state to persist for MCP.
+
 **Open:** choose shared rate-limit primitives and gateway session persistence in CH5-05. Options include a dedicated managed cache with atomic counters, or a measured database-backed limiter. MCP sessions terminate at trusted gateways, not app instances; catalog/progress data must survive app sleep and gateway replacement. Affinity is at most an optimization, never the sole correctness mechanism. Exact session/reconnect semantics remain to test.
 
 **Reason:** selecting a distributed cache by habit does not establish failover correctness, but process-local counters/registry are inadequate for hosted replicas.
@@ -154,7 +159,7 @@ Read [verification](./00-VERIFICATION.md) first. This register records the engin
 
 ## HD22 — Gateway scale-to-zero capability
 
-**Accepted requirement:** the hosted gateway must support minimum instances zero and recover correct behavior on the next request without live process state. [ADR 0007](../../adr/0007-gateway-scale-to-zero.md) records this extension to ADR 0006. CH9-07/V22 are mandatory before launch, not satisfied by app-only sleep tests.
+**Accepted requirement:** the hosted gateway must support minimum instances zero and recover correct behavior on the next request without live process state. [ADR 0008](../../adr/0008-gateway-scale-to-zero.md) records this extension to ADR 0007. CH9-07/V22 are mandatory before launch, not satisfied by app-only sleep tests.
 
 **Implementation baseline:** external durable/reconstructable routing, authorization, quotas, audit intent and logical session/progress state; bounded lazy cold startup; no gateway-owned background scheduling. Prefer stateless MCP HTTP where supported, otherwise define restart-safe session state or protocol-correct expiry/reinitialization. Live SDK transport/server/socket objects cannot simply be serialized into a shared cache.
 
@@ -162,8 +167,18 @@ Read [verification](./00-VERIFICATION.md) first. This register records the engin
 
 **Verification/consequences:** measure gateway-only and both-gateway-and-app cold latency externally; show real zero intervals, independent scheduled app work, preserved quotas/audit, cold revocation and no mutation replay after disconnect. Shared database/network costs remain; no guarantee of zero during continuous customer traffic. The concrete transport/client support matrix remains a CH9-07 design-and-test gate, not presumed universal compatibility.
 
+## HD23 — Alignment with the central MCP gateway (Phase 15)
+
+**Accepted (user, 2026-10-08):** framework [Phase 15](../../implementation-plan/15-central-mcp-gateway.md) and [ADR 0006](../../adr/0006-central-mcp-gateway.md) Amendment 1 cover the gateway as a multi-tenant central MCP server. To avoid planning the same work twice:
+
+- **Terms.** A **workspace** is a customer company's account: the tenant, `orgId` in framework code (as HD06 already maps it). **Teams** are units inside a workspace (for example "Sales EMEA") that own apps; they are not a data boundary. Every app deployment belongs to exactly one workspace and is workspace-wide or team-owned.
+- **Implemented once, in Phase 15:** workspace-bound asymmetric gateway tokens (HD05 → P15-09); persistent registry and catalog independent of running instances (HD15, CH9-04 → P15-05, P15-08); stateless MCP (CH9-07 → P15-04); wake-tolerant calls, app status from real calls and a due-time wake sweep (CH9-04 → P15-14); host `sleep` runtime mode with bounded wake work (first slice of CH9-01 → P15-15); app-to-app calls inside a workspace (P15-13).
+- **Owned here:** Cloud Run services and min-zero profiles, provisioning, deploy-time registration, the full due-work reconciler with Cloud Tasks and the trusted dispatcher (CH9-02, CH9-03), version-pinned wake and restore fences (CH9-05), launch evidence and cost model (CH9-06, CH9-07 evidence), accounts, invitations, billing, previews and builds.
+- **Wake contract.** Phase 15's MVP wakes apps through `POST /embody/wake` driven by a once-a-minute sweep of saved next-due times plus a daily safety wake. HD21's reconciler and Cloud Tasks replace the sweep behind the same endpoint when stronger timing and scale guarantees are needed.
+- **App states.** Phase 15 defines `ready`, `idle` and `unavailable` from real calls. CH9-04's hosting states (deployed, executing, failed, paused, deleted) extend them with provider and operation evidence.
+
 ## Open-decision closure checklist
 
 Each closure records: selected option; alternatives and rejection reasons; cost/security/compatibility consequences; reviewer/approver; date; test evidence; affected plan/task IDs; reconsideration trigger.
 
-Before G0 close: product boundary review, Cloud Run security/cost qualification, region, infrastructure budget, identity-provider shortlist and GenUI gate resolution plan. Provider selection and mandatory app sleep/statelessness are accepted under ADR 0006; gateway-zero capability is accepted under ADR 0007. Do not leave these requirements marked OPEN. Before the dependent task completes close: concrete signer algorithm/provider, account recovery policy, event transport, limiter/session model, migration compatibility contract. Before customer data/paid launch close: legal/privacy, support staffing, retention/recovery promises, prices and limits. Never mark an OPEN decision accepted merely because a placeholder is implemented.
+Before G0 close: product boundary review, Cloud Run security/cost qualification, region, infrastructure budget, identity-provider shortlist and GenUI gate resolution plan. Provider selection and mandatory app sleep/statelessness are accepted under ADR 0007; gateway-zero capability is accepted under ADR 0008. Do not leave these requirements marked OPEN. Before the dependent task completes close: concrete signer algorithm/provider, account recovery policy, event transport, limiter/session model, migration compatibility contract. Before customer data/paid launch close: legal/privacy, support staffing, retention/recovery promises, prices and limits. Never mark an OPEN decision accepted merely because a placeholder is implemented.

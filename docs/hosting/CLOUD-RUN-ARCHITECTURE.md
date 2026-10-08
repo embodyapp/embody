@@ -1,6 +1,6 @@
 # Cloud Run hosting architecture: stateless apps, durable state, external wake-up
 
-**Authority:** [ADR 0006](../adr/0006-cloud-run-stateless-hosting.md) records the user's accepted Cloud Run/stateless/sleep direction. This document specifies the implementation baseline; provisioning and verification have not happened. It replaces the previous always-on-first hosting approach. [ADR 0007](../adr/0007-gateway-scale-to-zero.md) additionally requires a verified gateway min-zero profile; optional warm gateway capacity remains an operational choice.
+**Authority:** [ADR 0007](../adr/0007-cloud-run-stateless-hosting.md) records the user's accepted Cloud Run/stateless/sleep direction. This document specifies the implementation baseline; provisioning and verification have not happened. It replaces the previous always-on-first hosting approach. [ADR 0008](../adr/0008-gateway-scale-to-zero.md) additionally requires a verified gateway min-zero profile; optional warm gateway capacity remains an operational choice.
 
 ## 1. Runtime contract
 

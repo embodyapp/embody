@@ -28,7 +28,7 @@ Also read [the cross-cutting test strategy](./TEST-STRATEGY.md) and [specificati
 
 ## Managed hosting track
 
-The [hosting implementation plan](../hosting/implementation-plan/README.md) is a separate execution track. [ADR 0006](../adr/0006-cloud-run-stateless-hosting.md) selects Cloud Run first and requires stateless, sleep-capable hosted apps. Hosting CH9 adds request-driven host execution, external scheduling/wake and durable catalogs without removing local/self-hosted mode or waiving this framework's workflow/GenUI release gates. Changes to shared host/storage/gateway packages must run both applicable verification tracks. No hosting implementation is claimed by this cross-reference.
+The [hosting implementation plan](../hosting/implementation-plan/README.md) is a separate execution track. [ADR 0007](../adr/0007-cloud-run-stateless-hosting.md) selects Cloud Run first and requires stateless, sleep-capable hosted apps. Hosting CH9 adds request-driven host execution, external scheduling/wake and durable catalogs without removing local/self-hosted mode or waiving this framework's workflow/GenUI release gates. Changes to shared host/storage/gateway packages must run both applicable verification tracks. No hosting implementation is claimed by this cross-reference.
 
 ## Intended repository shape
 

@@ -107,5 +107,5 @@ Looking for low-level protocol specifications, architectural decision records (A
 - **[Embody Cloud Hosting Plan](./hosting/PLAN.md)**: Proposed hosting product, one-click deployment, sharing, runtime isolation, operations, pricing, and phased delivery.
 - **[Hosting Implementation Plan](./hosting/implementation-plan/README.md)**: Verification-first tasks, acceptance tests, architectural decisions, dependencies, and release gates.
 - **[Cloud Run Stateless Hosting Architecture](./hosting/CLOUD-RUN-ARCHITECTURE.md)**: Selected GCP stack, stateless app contract, scale-to-zero, durable wake-up, and gateway-owned sessions.
-- **[ADR 0006: Cloud Run and Sleep-Capable Apps](./adr/0006-cloud-run-stateless-hosting.md)**: Accepted provider/runtime direction; sleep is a launch requirement.
-- **[ADR 0007: Gateway Scale-to-Zero](./adr/0007-gateway-scale-to-zero.md)**: Mandatory gateway zero-capacity support, cold session recovery, and optional warm-capacity policy.
+- **[ADR 0007: Cloud Run and Sleep-Capable Apps](./adr/0007-cloud-run-stateless-hosting.md)**: Accepted provider/runtime direction; sleep is a launch requirement.
+- **[ADR 0008: Gateway Scale-to-Zero](./adr/0008-gateway-scale-to-zero.md)**: Mandatory gateway zero-capacity support, cold session recovery, and optional warm-capacity policy.

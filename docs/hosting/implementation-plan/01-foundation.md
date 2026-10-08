@@ -32,7 +32,7 @@
 **Implementation steps:**
 1. Inventory source upload, Git/login/billing callbacks, invite links, console/API, runtime ingress, MCP/SSE, views, events, secrets, migrations, exports and support tooling.
 2. Draw trust boundaries and attacker paths for malicious builders/apps/users/staff; assign each mitigation a test and accountable owner.
-3. Review HD01–HD22, accepted ADR 0006 (Cloud Run, statelessness and mandatory app sleep) and ADR 0007 (gateway zero-capacity support). Confirm private-app scope, deployment-as-data-access implications, pricing assumptions and what “production-ready” excludes.
+3. Review HD01–HD22, accepted ADR 0007 (Cloud Run, statelessness and mandatory app sleep) and ADR 0008 (gateway zero-capacity support). Confirm private-app scope, deployment-as-data-access implications, pricing assumptions and what “production-ready” excludes.
 4. Snapshot existing P11/P12/P13/P14 blockers with evidence links. Decide how required framework tests enter cloud gates without rewriting historical completion claims.
 5. Resolve the GenUI release scope through the existing gate or a reviewed superseding ADR; explicitly record optional-adapter dependency if retained.
 6. Finalize acceptance fixtures and initial supported workload limits; interview design partners using deploy/share/recovery scenarios.
@@ -64,7 +64,7 @@
 - `.c` stream/reconnect works through the selected edge; an idle app reaches zero and next authorized request cold-wakes it; app identity cannot use platform/neighbor credentials. Killing an instance is not assumed to revoke previously issued identity tokens—test IAM and revocation separately.
 - `.d` complete inventory is destroyed; independent inventory query finds no billable orphan outside explicitly retained evidence storage.
 
-**Completion evidence:** sanitized GCP infrastructure plan, cloud test reports, cost worksheet, provider assurance references and HD04 configuration qualification. If enforcement is infeasible, record BLOCKED and escalate the design under ADR 0006; do not silently switch provider or weaken V05.
+**Completion evidence:** sanitized GCP infrastructure plan, cloud test reports, cost worksheet, provider assurance references and HD04 configuration qualification. If enforcement is infeasible, record BLOCKED and escalate the design under ADR 0007; do not silently switch provider or weaken V05.
 
 ## CH1-04 — Scaffold contracts, services and durable platform state
 

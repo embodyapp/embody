@@ -1,8 +1,8 @@
-# ADR 0007: The hosted gateway must support scale-to-zero
+# ADR 0008: The hosted gateway must support scale-to-zero
 
 - Status: Accepted requirement, by explicit user instruction to add gateway scale-to-zero to the hosting plan.
 - Implementation status: Not implemented or verified. MCP transport/client compatibility and operational settings still need evidence.
-- Extends: [ADR 0006](./0006-cloud-run-stateless-hosting.md). Does not require shutting down active work, remove app sleep requirements, or claim databases/network services also scale to zero.
+- Extends: [ADR 0007](./0007-cloud-run-stateless-hosting.md). Does not require shutting down active work, remove app sleep requirements, or claim databases/network services also scale to zero.
 
 ## Decision
 

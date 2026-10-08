@@ -1,10 +1,10 @@
-# ADR 0006: Cloud Run first; stateless, sleep-capable hosted apps
+# ADR 0007: Cloud Run first; stateless, sleep-capable hosted apps
 
 - Status: Accepted for provider direction and mandatory runtime contract, by explicit user instruction in the hosting planning conversation.
 - Implementation status: Not implemented or verified. Detailed service configuration, security controls, region, budgets and operational targets still require the plan's evidence gates.
 - Supersedes: the AWS/Fargate-first evaluation and always-on-first/scale-to-zero-later proposals in hosting decisions HD04 and HD13. Does not supersede framework workflow semantics in ADR 0003 or GenUI gates in ADR 0005.
 
-**Extension:** [ADR 0007](./0007-gateway-scale-to-zero.md) additionally requires verified gateway scale-to-zero capability. Permission to choose warm shared capacity does not remove that requirement.
+**Extension:** [ADR 0008](./0008-gateway-scale-to-zero.md) additionally requires verified gateway scale-to-zero capability. Permission to choose warm shared capacity does not remove that requirement.
 
 ## Context
 
