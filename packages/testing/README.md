@@ -16,7 +16,7 @@ const card = await harness.client.kanban.card.create({ data: { title: "Typed" } 
 await harness.client.kanban.bulkMove({ cardIds: [card.id], newStatus: "in_review" });
 ```
 
-`call(target, input)` remains available for dynamic targets. `asAgent` and `asHuman` create immutable principal views, while `veto`, filtered `events(name)`, `progress(requestId)`, and `audit()` provide structured observations through the same production kernel seam. Calls accept an optional `AbortSignal` for cancellation tests.
+`call(target, input)` remains available for dynamic targets. `asAgent`, `asHuman` and `asDelegatedAgent` (an agent acting for a person, as the gateway attributes MCP calls) create immutable principal views, while `veto`, filtered `events(name)`, `progress(requestId)`, and `audit()` provide structured observations through the same production kernel seam. Calls accept an optional `AbortSignal` for cancellation tests.
 
 ## Startup benchmark
 

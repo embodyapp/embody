@@ -111,3 +111,43 @@ describe("createTestHarness", () => {
     ).rejects.toThrow(/unavailable service/i);
   });
 });
+
+describe("delegated principals", () => {
+  const echo = definePlugin({
+    id: "echo",
+    version: "1.0.0",
+    actions: {
+      whoami: {
+        input: z.object({}),
+        handler: (_input: unknown, context: KernelContext) => ({
+          actorType: context.principal.actorType,
+          delegation: context.principal.delegation,
+        }),
+      },
+    },
+  });
+
+  it("exposes the delegation to handlers", async () => {
+    const harness = await createTestHarness({ plugins: [echo] });
+    await expect(
+      harness.asDelegatedAgent("alice", { client: "codex" }).call("echo.whoami", {}),
+    ).resolves.toEqual({
+      actorType: "agent",
+      delegation: { subjectId: "alice", subjectType: "human", client: "codex" },
+    });
+    await harness.close();
+  });
+
+  it("rejects a delegation on a non-agent principal", async () => {
+    const harness = await createTestHarness({ plugins: [echo] });
+    const forged = harness.as({
+      ...harness.principal,
+      actorType: "human",
+      delegation: { subjectId: "alice", subjectType: "human" },
+    });
+    await expect(forged.call("echo.whoami", {})).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    await harness.close();
+  });
+});
