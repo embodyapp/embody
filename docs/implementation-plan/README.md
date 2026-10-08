@@ -21,6 +21,7 @@ This directory is the execution source of truth for agents implementing the spec
 | 12 | [Hardening and release readiness](./12-hardening-and-release.md) | 1–11 |
 | 13 | [Commercial and source-available licensing](./13-commercial-licensing.md) | 12 |
 | 14 | [Generative UI presentation](./14-generative-ui.md) | 5, 8–10; post-baseline feature track |
+| 15 | [Central MCP gateway](./15-central-mcp-gateway.md) | 7–8, 10; D-07; post-baseline feature track |
 
 Phase 13 remains the final gate for the baseline release train. Phase 14 is a separately gated feature track: it may proceed in parallel where its dependencies are complete, but it must pass P14-07 before any release or documentation advertises GenUI support.
 

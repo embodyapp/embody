@@ -14,6 +14,7 @@ This file is intentionally simple so small agents can coordinate without a proje
 | D-04 | Set supported Node/PostgreSQL/SQLite versions | DONE | pi | ADR 0002: Node 22/24, PostgreSQL 16+, SQLite 3.45+ JSON1 |
 | D-05 | Select first-party licensing model | DONE | pi | Unmodified Elastic License 2.0 plus paid commercial hosting terms and a separate trademark policy; source-available, not OSI open source |
 | D-06 | Approve GenUI ownership and renderer boundaries | DONE | pi | ADR 0005: apps own trusted views; `@embody/genui` ships web/text/browser renderers; native Pi support is an optional adapter; unsupported clients retain fallback output |
+| D-07 | Approve central MCP gateway, org tenancy, stateless MCP and delegated agent principal | OPEN | — | Proposed in `docs/plans/central-mcp-gateway.md`; ADR 0006 is written and approved in P15-00 |
 
 ## Work items
 
@@ -67,6 +68,18 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P14-05 | Standalone browser fallback and developer experience | NOT_STARTED | — | P9-02,P14-03 | Shared renderer, loopback short-lived capability sessions, secure headers/lifecycle, scaffolder and inspector workflow. |
 | P14-06 | `@embody/genui-pi` native adapter | NOT_STARTED | — | P14-02,P14-05 | Pi extension/TUI standard renderer, mode-safe text/browser fallback, keyboard/accessibility and lifecycle/package tests. |
 | P14-07 | GenUI reference E2E, hardening, docs, and release gate | NOT_STARTED | — | P10-03,P14-04,P14-05,P14-06 | Kanban parity journey across plain MCP/MCP Apps/browser/Pi/CLI; fuzz, soak, performance, security, artifacts, compatibility and dated vendor smoke evidence. |
+| P15-00 | ADR 0006 and MCP client spike | NOT_STARTED | — | P8-01 | ADR, spike server, dated `mcp-client-support.md`; sets compact threshold, session-mode need, identity provider |
+| P15-01 | Shared dispatch pipeline, real errors, audit on every surface | BLOCKED | — | D-07,P15-00 | Waiting for D-07 |
+| P15-02 | Action effects and app metadata | BLOCKED | — | D-07,P15-00 | Waiting for D-07 |
+| P15-03 | MCP tool metadata, structured results, compact discovery | BLOCKED | — | P15-01,P15-02 | |
+| P15-04 | Stateless MCP transport | BLOCKED | — | P15-03,P15-05 | |
+| P15-05 | Org-keyed state behind `GatewayStore` | BLOCKED | — | D-07,P15-00 | Waiting for D-07 |
+| P15-06 | Delegated agent principal | BLOCKED | — | D-07,P15-00 | Waiting for D-07 |
+| P15-07 | OAuth resource server per org | BLOCKED | — | P15-05,P15-06 | M2 |
+| P15-08 | PostgreSQL `GatewayStore` | BLOCKED | — | P15-05 | Needed for multi-instance deployments; may run in parallel with M2 |
+| P15-09 | Asymmetric, org-bound gateway tokens | BLOCKED | — | P15-05 | M3 |
+| P15-10 | Tenant routing, endpoint safety, per-org limits | BLOCKED | — | P15-05,P15-09 | M3 |
+| P15-11 | Isolation gate and production readiness | BLOCKED | — | P15-07,P15-08,P15-10 | M3 release gate |
 
 ## Current verification snapshot
 
@@ -113,3 +126,4 @@ Append concise entries; do not rewrite history.
 - 2026-09-19 `pi`: approved ADR 0005 and planned Phase 14 GenUI. The app owns trusted static/declarative views; action data remains authoritative; `@embody/genui` includes web, text, and standalone-browser renderers; Pi is an optional native adapter; MCP Apps and all fallback/security/release proofs are explicit P14 gates. No implementation was claimed.
 - 2026-09-19 `pi/01a0b7d0`: claimed P14-01 on branch `feat/genui-p14-01`.
 - 2026-09-19 `pi/01a0b7d0`: implemented P14-01 contracts and moved it to review. Added optional core view/action presentation manifests with strict cross-reference/resource validation, `@embody/genui` typed definitions/bindings/integrity/manifest enrichment, direct-output schema identity checks, accepted/rejected and compile-time tests, package artifacts/docs/changeset, and an ext-apps 1.7.5/MCP SDK 1.30 compatibility pin. Core 70 tests and GenUI 23 tests pass; root typecheck/build and affected quality gates pass. Full root tests are blocked only because native SQLite was installed with scripts disabled after Node 26/Android could not build it; root lint reports unrelated existing landing issues.
+- 2026-10-08 `claude`: proposed Phase 15 (central MCP gateway) and decision gate D-07; added planning rows only. No implementation was claimed.

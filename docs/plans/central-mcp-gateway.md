@@ -2,6 +2,8 @@
 
 **Status: proposal, not implemented.** Written 2026-10-08 against `main` at `3f44ab7`. Proposed IDs use `P15-xx`; nothing is claimed in [STATUS.md](../implementation-plan/STATUS.md) until the ADR in P15-00 is approved.
 
+**Implementation plan:** [Phase 15](../implementation-plan/15-central-mcp-gateway.md).
+
 **Related:** [ADR 0001](../adr/0001-phase-1-stack-and-package-boundaries.md), [ADR 0004](../adr/0004-cross-app-event-delivery.md), [ADR 0005](../adr/0005-generative-ui-presentation.md), [Phase 7](../implementation-plan/07-gateway.md), [Phase 8](../implementation-plan/08-mcp-and-cli.md), [Spec 04](../specs/04-pluggable-auth-identity.md), [Spec 05](../specs/05-client-surfaces-cli-mcp.md), [self-hosting](../production/07-self-hosting-the-gateway.md).
 
 ---
