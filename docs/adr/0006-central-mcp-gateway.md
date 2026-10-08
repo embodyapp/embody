@@ -32,19 +32,23 @@ The product direction is: each customer org is its own tenant; the gateway is st
 9. **The gateway is an OAuth resource server only.** It publishes protected-resource metadata per org, issues `401`/`403` challenges and validates tokens from the org's identity provider. It does not issue end-user tokens in production.
 10. **Errors are relayed, not replaced.** The host's sanitized error envelope (code, message, validation details, request ID) reaches MCP and HTTP clients; anything malformed becomes `INTERNAL`.
 
-## Amendment 1: tenants, workspaces and single-tenant apps (2026-10-08)
+## Amendment 1: workspaces, teams, single-tenant apps that can sleep (2026-10-08)
 
-Product direction clarified that Embody serves companies running many small, customized apps; that the gateway is multi-tenant; and that every app deployment belongs to one company. This amendment replaces decisions 2 and 3 and tightens 4 and 8. Other decisions are unchanged.
+Product direction clarified that Embody serves companies running many small, customized apps; that the gateway is multi-tenant; that every app deployment belongs to one company; and that apps and the gateway must be able to sleep when idle to reduce cost, without user-visible errors. This amendment replaces decisions 2 and 3, tightens 4, 5 and 8, and adds decisions on sleeping. Terms align with the Embody Cloud hosting plan (ADR 0007, ADR 0008).
 
-- **Tenant = company = `orgId`.** The existing `orgId` (principal, storage row-level security, events, registry) is the tenant: the only hard isolation boundary. The code keeps the name `orgId`; documentation calls it the tenant.
-- **Workspaces** are units inside a tenant (for example "Sales EMEA") that own apps. They are registration metadata and a discovery grouping, not a data boundary. Access is decided by scopes, which identity providers may map from workspace groups.
-- **Apps are single-tenant.** Every app deployment belongs to exactly one tenant and is either tenant-wide (for example a CRM used by all workspaces) or owned by one workspace. App IDs are unique within a tenant. A deployment never registers for more than one tenant; tenants that run the same app run separate deployments. Sharing customized apps is code distribution, not a gateway feature.
-- **Registrations** are keyed `(tenant, appId)`, carry an optional owning `workspaceId`, and are persisted until removed. Registration credentials are bound to one `(tenant, appId)` and optionally a workspace; the registration's tenant and workspace come from the credential.
-- **URLs** are `/t/<tenant>/...` (replacing `/o/<org>/...`). An optional `defaultTenant` keeps unprefixed routes for gateways that serve one tenant.
-- **Statelessness covers app hosts too.** Production hosts require `GATEWAY_ORG_ID`, reject gateway tokens for other tenants, and run as idempotent replicas behind one `PUBLIC_URL`.
-- **Tenant safety moves into the first release.** Because the gateway is multi-tenant from the start, the PostgreSQL store, tenant routing and asymmetric tenant-bound tokens are part of M1, not a later shared-hosting milestone. HS256 is accepted only on single-tenant gateways, for one release.
-- **App-to-app calls** (an app calling another app's actions in the same tenant through the gateway, with its own system identity and scopes) are added to Phase 15 after M1.
-- **Superseded:** the dedicated vs shared deployment modes, and registration credentials covering several orgs.
+- **Workspace = a customer company's account = the tenant = `orgId` in code.** It is the only hard isolation boundary (data, identity, credentials, billing). The code keeps the name `orgId`.
+- **Teams** are units inside a workspace (for example "Sales EMEA") that own apps. They are registration metadata and a discovery grouping, not a data boundary; access is decided by scopes, which identity providers may map from team groups.
+- **Apps are single-tenant.** Every app deployment belongs to exactly one workspace and is workspace-wide (for example a CRM) or team-owned. App IDs are unique within a workspace. A deployment never registers for more than one workspace.
+- **Registrations** are keyed `(workspace, appId)`, carry an optional owning team, are bound to credentials for exactly that key, and are **saved until removed, independent of any running instance**.
+- **URLs** are `/w/<workspace>/...`; `defaultWorkspace` keeps unprefixed routes for one-workspace gateways.
+- **Heartbeats are optional.** Apps register once per version (deploy pipeline or startup). App status (`ready`, `idle`, `unavailable`) is derived from real calls; tools are never removed because of status, and discovery never wakes an app.
+- **Calls tolerate sleeping apps:** a wake budget with progress messages; automatic retry only when the request provably never reached the app, or for `read`/`idempotent` actions; clear errors otherwise.
+- **Work without a user wakes its app:** events created by a request are sent before the response; apps report their next due time; a scheduler-driven sweep wakes apps with due work through a protected wake endpoint; a daily safety wake bounds the impact of a lost hint. The hosting plan's full reconciler may replace the sweep behind the same contract.
+- **App hosts have a `sleep` runtime mode** with no background timers, side-effect-free startup and a readiness check; `always-on` remains for local and self-hosted use.
+- **The gateway can scale to zero:** no in-memory state, lazy loading, fail-closed when the store is unavailable.
+- **Tenant safety is part of the MVP:** PostgreSQL store, workspace routing, asymmetric workspace-bound tokens and an isolation suite.
+- **App-to-app calls** within a workspace, with the calling app's own system identity and scopes, are part of the MVP.
+- **Superseded:** dedicated vs shared deployment modes; credentials covering several orgs; health from heartbeats; hiding tools of unhealthy apps.
 
 ## Consequences
 
