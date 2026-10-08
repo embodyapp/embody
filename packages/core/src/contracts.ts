@@ -9,6 +9,37 @@ export interface Principal {
   readonly roles: readonly string[];
   readonly scopes: readonly string[];
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /**
+   * Present when an agent acts on behalf of another subject, for example a model calling tools
+   * through an MCP client for the signed-in person. `actorType` is then `agent`.
+   */
+  readonly delegation?: Delegation;
+}
+
+/** The subject an agent principal acts for. */
+export interface Delegation {
+  /** The human or system the credential was issued to. At most 200 characters. */
+  readonly subjectId: string;
+  readonly subjectType: "human" | "system";
+  /** Verified client identifier (for example an OAuth client ID). At most 200 characters. */
+  readonly client?: string;
+}
+
+const DELEGATION_LIMIT = 200;
+
+/** Structural check for a delegation record; used by the kernel and token verifiers. */
+export function isValidDelegation(value: unknown): value is Delegation {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const { subjectId, subjectType, client, ...rest } = value as Record<string, unknown>;
+  return (
+    Object.keys(rest).length === 0 &&
+    typeof subjectId === "string" &&
+    subjectId.length > 0 &&
+    subjectId.length <= DELEGATION_LIMIT &&
+    (subjectType === "human" || subjectType === "system") &&
+    (client === undefined ||
+      (typeof client === "string" && client.length > 0 && client.length <= DELEGATION_LIMIT))
+  );
 }
 
 export interface EntityRecord<TData = Readonly<Record<string, unknown>>> {
@@ -68,6 +99,9 @@ export interface ExecutionAuditEvent {
   readonly durationMs: number;
   readonly outcome: "success" | "failure" | "cancelled";
   readonly errorCode?: string;
+  /** The delegating subject when the actor is an agent acting on someone's behalf. */
+  readonly subjectId?: string;
+  readonly client?: string;
 }
 
 export interface KernelServices {

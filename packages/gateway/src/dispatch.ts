@@ -222,6 +222,9 @@ export interface AuditRecord {
   readonly appId?: string;
   readonly target?: string;
   readonly actorId?: string;
+  /** The delegating subject and client when an agent acts on someone's behalf. */
+  readonly subjectId?: string;
+  readonly client?: string;
   readonly surface?: DispatchSurface;
   readonly outcome: AuditOutcome | (string & {});
   readonly errorCode?: EmbodyErrorCode;
@@ -310,6 +313,14 @@ export async function prepareDispatch(
       appId: context.appId,
       target: context.target,
       actorId: context.principal.actorId,
+      ...(context.principal.delegation === undefined
+        ? {}
+        : {
+            subjectId: context.principal.delegation.subjectId,
+            ...(context.principal.delegation.client === undefined
+              ? {}
+              : { client: context.principal.delegation.client }),
+          }),
       surface: context.surface,
       outcome,
       ...(errorCode === undefined ? {} : { errorCode }),

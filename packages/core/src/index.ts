@@ -2,6 +2,7 @@ export { z } from "zod";
 export {
   definePlugin,
   defineWorkflow,
+  isValidDelegation,
   type ActionDefinition,
   type ActionHandler,
   type ActionInput,
@@ -9,6 +10,7 @@ export {
   type ActorType,
   type CheckedActionDefinition,
   type CheckedPluginDefinition,
+  type Delegation,
   type DomainEvent,
   type ExecutionAuditEvent,
   type ExecutionOptions,

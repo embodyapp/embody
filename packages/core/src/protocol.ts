@@ -30,7 +30,16 @@ export const principalSchema = z
     roles: z.array(z.string().min(1).max(100)).max(100),
     scopes: z.array(z.string().min(1).max(200)).max(500),
     metadata: z.record(z.string(), z.unknown()).optional(),
+    delegation: z
+      .object({
+        subjectId: z.string().min(1).max(200),
+        subjectType: z.enum(["human", "system"]),
+        client: z.string().min(1).max(200).optional(),
+      })
+      .strict()
+      .optional(),
   })
+  // Only agent principals may carry a delegation; the kernel and token verifiers enforce this.
   .strict();
 
 const entityManifestSchema = z

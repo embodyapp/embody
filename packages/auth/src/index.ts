@@ -1,6 +1,6 @@
 import { URL } from "node:url";
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
-import { UnauthenticatedError, type Principal } from "@embody/core";
+import { isValidDelegation, UnauthenticatedError, type Principal } from "@embody/core";
 
 export interface GatewayJwtVerifierOptions {
   readonly issuer: string;
@@ -20,7 +20,7 @@ export interface AppAuthVerifier {
 }
 
 function principalFromClaims(claims: JWTPayload): Principal {
-  const { orgId, actorId, actorType, roles, scopes, metadata } = claims;
+  const { orgId, actorId, actorType, roles, scopes, metadata, delegation } = claims;
   if (
     typeof orgId !== "string" ||
     !orgId ||
@@ -32,7 +32,8 @@ function principalFromClaims(claims: JWTPayload): Principal {
     !Array.isArray(scopes) ||
     !scopes.every((value) => typeof value === "string") ||
     (metadata !== undefined &&
-      (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)))
+      (metadata === null || typeof metadata !== "object" || Array.isArray(metadata))) ||
+    (delegation !== undefined && (actorType !== "agent" || !isValidDelegation(delegation)))
   )
     throw new UnauthenticatedError("Gateway token has invalid principal claims");
   return {
@@ -42,6 +43,7 @@ function principalFromClaims(claims: JWTPayload): Principal {
     roles,
     scopes,
     ...(metadata === undefined ? {} : { metadata: metadata as Readonly<Record<string, unknown>> }),
+    ...(isValidDelegation(delegation) ? { delegation } : {}),
   };
 }
 

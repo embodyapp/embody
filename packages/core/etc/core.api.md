@@ -295,6 +295,14 @@ export function defineWorkflow<const TInput extends z.ZodType>(input: TInput): <
     readonly input: TInput;
 };
 
+// @public
+export interface Delegation {
+    readonly client?: string;
+    readonly subjectId: string;
+    // (undocumented)
+    readonly subjectType: "human" | "system";
+}
+
 // @public (undocumented)
 export class DependencyError extends EmbodyError {
     constructor(message?: string);
@@ -597,6 +605,8 @@ export interface ExecutionAuditEvent {
     // (undocumented)
     readonly actorId: string;
     // (undocumented)
+    readonly client?: string;
+    // (undocumented)
     readonly durationMs: number;
     // (undocumented)
     readonly errorCode?: string;
@@ -606,6 +616,7 @@ export interface ExecutionAuditEvent {
     readonly outcome: "success" | "failure" | "cancelled";
     // (undocumented)
     readonly requestId?: string;
+    readonly subjectId?: string;
     // (undocumented)
     readonly target: string;
     // (undocumented)
@@ -683,6 +694,9 @@ export class HookVetoError extends EmbodyError {
 export class InternalError extends EmbodyError {
     constructor(message?: string, options?: ErrorOptions);
 }
+
+// @public
+export function isValidDelegation(value: unknown): value is Delegation;
 
 // @public (undocumented)
 export type JsonSchema = Readonly<Record<string, unknown>>;
@@ -867,6 +881,7 @@ export interface Principal {
     readonly actorId: string;
     // (undocumented)
     readonly actorType: ActorType;
+    readonly delegation?: Delegation;
     // (undocumented)
     readonly metadata?: Readonly<Record<string, unknown>>;
     // (undocumented)
@@ -892,6 +907,14 @@ export const principalClaimsSchema: z.ZodObject<{
     roles: z.ZodArray<z.ZodString>;
     scopes: z.ZodArray<z.ZodString>;
     metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    delegation: z.ZodOptional<z.ZodObject<{
+        subjectId: z.ZodString;
+        subjectType: z.ZodEnum<{
+            human: "human";
+            system: "system";
+        }>;
+        client: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
     iss: z.ZodString;
     aud: z.ZodString;
     sub: z.ZodString;
@@ -913,6 +936,14 @@ export const principalSchema: z.ZodObject<{
     roles: z.ZodArray<z.ZodString>;
     scopes: z.ZodArray<z.ZodString>;
     metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    delegation: z.ZodOptional<z.ZodObject<{
+        subjectId: z.ZodString;
+        subjectType: z.ZodEnum<{
+            human: "human";
+            system: "system";
+        }>;
+        client: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 
 // @public (undocumented)
