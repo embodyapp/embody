@@ -14,7 +14,7 @@ This file is intentionally simple so small agents can coordinate without a proje
 | D-04 | Set supported Node/PostgreSQL/SQLite versions | DONE | pi | ADR 0002: Node 22/24, PostgreSQL 16+, SQLite 3.45+ JSON1 |
 | D-05 | Select first-party licensing model | DONE | pi | Unmodified Elastic License 2.0 plus paid commercial hosting terms and a separate trademark policy; source-available, not OSI open source |
 | D-06 | Approve GenUI ownership and renderer boundaries | DONE | pi | ADR 0005: apps own trusted views; `@embody/genui` ships web/text/browser renderers; native Pi support is an optional adapter; unsupported clients retain fallback output |
-| D-07 | Approve central MCP gateway, org tenancy, stateless MCP and delegated agent principal | DONE | owner | ADR 0006 accepted 2026-10-08; Amendment 1 (tenants, workspaces, single-tenant apps) 2026-10-08 |
+| D-07 | Approve central MCP gateway, tenancy, stateless MCP and delegated agent principal | DONE | owner | ADR 0006 accepted 2026-10-08; Amendment 1 (workspaces, teams, single-tenant apps that can sleep) 2026-10-08 |
 
 ## Work items
 
@@ -68,20 +68,23 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P14-05 | Standalone browser fallback and developer experience | NOT_STARTED | — | P9-02,P14-03 | Shared renderer, loopback short-lived capability sessions, secure headers/lifecycle, scaffolder and inspector workflow. |
 | P14-06 | `@embody/genui-pi` native adapter | NOT_STARTED | — | P14-02,P14-05 | Pi extension/TUI standard renderer, mode-safe text/browser fallback, keyboard/accessibility and lifecycle/package tests. |
 | P14-07 | GenUI reference E2E, hardening, docs, and release gate | NOT_STARTED | — | P10-03,P14-04,P14-05,P14-06 | Kanban parity journey across plain MCP/MCP Apps/browser/Pi/CLI; fuzz, soak, performance, security, artifacts, compatibility and dated vendor smoke evidence. |
-| P15-00 | ADR 0006 and MCP client spike | IN_PROGRESS | claude | P8-01 | ADR 0006 accepted and amended (tenants, workspaces, single-tenant apps); client spike and `mcp-client-support.md` remain |
-| P15-01 | Shared dispatch pipeline, real errors, audit on every surface | IN_REVIEW | claude | P8-01 | M1. PR #29; `pnpm verify` and `pnpm test:e2e` passed (E2E with the SQL init-script fix applied locally) |
-| P15-02 | Action effects and app metadata | IN_REVIEW | claude | D-07 | M1. PR #30; `pnpm verify` passed |
-| P15-03 | MCP tool metadata, structured results, compact discovery | NOT_STARTED | — | P15-01,P15-02 | M1 |
-| P15-04 | Stateless MCP transport | NOT_STARTED | — | P15-03,P15-05 | M1 |
-| P15-05 | Tenant-keyed store, tenant routing and workspaces | NOT_STARTED | — | D-07,P15-01 | M1. Includes `/t/<tenant>` routing (moved from P15-10) |
-| P15-06 | Delegated agent principal | IN_REVIEW | claude | P15-01 | M1. PR #31 (stacked on #29); `pnpm verify` passed |
-| P15-07 | OAuth resource server per tenant | NOT_STARTED | — | P15-05,P15-06 | M2 |
-| P15-08 | PostgreSQL `GatewayStore` | NOT_STARTED | — | P15-05 | M1 (moved from M3): required for multi-instance gateways |
-| P15-09 | Asymmetric, tenant-bound gateway tokens | NOT_STARTED | — | P15-05 | M1 (moved from M3) |
-| P15-10 | Endpoint safety and per-tenant limits | NOT_STARTED | — | P15-05,P15-09 | M3 |
-| P15-11 | Isolation gate and production readiness | NOT_STARTED | — | P15-07,P15-08,P15-10,P15-12 | M3 release gate |
-| P15-12 | Stateless, single-tenant app hosts | NOT_STARTED | — | P15-05,P15-09 | M1. `GATEWAY_ORG_ID` enforcement, replica idempotency, one-deployment-per-tenant E2E |
-| P15-13 | App-to-app calls within a tenant | NOT_STARTED | — | P15-05,P15-06,P15-09 | M2.5 |
+| P15-00 | ADR 0006, plan alignment and MCP client spike | IN_PROGRESS | claude | P8-01 | Stage 0. ADR 0006 accepted with Amendment 1 (workspaces, teams, single-tenant apps that can sleep); hosting plan aligned; client spike remains |
+| P15-01 | Shared dispatch pipeline, real errors, audit on every surface | IN_REVIEW | claude | P8-01 | Stage 1. PR #29; `pnpm verify` and `pnpm test:e2e` passed (E2E with the SQL init-script fix applied locally) |
+| P15-02 | Action effects and app metadata | IN_REVIEW | claude | D-07 | Stage 1. PR #30; `pnpm verify` passed |
+| P15-03 | MCP tool metadata, structured results, compact discovery | NOT_STARTED | — | P15-01,P15-02 | Stage 1 |
+| P15-04 | Stateless MCP transport | NOT_STARTED | — | P15-03,P15-05 | Stage 1 |
+| P15-05 | Workspace store, routing, teams and app status | NOT_STARTED | — | D-07,P15-01 | Stage 1. `/w/<workspace>` routing; heartbeats optional; status from real calls |
+| P15-06 | Delegated agent principal | IN_REVIEW | claude | P15-01 | Stage 1. PR #31 (stacked on #29); `pnpm verify` passed |
+| P15-07 | OAuth resource server per workspace | NOT_STARTED | — | P15-05,P15-06 | Stage 4 |
+| P15-08 | PostgreSQL `GatewayStore` | NOT_STARTED | — | P15-05 | Stage 1 |
+| P15-09 | Asymmetric, workspace-bound gateway tokens | NOT_STARTED | — | P15-05 | Stage 3 (= hosting HD05) |
+| P15-10 | Endpoint safety and per-workspace limits | NOT_STARTED | — | P15-05,P15-09 | Stage 3 |
+| P15-11 | Isolation gate and production readiness | NOT_STARTED | — | P15-07,P15-08,P15-10,P15-12 | Stage 3 isolation suite; load test and runbook may follow the MVP |
+| P15-12 | Stateless, single-tenant app hosts | NOT_STARTED | — | P15-05,P15-09 | Stage 3 |
+| P15-13 | App-to-app calls within a workspace | NOT_STARTED | — | P15-05,P15-06,P15-14 | Stage 5 (MVP) |
+| P15-14 | Sleep-safe gateway: wake-tolerant calls, safe retries, status, due-time wake sweep | NOT_STARTED | — | P15-05,P15-08 | Stage 2 |
+| P15-15 | Host sleep mode: no timers, events before response, wake endpoint, readiness check | NOT_STARTED | — | P15-14 | Stage 2 (first slice of hosting CH9-01) |
+| P15-16 | MVP proof on Cloud Run | NOT_STARTED | — | P15-07,P15-11,P15-13,P15-15 | Stage 6 |
 
 ## Current verification snapshot
 
@@ -130,4 +133,4 @@ Append concise entries; do not rewrite history.
 - 2026-09-19 `pi/01a0b7d0`: implemented P14-01 contracts and moved it to review. Added optional core view/action presentation manifests with strict cross-reference/resource validation, `@embody/genui` typed definitions/bindings/integrity/manifest enrichment, direct-output schema identity checks, accepted/rejected and compile-time tests, package artifacts/docs/changeset, and an ext-apps 1.7.5/MCP SDK 1.30 compatibility pin. Core 70 tests and GenUI 23 tests pass; root typecheck/build and affected quality gates pass. Full root tests are blocked only because native SQLite was installed with scripts disabled after Node 26/Android could not build it; root lint reports unrelated existing landing issues.
 - 2026-10-08 `claude`: proposed Phase 15 (central MCP gateway) and decision gate D-07; added planning rows only. No implementation was claimed.
 - 2026-10-08 `claude`: ADR 0006 accepted by the owner (D-07 DONE). P15-01 implemented on `feat/p15-01-dispatch-pipeline` and moved to review; P15-00 client spike remains.
-- 2026-10-08 `claude`: recorded ADR 0006 Amendment 1 from the owner: tenant = company (`orgId`), workspaces inside tenants, single-tenant stateless app deployments, `/t/<tenant>` URLs. Moved the PostgreSQL store and tenant-bound tokens into M1; added P15-12 (stateless single-tenant app hosts) and P15-13 (app-to-app calls).
+- 2026-10-08 `claude`: recorded ADR 0006 Amendment 1 from the owner: workspace = company account (`orgId`), teams inside workspaces own apps, single-tenant stateless app deployments, `/w/<workspace>` URLs, apps and gateway able to sleep (heartbeats optional, status from real calls, wake-tolerant calls, due-time wake sweep), app-to-app calls in the MVP. Restructured Phase 15 into MVP stages 0–6; added P15-14, P15-15, P15-16; aligned ownership with the hosting plan (design plan §8).

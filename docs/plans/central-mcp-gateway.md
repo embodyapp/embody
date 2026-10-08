@@ -1,23 +1,26 @@
 # Central MCP gateway: production plan
 
-**Status: accepted.** [ADR 0006](../adr/0006-central-mcp-gateway.md), amended 2026-10-08 with the tenant/workspace model below. Written against `main` at `3f44ab7`.
+**Status: accepted.** [ADR 0006](../adr/0006-central-mcp-gateway.md), amended 2026-10-08 (Amendment 1: workspaces, teams, single-tenant apps that can sleep). Written against `main` at `3f44ab7`.
 
 **Implementation plan:** [Phase 15](../implementation-plan/15-central-mcp-gateway.md) holds the work items, interfaces and tests. This document holds the model and the reasoning.
 
-**Related:** [ADR 0001](../adr/0001-phase-1-stack-and-package-boundaries.md), [ADR 0004](../adr/0004-cross-app-event-delivery.md), [ADR 0005](../adr/0005-generative-ui-presentation.md), [Phase 7](../implementation-plan/07-gateway.md), [Phase 8](../implementation-plan/08-mcp-and-cli.md), [Spec 04](../specs/04-pluggable-auth-identity.md), [Spec 05](../specs/05-client-surfaces-cli-mcp.md), [self-hosting](../production/07-self-hosting-the-gateway.md).
+**Hosting plan:** Embody Cloud hosting on Cloud Run ([hosting plan](../hosting/PLAN.md), ADR 0007 and ADR 0008 on the `docs/cloud-run-hosting-plan` branch) owns everything provider-specific. This plan owns the framework and gateway code both rely on. [§8](#8-relationship-to-the-hosting-plan) lists who owns what.
+
+**Related:** [ADR 0001](../adr/0001-phase-1-stack-and-package-boundaries.md), [ADR 0003](../adr/0003-durable-workflows.md), [ADR 0004](../adr/0004-cross-app-event-delivery.md), [ADR 0005](../adr/0005-generative-ui-presentation.md), [Phase 8](../implementation-plan/08-mcp-and-cli.md), [Spec 04](../specs/04-pluggable-auth-identity.md), [Spec 05](../specs/05-client-surfaces-cli-mcp.md).
 
 ---
 
 ## 1. Goal
 
-Embody's purpose is to let a company run many small, highly customized applications. People in that company should connect Claude Desktop, Claude web, Claude Code, Codex, ChatGPT or Cursor **once**, to their company's gateway URL, and use every Embody app they are allowed to use, from company-wide systems such as a CRM to small apps a single team built to automate its own process.
+Embody lets a company run many small, highly customized apps. People in that company connect Claude Desktop, Claude web, Claude Code, Codex, ChatGPT or Cursor **once**, to their workspace's gateway address, and use every Embody app they are allowed to use, from company-wide systems such as a CRM to small apps a team built to automate its own process.
 
 **Constraints from product direction:**
 
-1. **The gateway is multi-tenant.** One gateway deployment serves many companies. Nothing crosses between companies.
-2. **Every app deployment belongs to exactly one company.** Apps are single-tenant.
+1. **The gateway is multi-tenant.** One gateway deployment serves many workspaces (companies). Nothing crosses between workspaces.
+2. **Every app deployment belongs to exactly one workspace.** Apps are single-tenant.
 3. **The gateway and the apps are stateless.** Any instance can be added, killed or restarted; state lives in shared storage.
-4. **Ship something working as soon as possible.** Each milestone is releasable on its own; anything not needed is deferred ([§8](#8-explicitly-deferred)).
+4. **Apps and the gateway can sleep when idle** to reduce cost, and users never see errors because something was asleep.
+5. **Keep it simple and reach a working MVP fast** ([§7](#7-mvp-and-fastest-path)).
 
 ---
 
@@ -27,49 +30,46 @@ Embody's purpose is to let a company run many small, highly customized applicati
 
 | Term | Meaning | Example | Boundary |
 |---|---|---|---|
-| **Tenant** | A customer company. In code this is `orgId` (`principal.orgId`, storage row-level security, event routing, gateway registry). | Acme | **Hard.** Data, identity provider, credentials, billing. Nothing crosses tenants. |
-| **Workspace** | A unit inside a tenant that owns and manages apps, such as a department or team. | Acme Sales EMEA | **Soft.** Ownership and visibility of apps; not a data boundary. |
+| **Workspace** | A customer company's account. In code this is the tenant: `orgId` (`principal.orgId`, storage row-level security, event routing, gateway registry). | Acme | **Hard.** Data, identity provider, credentials, billing. Nothing crosses workspaces. |
+| **Team** | A unit inside a workspace that owns and manages apps, such as a department. | Acme Sales EMEA | **Soft.** Ownership and grouping of apps; not a data boundary. |
 | **App definition** | Code: a base app plus the plugins chosen for it. | CRM base + forecasting plugin | — |
-| **App** | An app ID within one tenant, served by one deployment. Either **tenant-wide** or **owned by a workspace**. | Acme's `crm` (tenant-wide); Sales EMEA's `stale-deal-followup` | App IDs are unique within a tenant. |
-| **Deployment** | Running, stateless instances of one app for one tenant. | `crm.acme.internal`, 3 replicas | Belongs to exactly one tenant. |
-| **Registration** | A deployment announcing itself to the gateway: tenant, app ID, owning workspace (optional), endpoint, manifest. | (Acme, `crm`) → URL + manifest | Persisted by the gateway. |
-| **Registration credential** | The secret a deployment registers with. Bound to one `(tenant, appId)` and optionally a workspace. | — | Issued by an operator. |
+| **App** | An app ID within one workspace, served by one deployment. Either **workspace-wide** or **owned by a team**. | Acme's `crm`; Sales EMEA's `deal-nudger` | App IDs are unique within a workspace. |
+| **Deployment** | Stateless instances of one app for one workspace, possibly zero while asleep. | `crm.acme…`, 0–3 instances | Belongs to exactly one workspace. |
+| **Registration** | The gateway's saved record of an app: workspace, app ID, owning team (optional), address, manifest, status, next due time. | (Acme, `crm`) → address + manifest | Kept until removed; does not depend on a running instance. |
+| **Registration credential** | The secret a deployment or deploy pipeline registers with. Bound to one `(workspace, appId)` and optionally a team. | — | Issued by an operator or the hosting control plane. |
 
-The code keeps the name `orgId` for the tenant to avoid a breaking rename across storage, tokens and apps; docs call it the tenant. "Workspace" is the product word for what people may call an organization inside a company.
+"Tenant" remains the technical word for a workspace where code and protocols are discussed. The code keeps the name `orgId`.
 
-### 2.2 How the CRM example works
+### 2.2 The CRM example
 
-- Acme's **CRM** is a tenant-wide app: one deployment, one copy of the data, used by every workspace granted access through scopes.
-- Sales EMEA deploys **stale-deal-followup**, owned by its workspace. It subscribes to CRM events (works today, [ADR 0004](../adr/0004-cross-app-event-delivery.md)) and needs to call CRM actions (new work: [§4.10](#410-app-to-app-calls-after-m1)).
-- A person in Sales EMEA connects to `…/t/acme/mcp` and sees the CRM plus the apps their scopes allow, including Sales EMEA's apps. Workspace membership shapes the list through scopes; it is not a data wall. If the CRM needs per-workspace visibility of records, the CRM enforces it.
-- Another company running the same CRM code runs its own deployment with its own data. Sharing a *customized version* of an app between workspaces or companies means sharing code (templates, plugin packages), which is a separate distribution track, not a gateway feature.
+- Acme's **CRM** is workspace-wide: one deployment, one copy of the data, used by every team granted access through scopes.
+- Sales EMEA's **Deal Nudger** is owned by that team. It listens for CRM events (works today, [ADR 0004](../adr/0004-cross-app-event-delivery.md)) and calls CRM actions with its own identity (P15-13).
+- Maya, in Sales EMEA, connects Claude to `…/w/acme/mcp` and sees the CRM and the apps her scopes allow, including Sales EMEA's. Team membership shapes the list through scopes; it is not a data wall. If the CRM needs per-team visibility of records, the CRM enforces it.
+- Globex running the same CRM code runs its own deployment with its own data. Sharing a customized app between teams or workspaces means sharing code (templates, plugin packages), a separate distribution track.
 
 ---
 
 ## 3. Current state on `main` (short)
 
-**Works:** `/mcp` and `/mcp/:appId` on the official SDK; catalog aggregated from healthy apps with `app__target` names and collision checks; per-principal scope filtering; audience-bound gateway JWT to app hosts (client tokens are never passed through); progress and cancellation. App hosts are already close to stateless: production requires PostgreSQL, registers a shared `PUBLIC_URL`, and background workers claim work through database leases.
+**Works:** `/mcp` and `/mcp/:appId` on the official SDK; catalog aggregated from healthy apps with collision checks; per-principal scopes; audience-bound gateway JWT to app hosts; progress and cancellation. App hosts in production already require PostgreSQL, register a shared `PUBLIC_URL`, and claim background work through database leases.
 
 **Blocks this goal:**
 
-| # | Problem | Where |
+| # | Problem | Fixed by |
 |---|---|---|
-| 1 | Every app error reaches the agent as "Tool execution failed" | `remoteEvents` in the gateway (fixed by P15-01) |
-| 2 | MCP and `/api/execute/stream` skip audit and rate limiting | gateway routes (fixed by P15-01) |
-| 3 | No action effect metadata or app title/description; no server instructions | `ActionManifest`, `AppManifest` (P15-02, P15-03) |
-| 4 | Every authorized tool of every app is listed at once | `createMcpCatalog` (P15-03) |
-| 5 | Results are JSON text only | `mcpResult` (P15-03) |
-| 6 | MCP sessions live in process memory | `McpHttpHandler.sessions` (P15-04) |
-| 7 | A person's credential used through a chat client is `human`, so agent-only guardrails stop applying | `Principal` (P15-06) |
-| 8 | No OAuth discovery; chat products cannot connect | bearer token only (P15-07) |
-| 9 | Registry is global, in memory and keyed by app ID only; credentials are a static `appId → secret` map | `GatewayRegistry` (P15-05, P15-08) |
-| 10 | Every app host verifies gateway tokens with one shared HS256 secret and checks only the app ID; any host could forge calls into another tenant's apps | `issueGatewayToken`, host verifier (P15-09) |
-| 11 | App hosts accept tokens for any tenant | host verifier (P15-09, P15-12) |
-| 12 | `assertPublicDns` exists but nothing calls it | gateway (P15-10) |
-| 13 | Event destinations come from the global registry | `GatewayRegistry.destinations` (P15-05) |
-| 14 | Apps cannot call other apps' actions | not implemented (P15-13) |
-
-Because the gateway is multi-tenant from the first release, items 9–11 block M1, not just a later shared-hosting milestone.
+| 1 | Every app error reaches the agent as "Tool execution failed" | P15-01 |
+| 2 | MCP and streaming execution skip audit and rate limits | P15-01 |
+| 3 | No action effect metadata, app title or description | P15-02 |
+| 4 | Every tool of every app listed at once; results JSON text only | P15-03 |
+| 5 | MCP sessions in process memory | P15-04 |
+| 6 | A person's credential used through a chat client is `human`, so agent-only guardrails stop applying | P15-06 |
+| 7 | No OAuth discovery; chat products cannot connect | P15-07 |
+| 8 | Registry global, in memory, keyed by app ID; credentials a static `appId → secret` map | P15-05, P15-08 |
+| 9 | Shared HS256 secret on every app host; hosts accept any workspace's tokens | P15-09, P15-12 |
+| 10 | `assertPublicDns` never called | P15-10 |
+| 11 | **An app is "alive" only while it heartbeats every 30 s; after 90 s silent its tools vanish and calls are refused. The heartbeat itself keeps apps awake.** | P15-05, P15-14 |
+| 12 | **Hosts run background timers (heartbeat, outbox, event delivery, workflow polling) that assume the process keeps running** | P15-15 |
+| 13 | Apps cannot call other apps' actions | P15-13 |
 
 ---
 
@@ -77,94 +77,122 @@ Because the gateway is multi-tenant from the first release, items 9–11 block M
 
 ### 4.1 The gateway is the central MCP server
 
-It already owns the registry, auth, scopes, token exchange, progress relay, audit and limits. Per-app MCP servers would multiply connections and consents per client; a separate MCP service would duplicate all of the above. `/t/<tenant>/mcp/<appId>` stays as a filtered view of the same server. Domain code never runs in the gateway; MCP logic stays in `@embody/mcp`, with the gateway supplying collaborators.
+It already owns the registry, auth, scopes, token exchange, progress relay, audit and limits. `/w/<workspace>/mcp/<appId>` stays as a filtered view of the same server. Domain code never runs in the gateway; MCP logic stays in `@embody/mcp`.
 
-### 4.2 Tenancy: tenants and workspaces
+### 4.2 Workspaces and teams
 
-- **Registry key:** `(tenant, appId)`. Two tenants may each have a `crm` with different plugins, endpoints and versions.
-- **Registration credential:** bound to one `(tenant, appId)` and optionally a `workspaceId`. The registration's tenant and workspace come from the credential, never from the request body alone.
-- **Tenant configuration:** identity provider, scope policy, limits, allowed endpoint origins, workspaces.
-- **Every read path** (catalog, MCP, dispatch, events, CLI) filters by the caller's tenant. There is no cross-tenant catalog, call or event.
-- **Workspaces** are registration metadata (owner) and a grouping in discovery. Access to an app is decided by scopes, which identity providers can map from workspace groups (P15-07). A principal-level workspace membership field is deferred until a feature needs it.
-- **A gateway with one tenant** is just a small deployment. An optional `defaultTenant` keeps today's unprefixed `/mcp` and `/api/...` URLs working.
+- **Registry key:** `(workspace, appId)`. Two workspaces may each have a `crm` with different plugins, addresses and versions.
+- **Registration credentials** are bound to one `(workspace, appId)` and optionally a team; the registration's workspace and team come from the credential.
+- **Every read path** (catalog, MCP, dispatch, events, CLI) filters by the caller's workspace. Nothing is cross-workspace.
+- **Teams** are registration metadata (owner) and a grouping in discovery. Access is decided by scopes, which identity providers can map from team groups (P15-07). Principal-level team membership is deferred.
+- **One-workspace gateways** keep today's unprefixed `/mcp` and `/api/...` via `defaultWorkspace`.
 
-### 4.3 Tenant in the URL
+### 4.3 Workspace in the URL
 
-OAuth discovery happens before the client has a token, so the gateway must know which tenant's identity provider to advertise from the URL alone.
-
-- `https://gateway.example.com/t/<tenant>/mcp` (also `/t/<tenant>/mcp/<appId>`, `/t/<tenant>/api/...`).
-- With `defaultTenant` configured, the unprefixed routes serve that tenant.
-- The authenticated principal's tenant must equal the URL's tenant, otherwise `403`, checked once in the route layer.
-- Per-tenant hostnames can be added later without design changes.
+OAuth discovery happens before the client has a token, so the URL names the workspace: `https://gateway.example.com/w/<workspace>/mcp` (also `/w/<workspace>/mcp/<appId>`, `/w/<workspace>/api/...`). The authenticated principal's workspace must equal the URL's (`403` otherwise).
 
 ### 4.4 Stateless gateway
 
 | State | Where it lives |
 |---|---|
-| Registrations, credentials, tenant configuration | `GatewayStore` interface: in-memory for development and tests, **PostgreSQL in M1** for any multi-instance deployment. |
-| MCP sessions | **None.** Stateless Streamable HTTP; each POST builds the server view from the authenticated principal and the current registry. |
-| Rate limits | Per instance (limits divided by instance count in configuration) until load data shows a need for a shared limiter. |
-| Audit | `AuditSink`: JSON lines on stdout by default; optional Postgres sink. |
-| Catalog cache | Per instance, per tenant, a few seconds, keyed by registry revision. Disposable. |
-| In-flight calls | The HTTP request itself. If an instance dies, the call is cancelled and its outcome is uncertain, as with any interrupted HTTP call. |
+| Registrations, credentials, workspace configuration, app status and next due times | `GatewayStore`: in-memory for development and tests, **PostgreSQL** for any real deployment |
+| MCP sessions | **None.** Stateless Streamable HTTP |
+| Rate limits | Per instance until load data shows a need for a shared limiter |
+| Audit | `AuditSink` (JSON lines by default) |
+| Caches | Per instance, per workspace, seconds, keyed by registry revision; disposable |
 
-**Cost:** no server-initiated `tools/list_changed`; new or redeployed apps appear on the client's next tool listing. Features that need the server to ask the client something mid-call (chat GenUI elicitation) will need sticky routing or a message bus, decided in that plan.
+Startup loads only configuration; everything else is read lazily per request, so a cold gateway instance serves correctly. If the store cannot be read, requests fail closed with a clear "temporarily unavailable" error, never an empty or permissive catalog.
 
 ### 4.5 Compact discovery
 
-Companies are expected to run many small apps, so compact discovery is the normal case, not an edge case.
-
-| Mode | Tools listed | When |
-|---|---|---|
-| `full` | All authorized tools | `/mcp/<appId>`; or `/mcp` when the authorized tool count ≤ threshold (default 40) |
-| `compact` | `embody_apps`, `embody_describe`, `embody_read`, `embody_write`, plus named tools of apps selected with `?apps=a,b` | above the threshold; or `?tools=compact` |
-
-- `embody_apps` (read-only): authorized apps with title, description, owning workspace, health and tool count.
-- `embody_describe` (read-only): schemas and descriptions for an app or one target.
-- `embody_read` (read-only): dispatches a `read` target; refuses anything else.
-- `embody_write` (destructive): dispatches `write` or `destructive` targets.
-
-Two generic call tools, because clients approve per tool name: an "always allow" on reads must never cover a delete. All go through the same dispatch pipeline and scope checks as named tools. Tool names are identical across modes. App ID `embody` is reserved. No server state is needed, and clients that never re-list tools still work.
+Companies run many small apps, so compact discovery is the normal case. Above a tool-count threshold (default 40), `/mcp` lists `embody_apps`, `embody_describe`, `embody_read` (read-only) and `embody_write` (destructive), plus named tools of apps selected with `?apps=`. Clients approve per tool name, so an "always allow" on reads never covers a delete. **Listing tools never wakes an app:** everything comes from the saved registration.
 
 ### 4.6 Delegated agent principal
 
-A call that arrives through MCP is an **agent** call made **on behalf of** the credential's subject: `actorType: "agent"`, `actorId: "<client|mcp>:<subject>"`, `delegation: { subjectId, subjectType, client? }`. Agent credentials are unchanged; the HTTP API and CLI are unchanged. The delegation reaches app hosts, handlers and audit. `mcp.actor: "token"` keeps the old attribution for one release. (Implemented in P15-06.)
+A call that arrives through MCP is an **agent** call made **on behalf of** the credential's subject (`actorType: "agent"`, `delegation: { subjectId, subjectType, client? }`). Agent credentials and the HTTP API are unchanged. Implemented in P15-06.
 
-### 4.7 Gateway → app tokens: asymmetric and tenant-bound (M1)
+### 4.7 Gateway → app tokens: asymmetric and workspace-bound
 
-- The gateway signs with ES256 and publishes `/.well-known/jwks.json` with `kid` rotation. App hosts hold no signing secret, so a compromised host cannot forge calls.
-- Hosts verify signature, `aud = appId`, and that the token's tenant equals their configured `GATEWAY_ORG_ID`.
-- HS256 is accepted only when the gateway serves a single tenant, for one release, with a deprecation warning.
+ES256 with a published JWKS and `kid` rotation; app hosts hold no signing secret and reject tokens for any other workspace. HS256 only on one-workspace gateways, for one release. (Hosting decision HD05 is the same decision; Phase 15 implements it.)
 
-### 4.8 OAuth resource server (M2)
+### 4.8 OAuth resource server
 
-Per the MCP authorization specification (`2025-11-25`): per-tenant protected-resource metadata at `/.well-known/oauth-protected-resource/t/<tenant>/mcp`; `401` challenges; tokens validated by the tenant's identity provider with the tenant's MCP URL as audience; a per-tenant policy mapping OAuth scopes, roles or workspace groups to Embody scopes; `insufficient_scope` step-up. API keys keep working for developer tools and CI. The gateway never issues end-user tokens in production.
+Per-workspace protected-resource metadata, `401` challenges, tokens validated by the workspace's identity provider with the workspace MCP URL as audience, a per-workspace scope policy (OAuth scopes, roles or team groups → Embody scopes), `insufficient_scope` step-up. API keys keep working for developer tools and CI.
 
-### 4.9 Stateless, single-tenant app deployments
+### 4.9 Apps and the gateway can sleep
 
-- A deployment serves exactly one tenant: production hosts require `GATEWAY_ORG_ID` and reject gateway tokens for any other tenant.
-- Replicas share one `PUBLIC_URL` and one manifest generation, so their registrations and heartbeats are idempotent.
-- Production already requires PostgreSQL; workers already use database leases. P15-12 proves this with a multi-replica test and documents it.
-- **Registrations persist** in the gateway store until removed. A deployment that stops heartbeating is shown as unavailable instead of disappearing.
-- **Open question:** whether app deployments should scale to zero when idle. If yes, "no recent heartbeat" must become an *idle* state that is still routed so the platform can wake the app ([§9](#9-open-questions)).
+#### What "asleep" means
 
-### 4.10 App-to-app calls (after M1)
+A deployment with zero running instances. The hosting platform (Cloud Run) stops it when idle and starts it when a request arrives. Embody's job is to never need a running instance to *know* about an app, never keep an app awake by itself, and always wake an app when there is work for it.
 
-An app such as Sales EMEA's automation must call CRM actions. Today apps can only receive other apps' events. The new capability: an app calls another app **in the same tenant** through the gateway with its own **system** identity, with scopes granted to that app, through the same dispatch pipeline (scope checks, rate limits, audit). Target app hooks can tell that an automation is calling. Planned as P15-13 after M1.
+#### Registration without heartbeats
+
+- An app is registered **once per version**: by the deploy pipeline (`embody register`) or at startup. Re-registering the same version is a cheap no-op.
+- Registrations are saved until removed. Heartbeats become **optional** (`GATEWAY_HEARTBEAT=off` is the default in sleep mode); always-on, self-hosted apps may keep them.
+- The gateway never polls or pings apps.
+
+#### Status from real calls
+
+| Status | Meaning | Tools listed? | Calls |
+|---|---|---|---|
+| `ready` | The last call succeeded recently | Yes | Routed |
+| `idle` | No recent traffic; normally asleep | **Yes** | Routed; the call wakes it |
+| `unavailable` | Several consecutive calls failed even after waiting for wake-up | Yes, marked unavailable in `embody_apps` | Routed (to detect recovery); clear error if it still fails |
+
+Tools are never removed because of status, so a chat client's tool list never changes under the user. A successful call restores `ready`. Status writes are rate-limited (at most one write per app per minute while nothing changes) so busy apps do not hammer the store.
+
+#### No errors because something was asleep
+
+1. **Wake-tolerant calls.** The gateway allows a configurable wake budget (default 30 s) for the first connection and sends an MCP progress message ("Starting Deal Nudger…") when the client supplied a progress token, so clients keep waiting.
+2. **Safe retries only.** During the wake budget the gateway retries when the request provably never reached the app (connection refused, DNS failure, platform `503`/`429` before any response). It also retries after an ambiguous failure only for `read` or `idempotent` actions. Other writes are never retried blindly; an ambiguous outcome returns "outcome unknown, check before retrying" with the request ID.
+3. **Clear failure.** If an app does not wake within the budget: "Deal Nudger did not start. Try again in a minute." Never a generic failure. After three consecutive wake failures the app shows `unavailable` until a call succeeds or a new version registers.
+4. **Discovery never wakes apps** (§4.5), and an idle MCP client keeps nothing open to apps.
+5. **Events wake their receiver.** Delivering an event is an ordinary request to the receiving app. Failed deliveries stay in the sender's database and are retried as due work.
+6. **Due work wakes its app.** See below.
+
+#### Work that happens without a user
+
+Apps also have work nobody is waiting for: events to publish, delivery retries, delayed workflow steps.
+
+- **During a request** (sleep mode): after the transaction commits, the host publishes and delivers the events that request created **before responding**, within a time budget. Anything left (for example a receiver that is down) stays in the database as due work.
+- **Next due time.** Every response from an app in sleep mode carries its earliest pending due time (`x-embody-next-due`), and the wake endpoint returns it too. The gateway saves it on the registration.
+- **Wake sweep.** A platform scheduler (Cloud Scheduler on Cloud Run, cron elsewhere) calls the gateway's protected `/internal/wake-due` once a minute. The gateway calls `POST /embody/wake` on every app whose due time has passed, with a short-lived system token. The app runs a bounded batch of due work (outbox, deliveries, workflow steps) under its existing leases, then reports the next due time.
+- **Lost hints are not lost work.** If an app crashes between committing work and reporting its due time, the work is still in its database. It runs the next time the app wakes for any reason, and a **daily safety wake** of every app with activity in the last 30 days guarantees an upper bound.
+- This is deliberately simpler than the hosting plan's full due-work reconciler with Cloud Tasks (hosting CH9-02/CH9-03), which can replace the sweep later behind the same `/embody/wake` contract when stronger timing and scale guarantees are needed.
+
+#### Sleep mode for app hosts
+
+`EMBODY_RUNTIME=sleep` (the default for hosted deployments; `always-on` stays the default for local and self-hosted):
+
+- no heartbeat, outbox, delivery or workflow timers;
+- startup does no business work and no migrations;
+- registration at startup is idempotent and does not delay serving requests;
+- the wake endpoint runs bounded due work;
+- events created by a request are sent before responding;
+- apps that declare always-running needs (custom intervals, local files) fail the sleep-mode readiness check with an explanation.
+
+#### The gateway sleeps too
+
+With nothing in memory and no heartbeats, a quiet gateway can scale to zero. The scheduler's once-a-minute call wakes it briefly. Hosting may still keep one warm instance for latency; that is a cost choice, never needed for correctness. (Hosting ADR 0008 requires the min-zero capability; Phase 15 makes the code capable of it.)
+
+### 4.10 App-to-app calls
+
+An app calls another app **in the same workspace** through the gateway with its own **system** identity and scopes granted to that app, through the same dispatch pipeline (scope checks, rate limits, audit, wake handling). The target's hooks see which app is calling. Calls never leave the workspace. Part of the MVP (P15-13).
 
 ---
 
-## 5. Milestones
+## 5. Trade-offs of sleeping
 
-| Milestone | Who can use it | Items | Rough size |
-|---|---|---|---|
-| **M0: decide and verify** | — | P15-00 ADR and client spike | ~2 days |
-| **M1: multi-tenant gateway works in chat** | Claude Code, Codex, Cursor, Claude Desktop via the CLI bridge (token auth), on a multi-tenant, multi-instance gateway | P15-01, 02, 06 (open PRs) · P15-03 MCP metadata and discovery · P15-04 stateless MCP · P15-05 tenant-keyed store, routing and workspaces · P15-08 Postgres store · P15-09 tenant-bound asymmetric tokens · P15-12 stateless single-tenant app hosts | ~4–5 weeks |
-| **M2: chat products** | Adds Claude web/desktop connectors and ChatGPT | P15-07 OAuth per tenant | ~1 week |
-| **M2.5: apps integrate** | App-to-app automation | P15-13 app-to-app calls | ~1–2 weeks |
-| **M3: production gate** | Managed multi-tenant service | P15-10 endpoint safety and per-tenant limits · P15-11 isolation suite, load test, runbook | ~2 weeks |
-
-Sizes are rough single-engineer estimates, not commitments. Details: [Phase 15](../implementation-plan/15-central-mcp-gateway.md).
+| Trade-off | What users notice | Mitigation |
+|---|---|---|
+| Cold start | First request after a quiet period takes ~1–5 s, longer if the gateway also slept | "Starting…" progress message; optional warm gateway |
+| Events sent before responding | Actions that publish events respond slightly later | Bounded budget; only for event-producing actions |
+| Due-work timing | Delayed steps and retries run within about a minute of their due time | One-minute sweep; hosting reconciler later for tighter timing |
+| Interrupted writes | Rarely, "outcome unknown, check before retrying" | Automatic retry only when provably safe |
+| Tool list changes | New apps appear in a new conversation | — |
+| Unsupported patterns | Apps needing always-running loops or local files cannot use sleep mode | Readiness check explains why; always-on mode remains for self-hosting |
+| Cost floor | Database, scheduler and logging do not sleep | Shared across all apps |
+| Two runtime modes | `sleep` and `always-on` both need tests | Shared conformance suite |
 
 ---
 
@@ -172,53 +200,68 @@ Sizes are rough single-engineer estimates, not commitments. Details: [Phase 15](
 
 | Change | Existing deployments |
 |---|---|
-| Error messages become informative | Intended; release note |
-| Delegated agent principal over MCP | Human credentials used over MCP hit agent-only hooks; `mcp.actor: "token"` for one release |
-| Stateless MCP | Transparent to clients that support it (verified in M0) |
-| Tenant-keyed registry and credentials | Old `appId → secret` config is accepted when the gateway serves a single tenant, mapped to `defaultTenant`, for one release |
-| Two tenants sharing one app deployment (today's E2E topology) | Not supported: each tenant gets its own deployment. The E2E moves to one deployment per tenant. |
-| Asymmetric gateway tokens | HS256 accepted only on single-tenant gateways for one release, with warning |
-| Manifest metadata | Optional; old hosts register; custom actions default to `write` |
-| `/mcp`, `/api/...` paths | Unchanged when `defaultTenant` is set; `/t/<tenant>/...` otherwise |
+| Informative errors; delegated agent on MCP | Release notes; `mcp.actor: "token"` for one release |
+| Workspace-keyed registry and credentials | Old `appId → secret` config accepted with `defaultWorkspace` for one release |
+| Two workspaces sharing one app deployment | Not supported; each workspace gets its own deployment |
+| Asymmetric gateway tokens | HS256 only on one-workspace gateways, for one release |
+| Heartbeats | Optional; still accepted from always-on hosts |
+| Host runtime mode | `always-on` default locally and self-hosted; `sleep` for hosted |
+| `/mcp`, `/api/...` | Unchanged with `defaultWorkspace`; `/w/<workspace>/...` otherwise |
 
 ---
 
-## 7. Why this should work
+## 7. MVP and fastest path
 
-- **It reuses what exists.** Registry, auth chain, scopes, token exchange, progress relay, database-leased workers and E2E infrastructure are built and tested; most steps reshape them.
-- **One hard boundary.** The tenant is the only isolation boundary, and it already is one in storage, events and tokens. Workspaces add ownership and visibility without a second data wall.
-- **It is standard MCP only:** stateless Streamable HTTP, OAuth protected-resource metadata, annotations, output schemas, structured content, server instructions.
-- **Statelessness removes the hardest operational problems.** No session affinity, store-backed registrations, idempotent app replicas.
-- **Compact discovery scales with "many small apps"** on any client.
-- **Tenant safety lands before the first release:** tenant-keyed registry, tenant-bound tokens and host checks are in M1, with an isolation suite as the production gate.
+**MVP:** people in several companies use their own single-tenant apps from Claude Desktop, Claude web, Claude Code, Codex, ChatGPT and Cursor through one multi-tenant gateway, with workspaces and teams, agent rules enforced, a complete audit log, apps calling each other inside a workspace, and apps and the gateway sleeping when idle without user-visible errors.
+
+| Stage | Items | Rough size |
+|---|---|---|
+| 0. Align plans | ADR numbering, terms and ownership with the hosting plan (this change) | 1–2 days |
+| 1. Gateway core | P15-01, P15-02, P15-06 (open PRs) · P15-03 MCP metadata and compact discovery · P15-04 stateless MCP · P15-05 workspace store, routing, teams and status · P15-08 PostgreSQL store | ~2.5 weeks |
+| 2. Sleep | P15-14 sleep-safe gateway (wake-tolerant calls, safe retries, due-time sweep) · P15-15 host sleep mode (no timers, events before response, wake endpoint, readiness check) | ~2 weeks |
+| 3. Workspace safety | P15-09 workspace-bound tokens · P15-12 single-tenant hosts · P15-10 endpoint safety and limits · P15-11 isolation suite | ~1.5 weeks |
+| 4. Chat products | P15-07 OAuth per workspace | ~1 week |
+| 5. Apps call apps | P15-13 app-to-app calls | ~1.5 weeks |
+| 6. Prove on Cloud Run | P15-16 MVP proof: reference apps and the gateway reach zero and wake on calls, events and due work | ~1 week |
+| **Total** | | **~10 weeks, one engineer** |
+
+After the MVP, the hosting plan's remaining sleep work (full due-work reconciler with Cloud Tasks, version-pinned wake, restore fences, launch evidence) builds on the same contracts.
 
 ---
 
-## 8. Explicitly deferred
+## 8. Relationship to the hosting plan
+
+| Topic | Owner | Notes |
+|---|---|---|
+| Gateway code: catalog, MCP, dispatch, store, status, wake-tolerant calls, due-time sweep | **Phase 15** | Hosting CH9-04 and CH9-07 framework parts are delivered here |
+| Workspace-bound asymmetric tokens | **Phase 15** (P15-09) | = hosting HD05 |
+| Persistent registry and gateway sessions | **Phase 15** (P15-04, P15-05, P15-08) | = hosting HD15 registry/session parts; MCP is stateless |
+| Host sleep mode, wake endpoint, bounded due work | **Phase 15** (P15-15) | First slice of hosting CH9-01 |
+| Cloud Run services, min-zero profiles, Cloud Scheduler wiring, deploy-time registration | **Hosting** | P15-16 uses a minimal version as MVP proof |
+| Full due-work reconciler, Cloud Tasks, dispatcher, version-pinned wake, restore fences | **Hosting** (CH9-02, CH9-03, CH9-05) | Replaces the MVP sweep behind the same wake contract |
+| Launch evidence V19–V22, cost model | **Hosting** (CH9-06, CH9-07 evidence) | — |
+| Accounts, invitations, billing, previews, builds | **Hosting** | Workspace = the hosting plan's workspace |
+
+---
+
+## 9. Explicitly deferred
 
 - `tools/list_changed` notifications, MCP sessions, per-session app activation.
-- Shared rate-limit store.
-- Principal-level workspace membership (scopes decide access until a feature needs membership).
-- Cross-tenant anything: shared deployments, cross-tenant calls or events.
-- Distribution of customized apps (templates, plugin catalog) — separate track.
+- Shared rate-limit store; principal-level team membership.
+- Anything cross-workspace.
+- Distribution of customized apps (templates, plugin catalog).
 - Transparent stdio bridge, `embody login`, MCP in `embody dev`, development authorization server.
-- Per-tenant hostnames, app icons, MCP tasks for workflows, app-declared prompts and resources, event notifications to chat.
-- Chat GenUI (builds on this plan).
+- Per-workspace hostnames, app icons, MCP tasks, app-declared prompts and resources, event notifications to chat, chat GenUI.
 
----
-
-## 9. Open questions
+## 10. Open questions
 
 | Question | Needed by |
 |---|---|
-| Should app deployments scale to zero when idle (idle state and wake-on-call)? | P15-05/P15-12 design |
-| Which identity provider(s) will the managed service support first, and which client registration methods do chat clients use with them? | M2 (M0 spike) |
-| Tenant provisioning: self-serve signup or operator-provisioned at first? | M3 |
-| Where does the managed gateway's signing key live (cloud KMS choice)? | M1 (P15-09) |
-| Do any target clients require MCP sessions? | M1 (M0 spike) |
+| Which identity provider(s) first, and which client registration methods chat clients use with them | P15-07 (M0 spike) |
+| Where the gateway signing key lives (cloud KMS choice) | P15-09 |
+| Do any target clients require MCP sessions? | P15-04 (M0 spike) |
+| Default wake budget and sweep interval on real Cloud Run | P15-16 measurements |
 
----
+## 11. Phase 14 note
 
-## 10. Phase 14 note
-
-Commit `ec7ca78` (Phase 14 GenUI, on `docs/genui-incremental-plan`) is not on `main` and rewrites `packages/mcp/src/index.ts`. Its per-session catalog snapshot does not survive stateless MCP and should become a per-request generation check when it is rebased onto Phase 15.
+Commit `ec7ca78` (Phase 14 GenUI, on `docs/genui-incremental-plan`) is not on `main` and rewrites `packages/mcp/src/index.ts`. Its per-session catalog snapshot does not survive stateless MCP and should become a per-request generation check when rebased onto Phase 15.
