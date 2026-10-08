@@ -274,6 +274,8 @@ export function oidcProvider(options: OidcProviderOptions): GatewayAuthProvider 
 }
 function principalClaims(claims: JWTPayload): Principal | null {
   const { orgId, actorId, actorType, roles, scopes } = claims;
+  // `azp` (OIDC) or `client_id` (OAuth token exchange/introspection style) identify the client app.
+  const client = typeof claims["azp"] === "string" ? claims["azp"] : claims["client_id"];
   return typeof orgId === "string" &&
     typeof actorId === "string" &&
     (actorType === "agent" || actorType === "human" || actorType === "system") &&
@@ -281,8 +283,45 @@ function principalClaims(claims: JWTPayload): Principal | null {
     roles.every((x) => typeof x === "string") &&
     Array.isArray(scopes) &&
     scopes.every((x) => typeof x === "string")
-    ? { orgId, actorId, actorType, roles, scopes }
+    ? {
+        orgId,
+        actorId,
+        actorType,
+        roles,
+        scopes,
+        ...(typeof client === "string" && client.length > 0 && client.length <= 200
+          ? { metadata: { client } }
+          : {}),
+      }
     : null;
+}
+
+/** How MCP calls are attributed. See ADR 0006, decision 7. */
+export type McpActorMode = "agent-on-behalf" | "token";
+
+/**
+ * MCP calls are chosen by a model, so a human or system credential used over MCP becomes an agent
+ * acting on that subject's behalf. Agent credentials are returned unchanged. The client label comes
+ * only from verified credential data (`principal.metadata.client`), never from the MCP client.
+ */
+export function delegatedAgentPrincipal(principal: Principal): Principal {
+  if (principal.actorType === "agent") return principal;
+  const raw = principal.metadata?.["client"];
+  const client =
+    typeof raw === "string" && raw.length > 0 && raw.length <= 200 && !/[\s:]/.test(raw)
+      ? raw
+      : undefined;
+  const actorId = `${client ?? "mcp"}:${principal.actorId}`.slice(0, 500);
+  return {
+    ...principal,
+    actorType: "agent",
+    actorId,
+    delegation: {
+      subjectId: principal.actorId.slice(0, 200),
+      subjectType: principal.actorType,
+      ...(client === undefined ? {} : { client }),
+    },
+  };
 }
 export class AuthChain {
   public constructor(private readonly providers: readonly GatewayAuthProvider[]) {}
@@ -354,6 +393,14 @@ export interface GatewayOptions {
   readonly audit?: AuditSink;
   readonly limiter?: FixedWindowRateLimiter;
   readonly environment?: "development" | "production";
+  readonly mcp?: {
+    /**
+     * `agent-on-behalf` (default) treats human/system credentials used over MCP as an agent acting
+     * for that subject, so agent guardrails apply. `token` keeps the credential's actor type and
+     * is deprecated; it will be removed in a future release.
+     */
+    readonly actor?: McpActorMode;
+  };
 }
 function bearer(value: string | undefined): string {
   const match = /^Bearer\s+(.+)$/i.exec(value ?? "");
@@ -524,6 +571,11 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       prepared.finish({ outcome, ...(errorCode === undefined ? {} : { errorCode }) });
     }
   };
+  const mcpActor = options.mcp?.actor ?? "agent-on-behalf";
+  if (mcpActor === "token")
+    app.log.warn(
+      "mcp.actor 'token' is deprecated: MCP calls keep the credential's actor type, so agent-only guardrails do not apply to human credentials",
+    );
   const mcp = new McpHttpHandler<Principal>({ catalog: catalogFor, execute: remoteEvents });
   const mcpRoute = async (request: FastifyRequest, reply: FastifyReply) => {
     const principal = await options.auth.authenticate(
@@ -540,8 +592,9 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       response: reply.raw,
       ...(request.body === undefined ? {} : { body: request.body }),
       ...(scoped === undefined ? {} : { scopedAppId: scoped }),
+      // Sessions stay pinned to the authenticated credential, not the derived agent identity.
       identity: `${principal.orgId}:${principal.actorId}`,
-      context: principal,
+      context: mcpActor === "token" ? principal : delegatedAgentPrincipal(principal),
     });
   };
   for (const url of ["/mcp", "/mcp/:appId"])

@@ -27,6 +27,13 @@ interface Principal {
 
   /** Optional custom metadata claims */
   readonly metadata?: Readonly<Record<string, unknown>>;
+
+  /** Set when an agent acts on behalf of a person or system (see below) */
+  readonly delegation?: {
+    readonly subjectId: string;
+    readonly subjectType: "human" | "system";
+    readonly client?: string;
+  };
 }
 ```
 
@@ -37,6 +44,18 @@ Most web frameworks only know *who* a user is (e.g. `user_123`). Embody explicit
 - **`system`**: Schedulers, background daemons, and system webhooks.
 
 This allows your business logic and pre-commit hooks to attenuate agent permissions without degrading human operational control.
+
+### Agents acting on someone's behalf (MCP)
+
+When a person connects a chat client such as Claude or Codex to the gateway's MCP endpoint, a model chooses which tools to call even though the credential belongs to the person. The gateway therefore attributes MCP calls made with a `human` or `system` credential to an **agent acting on that subject's behalf**:
+
+- `actorType` is `agent`, so agent-only guardrails apply;
+- `actorId` is `<client>:<subject>` (or `mcp:<subject>` when the credential names no client);
+- `delegation.subjectId` is the person or system the credential belongs to, and `delegation.client` the verified client ID (from an OIDC token's `azp`/`client_id` claim or `principal.metadata.client`), never the name the MCP client reports.
+
+Agent credentials are unchanged, and the HTTP API and CLI keep the credential's own actor type. Hooks that need the person, for example to assign work to them, read `context.principal.delegation?.subjectId`. Audit records include the subject and client. Test this with `harness.asDelegatedAgent("alice")`.
+
+Gateways can keep the old behavior for one release with `createGateway({ mcp: { actor: "token" } })`; it is deprecated because agent-only guardrails then do not apply to people's credentials over MCP.
 
 ---
 

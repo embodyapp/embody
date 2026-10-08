@@ -53,3 +53,33 @@ describe("gateway JWT verifier", () => {
     ).toThrow("disabled");
   });
 });
+
+describe("delegation claims", () => {
+  const verifier = () =>
+    gatewayJwtVerifier({
+      issuer: "gateway",
+      audience: "kanban",
+      key: secret,
+      algorithms: ["HS256"],
+    });
+
+  it("round-trips a delegated agent", async () => {
+    const delegation = { subjectId: "user-1", subjectType: "human", client: "claude" };
+    await expect(
+      verifier().verify(await token({ actorType: "agent", actorId: "claude:user-1", delegation })),
+    ).resolves.toMatchObject({ actorType: "agent", delegation });
+  });
+
+  it("rejects delegation on non-agent principals and malformed delegation", async () => {
+    for (const overrides of [
+      { delegation: { subjectId: "user-1", subjectType: "human" } },
+      { actorType: "agent", delegation: { subjectId: "", subjectType: "human" } },
+      { actorType: "agent", delegation: { subjectId: "u", subjectType: "agent" } },
+      { actorType: "agent", delegation: { subjectId: "u", subjectType: "human", extra: 1 } },
+      { actorType: "agent", delegation: "user-1" },
+    ])
+      await expect(verifier().verify(await token(overrides))).rejects.toBeInstanceOf(
+        UnauthenticatedError,
+      );
+  });
+});

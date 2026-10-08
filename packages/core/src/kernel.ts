@@ -13,6 +13,7 @@ import type {
   EventHandler,
   WorkflowStepContext,
 } from "./contracts.js";
+import { isValidDelegation } from "./contracts.js";
 import {
   ConflictError,
   DependencyError,
@@ -257,6 +258,14 @@ export class Kernel {
         target,
         orgId: execution.principal.orgId,
         actorId: execution.principal.actorId,
+        ...(execution.principal.delegation === undefined
+          ? {}
+          : {
+              subjectId: execution.principal.delegation.subjectId,
+              ...(execution.principal.delegation.client === undefined
+                ? {}
+                : { client: execution.principal.delegation.client }),
+            }),
         ...(execution.requestId === undefined ? {} : { requestId: execution.requestId }),
         ...(execution.traceparent === undefined ? {} : { traceparent: execution.traceparent }),
         durationMs: Date.now() - startedAt,
@@ -670,7 +679,9 @@ export class Kernel {
       !Array.isArray(principal.roles) ||
       !Array.isArray(principal.scopes) ||
       !principal.roles.every((role) => typeof role === "string") ||
-      !principal.scopes.every((scope) => typeof scope === "string")
+      !principal.scopes.every((scope) => typeof scope === "string") ||
+      (principal.delegation !== undefined &&
+        (principal.actorType !== "agent" || !isValidDelegation(principal.delegation)))
     )
       throw new ValidationError("Principal is invalid");
   }
