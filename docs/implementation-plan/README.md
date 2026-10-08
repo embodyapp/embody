@@ -2,6 +2,10 @@
 
 This directory is the execution source of truth for agents implementing the specifications in [`../specs/`](../specs/). Read this file, [`STATUS.md`](./STATUS.md), and [`00-architecture-and-decisions.md`](./00-architecture-and-decisions.md) before taking work.
 
+## Focused hosted MVP
+
+For the owner-approved, request-driven hosted MVP (CLI deployment, centralized CLI/MCP control, and mandatory app/gateway scale-to-zero), use the [MVP scope and implementation plan](../mvp/README.md) and its [completion tracker](../mvp/STATUS.md). This narrower hosted profile excludes background workflows and GenUI; it does not mark the broader framework phases below complete or waive applicable release/security obligations.
+
 ## Delivery order
 
 | Phase | Plan | Depends on |
