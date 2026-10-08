@@ -1,7 +1,7 @@
 # ADR 0006: Central MCP gateway, org tenancy and delegated agent principal
 
-- Status: Proposed
-- Date: 2026-10-08
+- Status: Accepted
+- Date: 2026-10-08 (accepted 2026-10-08)
 - Decision gate: D-07
 - Plans: [design](../plans/central-mcp-gateway.md), [Phase 15](../implementation-plan/15-central-mcp-gateway.md)
 
