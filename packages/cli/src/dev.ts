@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Kernel, type EmbodyPlugin, type Principal } from "@embody/core";
 import { localDevVerifier } from "@embody/auth";
-import { createHost, WorkflowWorker, type EmbodyHost } from "@embody/host";
+import { appMetadataOf, createHost, WorkflowWorker, type EmbodyHost } from "@embody/host";
 import { SqliteStorage } from "@embody/storage";
 
 export interface EmbodyDevConfig {
@@ -14,6 +14,9 @@ export interface EmbodyDevConfig {
   readonly port?: number;
   readonly principal?: Principal;
   readonly sqlitePath?: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly instructions?: string;
 }
 export interface DevServer {
   readonly host: EmbodyHost;
@@ -42,7 +45,12 @@ export async function startDevServer(config: EmbodyDevConfig): Promise<DevServer
   const filename = resolve(config.sqlitePath ?? ".embody/dev.sqlite");
   await mkdir(dirname(filename), { recursive: true });
   const storage = new SqliteStorage({ filename });
-  const kernel = new Kernel({ plugins: config.plugins, storage });
+  const app = appMetadataOf(config);
+  const kernel = new Kernel({
+    plugins: config.plugins,
+    storage,
+    ...(app === undefined ? {} : { app }),
+  });
   await kernel.boot();
   const workflowWorker = new WorkflowWorker({ storage, kernel });
   const host = createHost({

@@ -82,9 +82,32 @@ const viewResourceUriSchema = z
   );
 const integritySchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 
+// Control characters other than newline and tab, plus bidirectional overrides.
+// eslint-disable-next-line no-control-regex -- rejecting control characters is the point.
+const unsafeText = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/;
+const plainText = (max: number, multiline: boolean) =>
+  z
+    .string()
+    .min(1)
+    .max(max)
+    .refine((value) => value.trim().length > 0, "Text must not be blank")
+    .refine((value) => !unsafeText.test(value), "Text must not contain control characters")
+    .refine((value) => multiline || !/[\n\t]/.test(value), "Text must be a single line");
+export const actionEffectSchema = z.enum(["read", "write", "destructive"]);
+export const appMetadataSchema = z
+  .object({
+    title: plainText(80, false).optional(),
+    description: plainText(500, true).optional(),
+    instructions: plainText(2_048, true).optional(),
+  })
+  .strict();
+
 const actionManifestSchema = z
   .object({
+    title: plainText(80, false).optional(),
     description: z.string().max(2_000).optional(),
+    effect: actionEffectSchema.optional(),
+    idempotent: z.boolean().optional(),
     inputSchema: jsonSchema,
     outputSchema: jsonSchema.optional(),
     generated: z.boolean(),
@@ -112,6 +135,7 @@ const viewManifestRecordSchema = z
 export const appManifestSchema = z
   .object({
     protocolVersion: protocolVersionSchema,
+    app: appMetadataSchema.optional(),
     plugins: z.array(z.object({ id: identifier, version: safeString }).strict()).max(500),
     entities: z.record(z.string(), entityManifestSchema),
     actions: z.record(z.string(), actionManifestSchema),

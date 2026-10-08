@@ -10,6 +10,8 @@ import {
   RateLimitedError,
   UnauthenticatedError,
   UnavailableError,
+  actionEffectSchema,
+  appMetadataSchema,
   stableStringify,
   toErrorEnvelope,
   type AppManifest,
@@ -93,6 +95,10 @@ function validEndpoint(value: string, options: GatewayRegistryOptions, allowPath
     throw new ForbiddenError("Endpoint origin is not allowed");
   return url;
 }
+/** App IDs that would collide with gateway-provided MCP tools. */
+const RESERVED_APP_IDS: ReadonlySet<string> = new Set(["embody"]);
+const actionTitleSchema = appMetadataSchema.shape.title.unwrap();
+
 function validateRegistration(value: Registration, options: GatewayRegistryOptions): string {
   if (
     value.protocolVersion !== 1 ||
@@ -105,6 +111,17 @@ function validateRegistration(value: Registration, options: GatewayRegistryOptio
     throw new BadRequestError("Manifest exceeds 256 KiB");
   if (value.manifest.protocolVersion !== 1)
     throw new BadRequestError("Manifest protocol is unsupported");
+  if (RESERVED_APP_IDS.has(value.appId)) throw new BadRequestError("App ID is reserved");
+  // Metadata is shown to people and models; reject malformed values without echoing them.
+  if (value.manifest.app !== undefined && !appMetadataSchema.safeParse(value.manifest.app).success)
+    throw new BadRequestError("App metadata is invalid");
+  for (const action of Object.values(value.manifest.actions))
+    if (
+      (action.title !== undefined && !actionTitleSchema.safeParse(action.title).success) ||
+      (action.effect !== undefined && !actionEffectSchema.safeParse(action.effect).success) ||
+      (action.idempotent !== undefined && typeof action.idempotent !== "boolean")
+    )
+      throw new BadRequestError("Action metadata is invalid");
   validEndpoint(value.endpoint, options);
   const health = validEndpoint(value.healthCheckUrl, options, true);
   if (health.origin !== new URL(value.endpoint).origin)

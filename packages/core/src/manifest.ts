@@ -1,7 +1,12 @@
 import { z } from "zod";
-import type { EmbodyPlugin, EntityDefinition, WorkflowDefinition } from "./contracts.js";
+import type {
+  ActionEffect,
+  EmbodyPlugin,
+  EntityDefinition,
+  WorkflowDefinition,
+} from "./contracts.js";
 import { compileWorkflow } from "./workflows.js";
-import { DuplicateRegistrationError } from "./errors.js";
+import { DuplicateRegistrationError, ValidationError } from "./errors.js";
 import { formatTarget } from "./target.js";
 
 export type JsonSchema = Readonly<Record<string, unknown>>;
@@ -17,8 +22,16 @@ export interface ActionPresentationManifest {
   readonly view: string;
 }
 
+export type { ActionEffect } from "./contracts.js";
+
 export interface ActionManifest {
+  /** Short human-readable name, at most 80 characters. */
+  readonly title?: string;
   readonly description?: string;
+  /** Omitted for custom actions that did not declare one; treat as `write` (see `actionEffect`). */
+  readonly effect?: ActionEffect;
+  /** True when repeating the call with the same input has no additional effect. */
+  readonly idempotent?: boolean;
   readonly inputSchema: JsonSchema;
   readonly outputSchema?: JsonSchema;
   readonly generated: boolean;
@@ -50,14 +63,33 @@ export interface WorkflowManifest {
   readonly controls: Readonly<Record<"start" | "status" | "cancel" | "retry", string>>;
 }
 
+/** Optional human-facing app metadata shown by MCP clients and discovery tools. */
+export interface AppMetadata {
+  /** At most 80 characters. */
+  readonly title?: string;
+  /** Plain text, at most 500 characters. */
+  readonly description?: string;
+  /** Plain-text usage notes for agents, at most 2,048 characters. */
+  readonly instructions?: string;
+}
+
+export const APP_METADATA_LIMITS = { title: 80, description: 500, instructions: 2_048 } as const;
+export const ACTION_TITLE_LIMIT = 80;
+
 export interface AppManifest {
   readonly protocolVersion: 1;
+  readonly app?: AppMetadata;
   readonly plugins: readonly { readonly id: string; readonly version: string }[];
   readonly entities: Readonly<Record<string, EntityManifest>>;
   readonly actions: Readonly<Record<string, ActionManifest>>;
   readonly workflows?: Readonly<Record<string, WorkflowManifest>>;
   readonly views?: Readonly<Record<string, ViewManifest>>;
   readonly eventSubscriptions: readonly string[];
+}
+
+/** The effective effect of an action; undeclared custom actions are treated as `write`. */
+export function actionEffect(action: Pick<ActionManifest, "effect">): ActionEffect {
+  return action.effect ?? "write";
 }
 
 function jsonSchema(schema: z.ZodType): JsonSchema {
@@ -91,6 +123,7 @@ function workflowActions(
   const prefix = formatTarget([pluginId, name]);
   return {
     [`${prefix}.start`]: {
+      effect: "write",
       description: `Start ${definition.description ?? name}`,
       inputSchema: jsonSchema(
         z.object({ input: definition.input, idempotencyKey: z.string().min(1).max(200) }),
@@ -99,18 +132,21 @@ function workflowActions(
       generated: true,
     },
     [`${prefix}.status`]: {
+      effect: "read",
       description: `Get ${definition.description ?? name} status`,
       inputSchema: jsonSchema(z.object({ id: workflowId })),
       outputSchema: jsonSchema(workflowStatusSchema),
       generated: true,
     },
     [`${prefix}.cancel`]: {
+      effect: "destructive",
       description: `Cancel ${definition.description ?? name}`,
       inputSchema: jsonSchema(z.object({ id: workflowId })),
       outputSchema: jsonSchema(workflowStatusSchema),
       generated: true,
     },
     [`${prefix}.retry`]: {
+      effect: "write",
       description: `Retry ${definition.description ?? name}`,
       inputSchema: jsonSchema(z.object({ id: workflowId })),
       outputSchema: jsonSchema(workflowStatusSchema),
@@ -145,11 +181,19 @@ function generatedActions(
     update: z.object({ id, data: definition.schema.partial() }),
     delete: z.object({ id }),
   };
+  const effects: Record<string, Pick<ActionManifest, "effect" | "idempotent">> = {
+    create: { effect: "write" },
+    get: { effect: "read" },
+    list: { effect: "read" },
+    update: { effect: "write", idempotent: true },
+    delete: { effect: "destructive" },
+  };
   return Object.fromEntries(
     Object.entries(schemas).map(([operation, schema]) => [
       formatTarget([pluginId, entityName, operation]),
       {
         ...(descriptions[operation] === undefined ? {} : { description: descriptions[operation] }),
+        ...effects[operation],
         inputSchema: jsonSchema(schema),
         generated: true,
       },
@@ -157,7 +201,14 @@ function generatedActions(
   );
 }
 
-export function compileManifest(plugins: readonly EmbodyPlugin[]): AppManifest {
+export interface CompileManifestOptions {
+  readonly app?: AppMetadata;
+}
+
+export function compileManifest(
+  plugins: readonly EmbodyPlugin[],
+  options: CompileManifestOptions = {},
+): AppManifest {
   const entities: Record<string, EntityManifest> = {};
   const actions: Record<string, ActionManifest> = {};
   const workflows: Record<string, WorkflowManifest> = {};
@@ -207,8 +258,13 @@ export function compileManifest(plugins: readonly EmbodyPlugin[]): AppManifest {
     }
     for (const [name, definition] of Object.entries(plugin.actions ?? {})) {
       const target = formatTarget([plugin.id, name]);
+      if (definition.title !== undefined)
+        assertText("Action title", definition.title, ACTION_TITLE_LIMIT, false);
       registerAction(actions, target, {
+        ...(definition.title === undefined ? {} : { title: definition.title }),
         ...(definition.description === undefined ? {} : { description: definition.description }),
+        ...(definition.effect === undefined ? {} : { effect: definition.effect }),
+        ...(definition.idempotent === undefined ? {} : { idempotent: definition.idempotent }),
         inputSchema: jsonSchema(definition.input),
         ...(definition.output === undefined ? {} : { outputSchema: jsonSchema(definition.output) }),
         generated: false,
@@ -218,8 +274,10 @@ export function compileManifest(plugins: readonly EmbodyPlugin[]): AppManifest {
       subscriptions.add(formatTarget(eventName.split(".")));
   }
 
+  const app = appMetadata(options.app);
   return deepSort({
     protocolVersion: 1,
+    ...(app === undefined ? {} : { app }),
     plugins: plugins
       .map(({ id, version }) => ({ id, version }))
       .sort((a, b) => a.id.localeCompare(b.id)),
@@ -228,6 +286,39 @@ export function compileManifest(plugins: readonly EmbodyPlugin[]): AppManifest {
     workflows,
     eventSubscriptions: [...subscriptions].sort(),
   }) as AppManifest;
+}
+
+// Control characters other than newline and tab, plus bidirectional overrides.
+// eslint-disable-next-line no-control-regex -- rejecting control characters is the point.
+const UNSAFE_TEXT = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/;
+
+function assertText(label: string, value: unknown, max: number, multiline: boolean): void {
+  if (
+    typeof value !== "string" ||
+    value.trim().length === 0 ||
+    value.length > max ||
+    UNSAFE_TEXT.test(value) ||
+    (!multiline && /[\n\t]/.test(value))
+  )
+    throw new ValidationError(`${label} must be non-empty plain text of at most ${max} characters`);
+}
+
+function appMetadata(value: AppMetadata | undefined): AppMetadata | undefined {
+  if (value === undefined) return undefined;
+  const result: { title?: string; description?: string; instructions?: string } = {};
+  if (value.title !== undefined) {
+    assertText("App title", value.title, APP_METADATA_LIMITS.title, false);
+    result.title = value.title;
+  }
+  if (value.description !== undefined) {
+    assertText("App description", value.description, APP_METADATA_LIMITS.description, true);
+    result.description = value.description;
+  }
+  if (value.instructions !== undefined) {
+    assertText("App instructions", value.instructions, APP_METADATA_LIMITS.instructions, true);
+    result.instructions = value.instructions;
+  }
+  return Object.keys(result).length === 0 ? undefined : result;
 }
 
 function registerAction(

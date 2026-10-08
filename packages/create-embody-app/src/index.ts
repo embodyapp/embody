@@ -74,7 +74,7 @@ function template(name: string): Readonly<Record<string, string>> {
         null,
         2,
       ) + "\n",
-    "embody.config.ts": `import { definePlugin, z } from "@embody/core";\nimport { defineApp } from "@embody/host";\n\nexport default defineApp({\n  appId: "${name}",\n  version: "0.1.0",\n  plugins: [definePlugin({\n    id: "app",\n    version: "0.1.0",\n    actions: { ping: { input: z.object({}), handler: () => ({ ok: true }) } },\n  })],\n});\n`,
+    "embody.config.ts": `import { definePlugin, z } from "@embody/core";\nimport { defineApp } from "@embody/host";\n\nexport default defineApp({\n  appId: "${name}",\n  version: "0.1.0",\n  title: "${name}",\n  description: "Describe what this app does for people and agents.",\n  plugins: [definePlugin({\n    id: "app",\n    version: "0.1.0",\n    actions: {\n      ping: { effect: "read", input: z.object({}), handler: () => ({ ok: true }) },\n    },\n  })],\n});\n`,
     "src/index.ts": `import config from "../embody.config.js";\nimport { createAppHost } from "@embody/host";\n\nconst runtime = await createAppHost(config);\nawait runtime.start();\nconsole.log(runtime.url);\nconst close = () => void runtime.stop();\nprocess.once("SIGINT", close);\nprocess.once("SIGTERM", close);\n`,
     "src/plugin.ts": `export { default } from "../embody.config.js";\n`,
     "src/plugin.test.ts": `import { expect, it } from "vitest";\nimport { createTestHarness } from "@embody/testing";\nimport config from "../embody.config.js";\n\nit("runs the starter action", async () => {\n  const harness = await createTestHarness({ plugins: config.plugins });\n  try { expect(await harness.call("app.ping", {})).toEqual({ ok: true }); } finally { await harness.close(); }\n});\n`,

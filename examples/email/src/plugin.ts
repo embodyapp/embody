@@ -109,7 +109,9 @@ export function createEmailPlugin(mailer: Mailer = unavailableMailer) {
     (define) => ({
       actions: {
         sendBatch: define.action({
+          title: "Send email batch",
           description: "Send an email batch with ordered live progress",
+          effect: "write",
           input: SendBatchInputSchema,
           output: SendBatchResultSchema,
           handler: async (input, context) => {

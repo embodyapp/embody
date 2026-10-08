@@ -53,6 +53,11 @@ export default defineApp({
   // Semantic version of the application manifest
   version: "1.0.0",
 
+  // Optional: shown to people and agents in MCP clients (plain text)
+  title: "Ops",
+  description: "Tasks and billing for the operations team.",
+  instructions: "List tasks before updating them.",
+
   // Ordered list of plugins registering entities, actions, and hooks
   plugins: [
     tasksPlugin,
