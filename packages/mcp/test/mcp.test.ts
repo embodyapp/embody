@@ -8,6 +8,7 @@ import type { AppManifest } from "@embody/core";
 import {
   createMcpCatalog,
   McpHttpHandler,
+  mcpErrorResult,
   mcpTargetName,
   type McpHttpOptions,
 } from "../src/index.js";
@@ -71,6 +72,40 @@ async function fixture(execute?: McpHttpOptions<string>["execute"]) {
   });
   return url;
 }
+
+describe("MCP error results", () => {
+  it("formats message, issues, retry hint and metadata", () => {
+    expect(
+      mcpErrorResult({
+        message: "Input is invalid",
+        code: "VALIDATION_ERROR",
+        requestId: "r-1",
+        details: [{ path: ["data", "title"], message: "Required" }],
+        retryAfterSeconds: 3,
+      }),
+    ).toEqual({
+      content: [
+        {
+          type: "text",
+          text: "Input is invalid\n- data.title: Required\nRetry after 3 seconds.",
+        },
+      ],
+      isError: true,
+      _meta: { "embody/errorCode": "VALIDATION_ERROR", "embody/requestId": "r-1" },
+    });
+  });
+
+  it("adds the request ID only for internal errors and omits empty metadata", () => {
+    expect(
+      mcpErrorResult({ message: "Tool execution failed", code: "INTERNAL_ERROR", requestId: "r" })
+        .content,
+    ).toEqual([{ type: "text", text: "Tool execution failed\nRequest ID: r" }]);
+    expect(mcpErrorResult({ message: "Cancelled" })).toEqual({
+      content: [{ type: "text", text: "Cancelled" }],
+      isError: true,
+    });
+  });
+});
 
 describe("MCP surface", () => {
   it("normalizes camel case and rejects collisions", () => {
