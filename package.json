@@ -32,7 +32,7 @@
     "verify": "pnpm lint && pnpm license:check && pnpm typecheck && pnpm test && pnpm build && pnpm api-report && pnpm format:check"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.31.1",
+    "@changesets/cli": "^3.0.3",
     "@eslint/js": "^9.39.5",
     "@microsoft/api-extractor": "^7.59.0",
     "eslint": "^9.39.5",
