@@ -12,6 +12,7 @@ import {
   stableStringify,
   toErrorEnvelope,
   z,
+  type AppMetadata,
   type EmbodyPlugin,
   type Principal,
 } from "@embody/core";
@@ -360,6 +361,26 @@ export interface AppDefinition {
   readonly appId: string;
   readonly version: string;
   readonly plugins: readonly EmbodyPlugin[];
+  /** Human-readable name shown by MCP clients, at most 80 characters. */
+  readonly title?: string;
+  /** Plain-text summary of what the app does, at most 500 characters. */
+  readonly description?: string;
+  /** Plain-text usage notes for agents, at most 2,048 characters. */
+  readonly instructions?: string;
+}
+
+/** Extracts the optional manifest metadata from an app definition. */
+export function appMetadataOf(definition: {
+  readonly title?: string;
+  readonly description?: string;
+  readonly instructions?: string;
+}): AppMetadata | undefined {
+  const metadata = {
+    ...(definition.title === undefined ? {} : { title: definition.title }),
+    ...(definition.description === undefined ? {} : { description: definition.description }),
+    ...(definition.instructions === undefined ? {} : { instructions: definition.instructions }),
+  };
+  return Object.keys(metadata).length === 0 ? undefined : metadata;
 }
 
 /** Preserves literal app configuration while checking the public host contract. */
@@ -504,7 +525,12 @@ export async function createAppHost(
     if (filename !== ":memory:") await mkdir(dirname(filename), { recursive: true });
     storage = new SqliteStorage({ filename });
   }
-  const kernel = new Kernel({ plugins: definition.plugins, storage });
+  const app = appMetadataOf(definition);
+  const kernel = new Kernel({
+    plugins: definition.plugins,
+    storage,
+    ...(app === undefined ? {} : { app }),
+  });
   await kernel.boot();
   let verifier = options.verifier;
   if (verifier === undefined && environment.NODE_ENV === "development") {
