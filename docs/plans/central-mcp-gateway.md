@@ -1,8 +1,8 @@
 # Central MCP gateway: production plan
 
-**Status: proposal, not implemented.** Written 2026-10-08 against `main` at `3f44ab7`. Proposed IDs use `P15-xx`; nothing is claimed in [STATUS.md](../implementation-plan/STATUS.md) until the ADR in P15-00 is approved.
+**Status: accepted.** [ADR 0006](../adr/0006-central-mcp-gateway.md), amended 2026-10-08 with the tenant/workspace model below. Written against `main` at `3f44ab7`.
 
-**Implementation plan:** [Phase 15](../implementation-plan/15-central-mcp-gateway.md).
+**Implementation plan:** [Phase 15](../implementation-plan/15-central-mcp-gateway.md) holds the work items, interfaces and tests. This document holds the model and the reasoning.
 
 **Related:** [ADR 0001](../adr/0001-phase-1-stack-and-package-boundaries.md), [ADR 0004](../adr/0004-cross-app-event-delivery.md), [ADR 0005](../adr/0005-generative-ui-presentation.md), [Phase 7](../implementation-plan/07-gateway.md), [Phase 8](../implementation-plan/08-mcp-and-cli.md), [Spec 04](../specs/04-pluggable-auth-identity.md), [Spec 05](../specs/05-client-surfaces-cli-mcp.md), [self-hosting](../production/07-self-hosting-the-gateway.md).
 
@@ -10,52 +10,66 @@
 
 ## 1. Goal
 
-A customer organization connects Claude Desktop, Claude web, Claude Code, Codex, ChatGPT or Cursor **once**, to its Embody gateway URL, and can safely use every Embody app it is authorized for.
+Embody's purpose is to let a company run many small, highly customized applications. People in that company should connect Claude Desktop, Claude web, Claude Code, Codex, ChatGPT or Cursor **once**, to their company's gateway URL, and use every Embody app they are allowed to use, from company-wide systems such as a CRM to small apps a single team built to automate its own process.
 
 **Constraints from product direction:**
 
-1. **Every customer org is its own tenant.** Apps, registrations, catalogs, identity settings, limits and audit are per org.
-2. **The gateway is stateless.** Any instance can serve any request; state lives in shared stores.
-3. **One codebase, two deployment modes.** A *shared* multi-tenant gateway for the managed service, and a *dedicated* single-org gateway for self-hosting, private networks and compliance. Dedicated is the same code configured with one org.
-4. **Ship something working as soon as possible.** Each milestone is releasable on its own. Anything not needed for a milestone is deferred ([§8](#8-explicitly-deferred)).
+1. **The gateway is multi-tenant.** One gateway deployment serves many companies. Nothing crosses between companies.
+2. **Every app deployment belongs to exactly one company.** Apps are single-tenant.
+3. **The gateway and the apps are stateless.** Any instance can be added, killed or restarted; state lives in shared storage.
+4. **Ship something working as soon as possible.** Each milestone is releasable on its own; anything not needed is deferred ([§8](#8-explicitly-deferred)).
 
 ---
 
-## 2. Milestones
+## 2. The model
 
-| Milestone | Who can use it | What it adds | Size |
+### 2.1 Terms
+
+| Term | Meaning | Example | Boundary |
 |---|---|---|---|
-| **M0: decide and verify** | — | ADR, client spike | ~2 days |
-| **M1: works in chat** | Dedicated gateways; Claude Code, Codex, Cursor, Claude Desktop via the CLI bridge (token auth) | Real errors, audit/limits on MCP, tool annotations, structured results, stateless MCP, compact discovery, delegated agent principal, org-keyed state | ~2 weeks |
-| **M2: chat products** | Adds Claude web/desktop connectors and ChatGPT | OAuth resource server per org | ~1 week |
-| **M3: shared multi-tenant** | Managed shared gateway | Postgres stores, org in URL, asymmetric org-bound tokens, endpoint safety, per-org limits and event routing, isolation test gate | ~2–3 weeks |
+| **Tenant** | A customer company. In code this is `orgId` (`principal.orgId`, storage row-level security, event routing, gateway registry). | Acme | **Hard.** Data, identity provider, credentials, billing. Nothing crosses tenants. |
+| **Workspace** | A unit inside a tenant that owns and manages apps, such as a department or team. | Acme Sales EMEA | **Soft.** Ownership and visibility of apps; not a data boundary. |
+| **App definition** | Code: a base app plus the plugins chosen for it. | CRM base + forecasting plugin | — |
+| **App** | An app ID within one tenant, served by one deployment. Either **tenant-wide** or **owned by a workspace**. | Acme's `crm` (tenant-wide); Sales EMEA's `stale-deal-followup` | App IDs are unique within a tenant. |
+| **Deployment** | Running, stateless instances of one app for one tenant. | `crm.acme.internal`, 3 replicas | Belongs to exactly one tenant. |
+| **Registration** | A deployment announcing itself to the gateway: tenant, app ID, owning workspace (optional), endpoint, manifest. | (Acme, `crm`) → URL + manifest | Persisted by the gateway. |
+| **Registration credential** | The secret a deployment registers with. Bound to one `(tenant, appId)` and optionally a workspace. | — | Issued by an operator. |
 
-Sizes are rough single-engineer estimates for review, not commitments. M1 and M2 can overlap after P15-01.
+The code keeps the name `orgId` for the tenant to avoid a breaking rename across storage, tokens and apps; docs call it the tenant. "Workspace" is the product word for what people may call an organization inside a company.
+
+### 2.2 How the CRM example works
+
+- Acme's **CRM** is a tenant-wide app: one deployment, one copy of the data, used by every workspace granted access through scopes.
+- Sales EMEA deploys **stale-deal-followup**, owned by its workspace. It subscribes to CRM events (works today, [ADR 0004](../adr/0004-cross-app-event-delivery.md)) and needs to call CRM actions (new work: [§4.10](#410-app-to-app-calls-after-m1)).
+- A person in Sales EMEA connects to `…/t/acme/mcp` and sees the CRM plus the apps their scopes allow, including Sales EMEA's apps. Workspace membership shapes the list through scopes; it is not a data wall. If the CRM needs per-workspace visibility of records, the CRM enforces it.
+- Another company running the same CRM code runs its own deployment with its own data. Sharing a *customized version* of an app between workspaces or companies means sharing code (templates, plugin packages), which is a separate distribution track, not a gateway feature.
 
 ---
 
 ## 3. Current state on `main` (short)
 
-**Works:** `/mcp` and `/mcp/:appId` on the official SDK; catalog aggregated from healthy apps with `app__target` names and collision checks; per-principal scope filtering; audience-bound gateway JWT to app hosts (client tokens are never passed through); progress and cancellation.
+**Works:** `/mcp` and `/mcp/:appId` on the official SDK; catalog aggregated from healthy apps with `app__target` names and collision checks; per-principal scope filtering; audience-bound gateway JWT to app hosts (client tokens are never passed through); progress and cancellation. App hosts are already close to stateless: production requires PostgreSQL, registers a shared `PUBLIC_URL`, and background workers claim work through database leases.
 
 **Blocks this goal:**
 
 | # | Problem | Where |
 |---|---|---|
-| 1 | Every app error reaches the agent as "Tool execution failed"; hook veto messages and validation details are dropped | `remoteEvents` in [gateway/src/index.ts](../../packages/gateway/src/index.ts) |
-| 2 | MCP and `/api/execute/stream` skip audit and rate limiting | only `POST /api/execute/:appId/:target` calls them |
-| 3 | No action effect metadata, so no read/destructive annotations; no app title/description; no server instructions | `ActionManifest`, `AppManifest`, `new Server(...)` |
-| 4 | Every authorized tool of every app is listed at once | `createMcpCatalog` |
-| 5 | Results are JSON text only | `mcpResult` |
-| 6 | MCP sessions live in process memory | `McpHttpHandler.sessions` |
-| 7 | A human signing in through a chat client becomes `actorType: "human"`, so agent-only guardrails (e.g. Kanban's PR rule) stop applying | `Principal`; `examples/kanban/src/plugin.ts` |
-| 8 | No OAuth discovery; chat products cannot connect | bearer token only |
-| 9 | Registry is global and in memory, keyed by app ID only; registration credentials are a static `appId → secret` map | `GatewayRegistry` |
-| 10 | Gateway → host tokens use one HS256 secret shared by every host, and hosts check only `aud = appId`. Any host holding the secret can mint calls to any app of any org | `issueGatewayToken`; host `gatewayJwtVerifier` with `algorithms: ["HS256"]` |
-| 11 | `assertPublicDns` exists but nothing calls it; dispatch to registered endpoints is open to DNS rebinding | gateway |
-| 12 | Event destinations come from the global registry, not filtered by org | `GatewayRegistry.destinations` |
+| 1 | Every app error reaches the agent as "Tool execution failed" | `remoteEvents` in the gateway (fixed by P15-01) |
+| 2 | MCP and `/api/execute/stream` skip audit and rate limiting | gateway routes (fixed by P15-01) |
+| 3 | No action effect metadata or app title/description; no server instructions | `ActionManifest`, `AppManifest` (P15-02, P15-03) |
+| 4 | Every authorized tool of every app is listed at once | `createMcpCatalog` (P15-03) |
+| 5 | Results are JSON text only | `mcpResult` (P15-03) |
+| 6 | MCP sessions live in process memory | `McpHttpHandler.sessions` (P15-04) |
+| 7 | A person's credential used through a chat client is `human`, so agent-only guardrails stop applying | `Principal` (P15-06) |
+| 8 | No OAuth discovery; chat products cannot connect | bearer token only (P15-07) |
+| 9 | Registry is global, in memory and keyed by app ID only; credentials are a static `appId → secret` map | `GatewayRegistry` (P15-05, P15-08) |
+| 10 | Every app host verifies gateway tokens with one shared HS256 secret and checks only the app ID; any host could forge calls into another tenant's apps | `issueGatewayToken`, host verifier (P15-09) |
+| 11 | App hosts accept tokens for any tenant | host verifier (P15-09, P15-12) |
+| 12 | `assertPublicDns` exists but nothing calls it | gateway (P15-10) |
+| 13 | Event destinations come from the global registry | `GatewayRegistry.destinations` (P15-05) |
+| 14 | Apps cannot call other apps' actions | not implemented (P15-13) |
 
-Items 1–8 matter for every deployment. Items 9–12 are tolerable in a dedicated gateway trusted by one org, and **block the shared gateway**.
+Because the gateway is multi-tenant from the first release, items 9–11 block M1, not just a later shared-hosting milestone.
 
 ---
 
@@ -63,303 +77,148 @@ Items 1–8 matter for every deployment. Items 9–12 are tolerable in a dedicat
 
 ### 4.1 The gateway is the central MCP server
 
-It already owns the registry, auth, scopes, token exchange, progress relay, audit and limits. Per-app MCP servers would multiply connections and consents per client; a separate MCP service would duplicate all of the above. `/mcp/:appId` stays as a filtered view of the same server. Domain code never runs in the gateway; MCP logic stays in `@embody/mcp`, with the gateway supplying collaborators.
+It already owns the registry, auth, scopes, token exchange, progress relay, audit and limits. Per-app MCP servers would multiply connections and consents per client; a separate MCP service would duplicate all of the above. `/t/<tenant>/mcp/<appId>` stays as a filtered view of the same server. Domain code never runs in the gateway; MCP logic stays in `@embody/mcp`, with the gateway supplying collaborators.
 
-### 4.2 Tenancy: everything is keyed by org
+### 4.2 Tenancy: tenants and workspaces
 
-- **Registry key:** `(orgId, appId)`. Two orgs may each have a `kanban` app with different endpoints and versions.
-- **Registration credential:** belongs to exactly one `(orgId, appId)`. An app host that serves several orgs registers once per org with each credential (usually there is only one).
-- **Org configuration:** identity provider (issuer, audience, claim mapping), scope policy, limits, allowed endpoint origins.
-- **Every read path** (catalog, MCP, dispatch, events, CLI) filters by the caller's org. There is no cross-org catalog.
-- **Dedicated mode** is a gateway configured with one org. `/mcp` resolves to it. Existing single-org deployments upgrade without URL changes.
+- **Registry key:** `(tenant, appId)`. Two tenants may each have a `crm` with different plugins, endpoints and versions.
+- **Registration credential:** bound to one `(tenant, appId)` and optionally a `workspaceId`. The registration's tenant and workspace come from the credential, never from the request body alone.
+- **Tenant configuration:** identity provider, scope policy, limits, allowed endpoint origins, workspaces.
+- **Every read path** (catalog, MCP, dispatch, events, CLI) filters by the caller's tenant. There is no cross-tenant catalog, call or event.
+- **Workspaces** are registration metadata (owner) and a grouping in discovery. Access to an app is decided by scopes, which identity providers can map from workspace groups (P15-07). A principal-level workspace membership field is deferred until a feature needs it.
+- **A gateway with one tenant** is just a small deployment. An optional `defaultTenant` keeps today's unprefixed `/mcp` and `/api/...` URLs working.
 
 ### 4.3 Tenant in the URL
 
-OAuth discovery happens before the client has a token, so the gateway must know which org's identity provider to advertise from the URL alone.
+OAuth discovery happens before the client has a token, so the gateway must know which tenant's identity provider to advertise from the URL alone.
 
-- Shared mode: `https://gateway.example.com/o/<org>/mcp` (also `/o/<org>/mcp/<appId>`, `/o/<org>/api/...`). Per-org hostnames can be added later without design changes.
-- Dedicated mode: `/mcp` and existing `/api/...` routes, plus `/o/<org>/...` for the configured org.
-- The authenticated principal's `orgId` must equal the URL's org, otherwise `403`. This is checked once in the route layer.
+- `https://gateway.example.com/t/<tenant>/mcp` (also `/t/<tenant>/mcp/<appId>`, `/t/<tenant>/api/...`).
+- With `defaultTenant` configured, the unprefixed routes serve that tenant.
+- The authenticated principal's tenant must equal the URL's tenant, otherwise `403`, checked once in the route layer.
+- Per-tenant hostnames can be added later without design changes.
 
 ### 4.4 Stateless gateway
 
 | State | Where it lives |
 |---|---|
-| Registry, registration credentials, org configuration | `GatewayStore` interface. In-memory implementation for dev and tests; PostgreSQL implementation (M3) for production. |
-| MCP sessions | **None.** Use the SDK's stateless Streamable HTTP mode (no `Mcp-Session-Id`). Each POST builds the server view from the authenticated principal and the current registry. |
-| Rate limits | Per-instance fixed window in M1–M2 (limits divided by instance count in configuration). Shared limiter is deferred until load data shows a need. |
-| Audit | `AuditSink` interface. Default: structured JSON log lines on stdout for the log pipeline. Optional Postgres sink in M3. |
-| Catalog cache | Per-instance, per-org, a few seconds, keyed by registry revision. Disposable. |
-| In-flight tool calls | The HTTP request itself. If an instance dies, the call is cancelled and the client sees a transport error; outcome is uncertain, as with any interrupted HTTP call. |
+| Registrations, credentials, tenant configuration | `GatewayStore` interface: in-memory for development and tests, **PostgreSQL in M1** for any multi-instance deployment. |
+| MCP sessions | **None.** Stateless Streamable HTTP; each POST builds the server view from the authenticated principal and the current registry. |
+| Rate limits | Per instance (limits divided by instance count in configuration) until load data shows a need for a shared limiter. |
+| Audit | `AuditSink`: JSON lines on stdout by default; optional Postgres sink. |
+| Catalog cache | Per instance, per tenant, a few seconds, keyed by registry revision. Disposable. |
+| In-flight calls | The HTTP request itself. If an instance dies, the call is cancelled and its outcome is uncertain, as with any interrupted HTTP call. |
 
-**What statelessness costs, and why that is acceptable now:** no server-initiated `tools/list_changed` notifications and no per-session state. New or redeployed apps appear on the client's next tool listing (typically a new conversation). Chat GenUI features that need the server to ask the client something mid-call (elicitation) will need sticky routing or a shared message bus; that is decided in the GenUI plan, not here.
+**Cost:** no server-initiated `tools/list_changed`; new or redeployed apps appear on the client's next tool listing. Features that need the server to ask the client something mid-call (chat GenUI elicitation) will need sticky routing or a message bus, decided in that plan.
 
-### 4.5 Compact discovery without sessions
+### 4.5 Compact discovery
+
+Companies are expected to run many small apps, so compact discovery is the normal case, not an edge case.
 
 | Mode | Tools listed | When |
 |---|---|---|
-| `full` | All authorized tools | `/mcp/<appId>`; or `/mcp` when the org's authorized tool count ≤ threshold (default 40) |
-| `compact` | `embody_apps`, `embody_describe`, `embody_read`, `embody_write`, plus named tools of apps selected with `?apps=a,b` | `/mcp` above the threshold; or `?tools=compact` |
+| `full` | All authorized tools | `/mcp/<appId>`; or `/mcp` when the authorized tool count ≤ threshold (default 40) |
+| `compact` | `embody_apps`, `embody_describe`, `embody_read`, `embody_write`, plus named tools of apps selected with `?apps=a,b` | above the threshold; or `?tools=compact` |
 
-- `embody_apps` (read-only): authorized apps with title, description, health and tool count.
+- `embody_apps` (read-only): authorized apps with title, description, owning workspace, health and tool count.
 - `embody_describe` (read-only): schemas and descriptions for an app or one target.
-- `embody_read` (read-only): dispatch a target whose effect is `read`; refuses anything else.
-- `embody_write` (destructive): dispatch a `write` or `destructive` target.
+- `embody_read` (read-only): dispatches a `read` target; refuses anything else.
+- `embody_write` (destructive): dispatches `write` or `destructive` targets.
 
-Two generic call tools instead of one, because clients approve per tool name: an "always allow" on `embody_read` must never cover a delete. All four go through the same dispatch pipeline and scope checks as named tools. `?apps=` is a convenience filter, not a permission. Tool names are identical across modes. App ID `embody` is reserved.
-
-This needs no server state and works on clients that never re-list tools.
+Two generic call tools, because clients approve per tool name: an "always allow" on reads must never cover a delete. All go through the same dispatch pipeline and scope checks as named tools. Tool names are identical across modes. App ID `embody` is reserved. No server state is needed, and clients that never re-list tools still work.
 
 ### 4.6 Delegated agent principal
 
-**Rule:** a call that arrives through MCP is an **agent** call made **on behalf of** the token's subject.
+A call that arrives through MCP is an **agent** call made **on behalf of** the credential's subject: `actorType: "agent"`, `actorId: "<client|mcp>:<subject>"`, `delegation: { subjectId, subjectType, client? }`. Agent credentials are unchanged; the HTTP API and CLI are unchanged. The delegation reaches app hosts, handlers and audit. `mcp.actor: "token"` keeps the old attribution for one release. (Implemented in P15-06.)
 
-```ts
-interface Principal {
-  // existing: orgId, actorId, actorType, roles, scopes, metadata?
-  readonly delegation?: {
-    readonly subjectId: string;
-    readonly subjectType: "human" | "system";
-    readonly client?: string; // OAuth client id or name, bounded
-  };
-}
-```
+### 4.7 Gateway → app tokens: asymmetric and tenant-bound (M1)
 
-- MCP with a human or system token → `actorType: "agent"`, `actorId: "<client|mcp>:<subjectId>"`, `delegation` set, scopes unchanged (never broader).
-- Agent API keys pass through unchanged.
-- `/api/execute` with a human token is still a human call.
-- The gateway → host token carries `delegation`; hosts expose it as `context.principal.delegation`. Existing `actorType === "agent"` guardrails keep working; hooks that need the person read `delegation.subjectId`. Audit records actor, subject and client.
-- Gateway option `mcp.actor: "agent-on-behalf" | "token"` (default `agent-on-behalf`). `token` is a one-release escape hatch with a deprecation warning.
-
-### 4.7 Gateway → host tokens: asymmetric and org-bound (M3)
-
-- Gateway signs with ES256 using a configured private key (KMS-backed in managed deployments) and publishes `/.well-known/jwks.json` with `kid` rotation.
-- Claims add `org` (the tenant). Hosts verify via JWKS URL, check `aud = appId` and `org ∈` the orgs the host registered for.
-- Hosts no longer hold any signing secret, so a compromised or malicious host cannot forge calls.
-- Dedicated mode keeps HS256 for one release (with a deprecation warning) so existing deployments do not break; shared mode refuses to start with HS256.
+- The gateway signs with ES256 and publishes `/.well-known/jwks.json` with `kid` rotation. App hosts hold no signing secret, so a compromised host cannot forge calls.
+- Hosts verify signature, `aud = appId`, and that the token's tenant equals their configured `GATEWAY_ORG_ID`.
+- HS256 is accepted only when the gateway serves a single tenant, for one release, with a deprecation warning.
 
 ### 4.8 OAuth resource server (M2)
 
-Per the MCP authorization specification (`2025-11-25`, already pinned):
+Per the MCP authorization specification (`2025-11-25`): per-tenant protected-resource metadata at `/.well-known/oauth-protected-resource/t/<tenant>/mcp`; `401` challenges; tokens validated by the tenant's identity provider with the tenant's MCP URL as audience; a per-tenant policy mapping OAuth scopes, roles or workspace groups to Embody scopes; `insufficient_scope` step-up. API keys keep working for developer tools and CI. The gateway never issues end-user tokens in production.
 
-1. `/.well-known/oauth-protected-resource/o/<org>/mcp` (and the dedicated `/mcp` equivalent) names the org's authorization server and supported scopes.
-2. Unauthenticated MCP requests get `401` with `WWW-Authenticate: Bearer resource_metadata="…"`.
-3. Tokens are validated by the existing `oidcProvider` configured per org, with the audience set to that org's MCP resource URL.
-4. Scope mapping: tokens carry coarse scopes (`embody:read`, `embody:write`) or roles; a per-org policy maps them to Embody's `app:target` scopes. Missing scope → `403` with `error="insufficient_scope"`.
-5. API keys keep working for Claude Code, Codex, Cursor, the CLI and CI.
+### 4.9 Stateless, single-tenant app deployments
 
-The gateway never issues end-user tokens in production; it is a resource server only. Which identity providers and client registration methods work with which chat clients is recorded in M0.
+- A deployment serves exactly one tenant: production hosts require `GATEWAY_ORG_ID` and reject gateway tokens for any other tenant.
+- Replicas share one `PUBLIC_URL` and one manifest generation, so their registrations and heartbeats are idempotent.
+- Production already requires PostgreSQL; workers already use database leases. P15-12 proves this with a multi-replica test and documents it.
+- **Registrations persist** in the gateway store until removed. A deployment that stops heartbeating is shown as unavailable instead of disappearing.
+- **Open question:** whether app deployments should scale to zero when idle. If yes, "no recent heartbeat" must become an *idle* state that is still routed so the platform can wake the app ([§9](#9-open-questions)).
+
+### 4.10 App-to-app calls (after M1)
+
+An app such as Sales EMEA's automation must call CRM actions. Today apps can only receive other apps' events. The new capability: an app calls another app **in the same tenant** through the gateway with its own **system** identity, with scopes granted to that app, through the same dispatch pipeline (scope checks, rate limits, audit). Target app hooks can tell that an automation is calling. Planned as P15-13 after M1.
 
 ---
 
-## 5. Implementation steps
+## 5. Milestones
 
-```text
-M0  P15-00 ─┐
-M1          ├─ P15-01 ─┬─ P15-03 ─┬─ P15-04
-            ├─ P15-02 ─┘          │
-            ├─ P15-05 ────────────┤
-            └─ P15-06 ────────────┘
-M2                        P15-07 (after P15-05, P15-06)
-M3                        P15-08 ─ P15-09 ─ P15-10 ─ P15-11
-```
+| Milestone | Who can use it | Items | Rough size |
+|---|---|---|---|
+| **M0: decide and verify** | — | P15-00 ADR and client spike | ~2 days |
+| **M1: multi-tenant gateway works in chat** | Claude Code, Codex, Cursor, Claude Desktop via the CLI bridge (token auth), on a multi-tenant, multi-instance gateway | P15-01, 02, 06 (open PRs) · P15-03 MCP metadata and discovery · P15-04 stateless MCP · P15-05 tenant-keyed store, routing and workspaces · P15-08 Postgres store · P15-09 tenant-bound asymmetric tokens · P15-12 stateless single-tenant app hosts | ~4–5 weeks |
+| **M2: chat products** | Adds Claude web/desktop connectors and ChatGPT | P15-07 OAuth per tenant | ~1 week |
+| **M2.5: apps integrate** | App-to-app automation | P15-13 app-to-app calls | ~1–2 weeks |
+| **M3: production gate** | Managed multi-tenant service | P15-10 endpoint safety and per-tenant limits · P15-11 isolation suite, load test, runbook | ~2 weeks |
 
-Every step is one PR with tests, docs, API report updates and a changeset. Every step keeps existing HTTP, CLI, event and workflow behavior unchanged unless stated.
-
-### M0: decide and verify
-
-#### P15-00: ADR and client spike
-
-- **ADR 0006** covering §4: gateway as central MCP, tenancy model, stateless mode, compact discovery, delegation rule, asymmetric tokens, resource-server-only OAuth. Add decision gate D-07 to STATUS.
-- **Spike** with a throwaway stateless server (~120 dummy tools, annotations, structured results, OAuth metadata) against Claude Desktop, Claude web, Claude Code, Codex, ChatGPT, Cursor and MCP Inspector. Record per client and version:
-  - stateless Streamable HTTP (no session ID) works;
-  - OAuth discovery, client registration method, `insufficient_scope` handling, token refresh;
-  - behavior with 120+ tools;
-  - whether annotations affect approval prompts;
-  - how `structuredContent` and `instructions` appear.
-- **Output:** ADR approved; `docs/guides/mcp-client-support.md` with dated results; threshold default confirmed.
-- **Fallback:** if a must-have client cannot use stateless mode, enable the SDK's session mode behind a flag with sticky routing on `Mcp-Session-Id` for that deployment. Session state stays minimal (identity only), so this does not change anything else in the plan.
-
-### M1: works in chat
-
-#### P15-01: one dispatch pipeline, real errors, audit everywhere
-
-**Files:** `packages/gateway/src/index.ts` → new `dispatch.ts`; `packages/mcp/src/index.ts`.
-
-1. Extract `dispatch(principal, appId, target, input, { stream, signal, requestId, surface })`: registry lookup and health → target advertised → `scopeAllows` → rate limit → gateway token → host call → progress relay → parse terminal result or error envelope → audit.
-2. `/api/execute`, `/api/execute/stream` and MCP become thin adapters.
-3. Parse the host's sanitized error envelope (already produced by `toErrorEnvelope`) with a bounded parser; unknown or malformed → `INTERNAL`.
-4. MCP mapping: `isError: true` with the envelope message; validation `details` listed; `_meta["embody/errorCode"]` and `_meta["embody/requestId"]`; `RATE_LIMITED` includes retry-after; unavailable app → "`<app>` is temporarily unavailable". Messages bounded and control characters stripped.
-5. `AuditSink` interface with stdout JSON default; records `surface`, org, app, target, actor, subject, client, outcome, duration, request ID.
-
-**Tests:** each error code through an official SDK client; malformed/oversized frames → `INTERNAL` without leaking content; MCP and stream calls audited and rate-limited; Kanban PR veto message reaches the MCP client verbatim.
-
-#### P15-02: action effects and app metadata
-
-**Files:** `packages/core/src/manifest.ts` and CRUD/workflow generation, `packages/host/src/index.ts` (`defineApp`), `validateRegistration`, `create-embody-app` templates, Kanban and Email.
-
-1. Optional `ActionManifest.effect: "read" | "write" | "destructive"`, `title`, `idempotent`.
-2. Generated CRUD: `get`/`list` read, `create` write, `update` write + idempotent, `delete` destructive. Workflow controls: `status` read, `start`/`retry` write, `cancel` destructive. Custom actions without `effect` are treated as `write`.
-3. Optional `AppManifest.app = { title?, description?, instructions? }` (plain text, bounded: 80 / 500 / 2,048 chars). Icons deferred.
-4. Registration validates sizes and characters; reserves app ID `embody`. Manifest `protocolVersion` stays `1`; older manifests still register.
-
-**Tests:** compiler golden files; old manifests register; invalid metadata rejected without echoing values.
-
-#### P15-03: MCP metadata, structured results, compact discovery
-
-**Files:** `packages/mcp/src/index.ts`, gateway options.
-
-1. Tools get `title` and `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentHint`) from effects.
-2. `outputSchema` when the action has an object output schema; results then include `structuredContent` (only if the value validates) plus compact JSON text.
-3. Server `instructions`: a fixed Embody section (naming, discovery tools, error format) plus the org's app titles and descriptions, bounded to 8 KiB.
-4. Compact discovery (§4.5), `?tools=` and `?apps=` parsing (bounded), threshold option, `tools/list` byte budget (default 256 KiB) with automatic compact fallback.
-5. Server name and version from package metadata.
-
-**Tests:** `tools/list` snapshots in both modes; `embody_read` refuses write targets; `embody_write` re-checks scope; unauthorized apps never appear in any discovery output; a client that never re-lists completes create/list/update/delete through compact tools; 10-app synthetic fixture stays within the budget.
-
-#### P15-04: stateless MCP transport
-
-**Files:** `packages/mcp/src/index.ts`, gateway MCP route.
-
-1. Replace the session map with stateless Streamable HTTP: build a `Server` per request from `(principal, org, scopedApp, mode)`; no `Mcp-Session-Id`.
-2. Respond `405` to standalone `GET` streams and `DELETE` per the stateless transport rules.
-3. Keep progress and cancellation within the POST response stream.
-4. Keep the session-mode code path behind `mcp.sessions: "stateless" | "sticky"` only if P15-00 found a client that needs it.
-5. Drain on shutdown: stop accepting, let in-flight calls finish up to 10 s, then cancel.
-
-**Tests:** two gateway instances behind a round-robin proxy in the E2E compose; list and call alternate instances successfully; killing an instance mid-call yields a clean client error and no duplicate execution; progress ordering and cancellation tests from Phase 8 still pass.
-
-#### P15-05: org-keyed state behind `GatewayStore`
-
-**Files:** `packages/gateway/src` (new `store.ts`), `apps/gateway`, host registration client.
-
-1. `GatewayStore` interface: orgs (config), registrations keyed `(orgId, appId)`, credentials (hashed) keyed the same way, a per-org registry revision. In-memory implementation only in M1.
-2. Registration and heartbeat resolve `(orgId, appId)` from the credential; registration body may include `orgId` and it must match.
-3. Health is derived on read from `lastSeen` and TTL; no background sweep needed.
-4. Catalog, MCP, dispatch and `/api/catalog` read the caller's org only. Per-instance catalog cache keyed by org revision.
-5. Dedicated mode: a `defaultOrg` option; existing `credentials: Record<appId, secret>` config is accepted and mapped to the default org for one release.
-6. Host: registration config accepts a list of `{ orgId?, secret }` (usually one).
-
-**Tests:** two orgs each with a `kanban` app on different endpoints; each org sees and calls only its own; existing single-org E2E unchanged.
-
-#### P15-06: delegated agent principal
-
-**Files:** `packages/core/src/contracts.ts`, `packages/core/src/protocol.ts`, `packages/host/src/index.ts` (verifier), gateway MCP route and token issuance, Spec 04.
-
-1. Add `Principal.delegation` and validation.
-2. MCP route applies §4.6; gateway token includes `delegation`; host verifier validates and exposes it.
-3. Audit includes subject and client.
-
-**Tests:** a human token over MCP triggers Kanban's agent PR guardrail and records the human as subject; the same token on `/api/execute` stays human; agent API keys unchanged; `mcp.actor: "token"` restores old behavior with a warning.
-
-**M1 exit:** Kanban and Email journeys (discover, read, guarded write with veto and correction) pass through an official SDK client against two stateless gateway instances; manually verified in Claude Code and Codex with token auth; docs: per-client connection guides for token-capable clients, updated Claude Desktop guide.
-
-### M2: chat products
-
-#### P15-07: OAuth resource server per org
-
-**Files:** gateway routes and auth configuration, org config schema, `apps/gateway`, docs.
-
-1. Per-org protected-resource metadata and `401` challenge (§4.8).
-2. Per-org `oidcProvider` (issuer, JWKS, audience = org MCP resource URL, claim mapping).
-3. Per-org scope policy and `insufficient_scope` challenge.
-4. URL org must equal token org.
-5. Docs: setup with at least one supported identity provider, chosen from the M0 results; connection guides for Claude web/desktop connectors and ChatGPT.
-
-**Tests:** metadata documents validate; wrong audience, wrong org, expired and under-scoped tokens rejected with correct challenges; MCP Inspector completes OAuth against a test identity provider in CI; manual verification in Claude web and ChatGPT recorded in the support matrix.
-
-**M2 exit:** a dedicated gateway is usable from Claude web/desktop and ChatGPT with OAuth sign-in.
-
-### M3: shared multi-tenant
-
-#### P15-08: PostgreSQL `GatewayStore`
-
-1. Migrations for orgs, registrations, credentials (slow KDF hashes), registry revision; uses existing `@embody/storage` PostgreSQL conventions.
-2. Heartbeats update `lastSeen` with a single-row upsert; revision increments only on registration or generation change.
-3. Org provisioning API or CLI command for operators (create org, issue app registration credentials, set identity provider). Admin-authenticated, not exposed to tenants.
-4. Optional Postgres `AuditSink`.
-
-**Tests:** conformance suite shared with the in-memory store; two instances see the same registry immediately after registration; gateway restart loses nothing.
-
-#### P15-09: asymmetric, org-bound gateway tokens
-
-1. ES256 signing with `kid`; `/.well-known/jwks.json`; key rotation with overlap.
-2. `org` claim; host verifier checks JWKS signature, `aud`, `org` and short expiry.
-3. Shared mode refuses HS256; dedicated mode warns.
-4. Host config: `GATEWAY_JWKS_URL` replaces `GATEWAY_JWT_SECRET`.
-
-**Tests:** host rejects tokens for another org, another app, wrong `kid`, HS256 in shared mode; rotation keeps calls working.
-
-#### P15-10: endpoint safety, per-org limits, org-scoped events
-
-1. Shared mode forbids private endpoints; registration and every dispatch run `assertPublicDns`; dispatch connects to the resolved, validated address; redirects refused.
-2. Per-org allowed endpoint origins.
-3. Per-org limits: registered apps (default 50), tools per org catalog, request rate per org and per actor, concurrent calls per org.
-4. `destinations(event)` filters registrations by `event.orgId`; durable relay (P7-04) does the same.
-5. `/o/<org>/...` routing for all routes; dedicated mode keeps unprefixed routes.
-
-**Tests:** DNS rebinding fixture blocked; private IP registration rejected in shared mode; one org exhausting limits does not affect another; events never reach another org's apps.
-
-#### P15-11: isolation gate and production readiness
-
-1. **Cross-tenant test suite (release-blocking):** token from org A on org B's URL; guessed app IDs; catalog, discovery and `embody_describe` leakage; registration credential reuse across orgs; forged host tokens; event routing; audit separation; cache poisoning across orgs.
-2. Load test: 100 orgs × 10 apps, `tools/list` and call latency at p50/p95 recorded in the performance baseline.
-3. Ops: runbook entries (key rotation, org provisioning, revoking credentials, draining instances), metrics (requests and errors by org/surface/code, OAuth challenges, registry size, heartbeat lag), alerts.
-4. Docs: self-hosting (dedicated) vs managed (shared), security model, upgrade notes for HS256 → JWKS and org-keyed credentials.
-
-**M3 exit:** isolation suite green; load numbers recorded; managed shared gateway deployable.
+Sizes are rough single-engineer estimates, not commitments. Details: [Phase 15](../implementation-plan/15-central-mcp-gateway.md).
 
 ---
 
 ## 6. Compatibility and upgrade
 
-| Change | Existing dedicated deployments |
+| Change | Existing deployments |
 |---|---|
 | Error messages become informative | Intended; release note |
-| Delegated agent principal over MCP | Behavior change for human tokens on MCP; `mcp.actor: "token"` for one release |
+| Delegated agent principal over MCP | Human credentials used over MCP hit agent-only hooks; `mcp.actor: "token"` for one release |
 | Stateless MCP | Transparent to clients that support it (verified in M0) |
-| Org-keyed registry and credentials | Old `appId → secret` config maps to the default org for one release |
-| Asymmetric gateway tokens | HS256 still accepted in dedicated mode for one release, with warning |
+| Tenant-keyed registry and credentials | Old `appId → secret` config is accepted when the gateway serves a single tenant, mapped to `defaultTenant`, for one release |
+| Two tenants sharing one app deployment (today's E2E topology) | Not supported: each tenant gets its own deployment. The E2E moves to one deployment per tenant. |
+| Asymmetric gateway tokens | HS256 accepted only on single-tenant gateways for one release, with warning |
 | Manifest metadata | Optional; old hosts register; custom actions default to `write` |
-| `/mcp`, `/api/...` paths | Unchanged in dedicated mode |
+| `/mcp`, `/api/...` paths | Unchanged when `defaultTenant` is set; `/t/<tenant>/...` otherwise |
 
 ---
 
 ## 7. Why this should work
 
-- **It reuses what exists.** Registry, auth chain, scopes, token exchange, progress relay and E2E infrastructure are already built and tested; most steps reshape them rather than add new systems.
-- **It is standard MCP only:** stateless Streamable HTTP, OAuth protected-resource metadata, tool annotations, output schemas, structured content, server instructions.
-- **Statelessness removes the hardest operational problem.** No session affinity, no session store, no notification fan-out. Instances can be added, removed or restarted freely.
-- **Compact discovery degrades safely** on any client, because it needs neither list-change support nor server state.
-- **Tenancy is designed in, not bolted on.** Dedicated mode is just one org, so self-hosted and managed deployments run the same code and tests.
-- **Security improves at each step:** governed MCP calls in M1, standard OAuth in M2, forgery-proof host tokens and SSRF protection in M3, with an isolation suite as a release gate before any tenants share a gateway.
+- **It reuses what exists.** Registry, auth chain, scopes, token exchange, progress relay, database-leased workers and E2E infrastructure are built and tested; most steps reshape them.
+- **One hard boundary.** The tenant is the only isolation boundary, and it already is one in storage, events and tokens. Workspaces add ownership and visibility without a second data wall.
+- **It is standard MCP only:** stateless Streamable HTTP, OAuth protected-resource metadata, annotations, output schemas, structured content, server instructions.
+- **Statelessness removes the hardest operational problems.** No session affinity, store-backed registrations, idempotent app replicas.
+- **Compact discovery scales with "many small apps"** on any client.
+- **Tenant safety lands before the first release:** tenant-keyed registry, tenant-bound tokens and host checks are in M1, with an isolation suite as the production gate.
 
 ---
 
 ## 8. Explicitly deferred
 
-Not needed for a working production system; revisit with evidence.
-
 - `tools/list_changed` notifications, MCP sessions, per-session app activation.
-- Shared rate-limit store (per-instance limits are enough until load data says otherwise).
-- Transparent stdio bridge for resources, prompts and elicitation (needed by the chat GenUI plan, not here).
-- `embody login` OAuth for the CLI; loopback MCP in `embody dev`; development authorization server.
-- Per-org hostnames, app icons, MCP tasks for workflows, app-declared prompts and resources, event notifications to chat.
-- Chat GenUI (server-built documents, elicitation, MCP Apps views). It builds on this plan; elicitation will require sticky routing or a message bus, decided there.
+- Shared rate-limit store.
+- Principal-level workspace membership (scopes decide access until a feature needs membership).
+- Cross-tenant anything: shared deployments, cross-tenant calls or events.
+- Distribution of customized apps (templates, plugin catalog) — separate track.
+- Transparent stdio bridge, `embody login`, MCP in `embody dev`, development authorization server.
+- Per-tenant hostnames, app icons, MCP tasks for workflows, app-declared prompts and resources, event notifications to chat.
+- Chat GenUI (builds on this plan).
 
 ---
 
-## 9. Phase 14 note
-
-Commit `ec7ca78` (Phase 14 GenUI, on `docs/genui-incremental-plan`) is not on `main` and rewrites `packages/mcp/src/index.ts` (view metadata, MCP Apps checks, a per-session catalog snapshot, partial error-code passthrough). Sequence it explicitly: either merge Phase 14 before P15-01 and adapt it to stateless mode, or land P15-01/P15-03/P15-04 first and rebase Phase 14. Its per-session catalog snapshot does not survive stateless mode and should become a generation check per request.
-
----
-
-## 10. Open questions
+## 9. Open questions
 
 | Question | Needed by |
 |---|---|
-| Which identity provider(s) will the managed service support first, and do they support the client registration method chat clients use? | M2 (answered by M0 spike) |
-| Org provisioning: self-serve signup or operator-provisioned at first? | M3 |
-| Where does the managed gateway's signing key live (cloud KMS choice)? | M3 |
-| Do any target clients require MCP sessions (stateless not supported)? | M1 (answered by M0 spike) |
+| Should app deployments scale to zero when idle (idle state and wake-on-call)? | P15-05/P15-12 design |
+| Which identity provider(s) will the managed service support first, and which client registration methods do chat clients use with them? | M2 (M0 spike) |
+| Tenant provisioning: self-serve signup or operator-provisioned at first? | M3 |
+| Where does the managed gateway's signing key live (cloud KMS choice)? | M1 (P15-09) |
+| Do any target clients require MCP sessions? | M1 (M0 spike) |
+
+---
+
+## 10. Phase 14 note
+
+Commit `ec7ca78` (Phase 14 GenUI, on `docs/genui-incremental-plan`) is not on `main` and rewrites `packages/mcp/src/index.ts`. Its per-session catalog snapshot does not survive stateless MCP and should become a per-request generation check when it is rebased onto Phase 15.

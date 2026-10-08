@@ -1,28 +1,28 @@
 # Phase 15 — Central MCP gateway
 
-**Design:** [central MCP gateway plan](../plans/central-mcp-gateway.md); ADR 0006 (written in P15-00). **Status:** proposed; blocked on D-07. **Depends on:** P7-01–P7-03, P8-01–P8-03, P10-03.
+**Design:** [central MCP gateway plan](../plans/central-mcp-gateway.md); [ADR 0006](../adr/0006-central-mcp-gateway.md) with Amendment 1. **Status:** accepted (D-07). **Depends on:** P7-01–P7-03, P8-01–P8-03, P10-03.
 
 ## Objective
 
-Make the Embody gateway the one MCP endpoint a customer org connects to from Claude, Codex, ChatGPT, Cursor and other MCP clients, with:
+Make the Embody gateway the one MCP endpoint people in a company connect to from Claude, Codex, ChatGPT, Cursor and other MCP clients, with:
 
-- per-org tenancy (registry, credentials, identity, limits, audit);
-- a stateless gateway process (any instance serves any request);
-- one codebase for shared multi-tenant and dedicated single-org deployments;
-- the fastest path to a working release: three milestones, each shippable.
+- a multi-tenant gateway: each **tenant** (company, `orgId` in code) has its own registry, credentials, identity, limits and audit;
+- **workspaces** inside a tenant that own apps, without being a data boundary;
+- **single-tenant app deployments**: each deployment belongs to one tenant and is tenant-wide or owned by a workspace;
+- a stateless gateway and stateless app hosts;
+- the fastest path to a working release.
 
 | Milestone | Items | Releasable result |
 |---|---|---|
 | M0 | P15-00 | Decision approved, client behavior known |
-| M1 | P15-01 – P15-06 | Dedicated gateway works in token-capable chat clients |
-| M2 | P15-07 | Dedicated gateway works in Claude web/desktop connectors and ChatGPT (OAuth) |
-| M3 | P15-08 – P15-11 | Shared multi-tenant gateway |
-
-P15-08 (PostgreSQL store) has no M2 dependency and may start once P15-05 is done; it is needed by any deployment running more than one gateway instance.
+| M1 | P15-01 – P15-06, P15-08, P15-09, P15-12 | Multi-tenant, multi-instance gateway works in token-capable chat clients |
+| M2 | P15-07 | Claude web/desktop connectors and ChatGPT (OAuth per tenant) |
+| M2.5 | P15-13 | Apps call other apps in the same tenant |
+| M3 | P15-10, P15-11 | Production gate: endpoint safety, per-tenant limits, isolation suite, load test, runbook |
 
 ## Non-goals
 
-Do not build in this phase (see design plan §8): `tools/list_changed` notifications, MCP sessions or per-session state, shared rate-limit store, transparent stdio bridge, `embody login`, MCP in `embody dev`, a development authorization server, per-org hostnames, app icons, MCP tasks, app-declared prompts/resources, multi-org registration from one app host, chat GenUI.
+Do not build in this phase (see design plan §8): `tools/list_changed` notifications, MCP sessions or per-session state, shared rate-limit store, principal-level workspace membership, anything cross-tenant (shared deployments, calls or events), app template/plugin distribution, transparent stdio bridge, `embody login`, MCP in `embody dev`, a development authorization server, per-tenant hostnames, app icons, MCP tasks, app-declared prompts/resources, chat GenUI.
 
 ## Conventions for every item
 
@@ -39,7 +39,7 @@ Do not build in this phase (see design plan §8): `tools/list_changed` notificat
 
 ### Deliverables
 
-1. `docs/adr/0006-central-mcp-gateway.md`: the decisions in design plan §4 (central MCP in gateway, org tenancy, org in URL, stateless MCP, compact discovery, delegated agent principal, asymmetric org-bound host tokens, OAuth resource server only). Add D-07 to STATUS as `DONE` when approved.
+1. `docs/adr/0006-central-mcp-gateway.md`: the decisions in design plan §4 (central MCP in gateway, tenancy, tenant in URL, stateless MCP, compact discovery, delegated agent principal, asymmetric tenant-bound host tokens, OAuth resource server only). Accepted 2026-10-08 with Amendment 1 (tenants, workspaces, single-tenant apps).
 2. Spike server in `scripts/spikes/mcp-clients/` (not published, not in the workspace build): a single-file Node server using the official SDK in stateless mode with 120 generated tools, two discovery tools, annotations, an `outputSchema` tool, server instructions, and OAuth protected-resource metadata pointing at a test identity provider.
 3. `docs/guides/mcp-client-support.md`: one row per client/version tested (Claude Desktop, Claude web, Claude Code, Codex, ChatGPT, Cursor, MCP Inspector) with columns:
 
@@ -267,60 +267,69 @@ export function createCatalogView(
 
 ---
 
-### P15-05: org-keyed state behind `GatewayStore`
+### P15-05: tenant-keyed store, tenant routing and workspaces
 
 **Packages:** `@embody/gateway`, `@embody/host`, `@embody/cli`, `apps/gateway`.
 
 #### Changes
 
-New `packages/gateway/src/store.ts`:
+New `packages/gateway/src/store.ts` (the code keeps `orgId` for the tenant):
 
 ```ts
-export interface OrgConfig {
+export interface TenantConfig {
   readonly orgId: string;
+  readonly workspaces?: readonly { readonly id: string; readonly title?: string }[];
   readonly allowedOrigins?: readonly string[];
-  readonly auth?: OrgAuthConfig;    // used by P15-07
-  readonly limits?: OrgLimits;      // used by P15-10
+  readonly auth?: TenantAuthConfig;  // used by P15-07
+  readonly limits?: TenantLimits;    // used by P15-10
+}
+export interface CredentialBinding {
+  readonly orgId: string;
+  readonly appId: string;
+  readonly workspaceId?: string;     // set for workspace-owned apps
 }
 export interface StoredRegistration extends Registration {
   readonly orgId: string;
+  readonly workspaceId?: string;
   readonly generation: string;
+  readonly registeredAt: string;
   readonly lastSeen: string;
 }
 export interface GatewayStore {
-  getOrg(orgId: string): Promise<OrgConfig | undefined>;
-  /** Credential secrets are random and high-entropy; lookup by SHA-256 hash is sufficient. */
-  findCredential(secretHash: string): Promise<{ orgId: string; appId: string } | undefined>;
-  putRegistration(value: StoredRegistration): Promise<void>;          // bumps org revision on new app or generation
+  getTenant(orgId: string): Promise<TenantConfig | undefined>;
+  /** Registration secrets are random and high-entropy; lookup by SHA-256 hash is sufficient. */
+  findCredential(secretHash: string): Promise<CredentialBinding | undefined>;
+  putRegistration(value: StoredRegistration): Promise<void>; // bumps tenant revision on new app or generation
   touch(orgId: string, appId: string, generation: string, at: string): Promise<"ok" | "missing" | "stale">;
   getRegistration(orgId: string, appId: string): Promise<StoredRegistration | undefined>;
   listRegistrations(orgId: string): Promise<{ revision: number; registrations: readonly StoredRegistration[] }>;
+  removeRegistration(orgId: string, appId: string): Promise<void>;
 }
-export class MemoryGatewayStore implements GatewayStore { /* constructor({ orgs, credentials, initial }) */ }
+export class MemoryGatewayStore implements GatewayStore { /* constructor({ tenants, credentials, initial }) */ }
 ```
 
-- `GatewayRegistry` becomes a façade over a store:
-  - `new GatewayRegistry({ store, ttlMs?, clock?, allowPrivateEndpoints?, ... })`;
-  - legacy constructor `{ credentials: Record<appId, secret>, initial? }` still accepted for one release: builds a `MemoryGatewayStore` with a single org from `GatewayOptions.defaultOrg` (required in that case) and logs a deprecation warning;
-  - methods become async: `register(body, secret)`, `heartbeat(body, secret)`, `snapshot(orgId)`, `get(orgId, appId)`, `destinations(event)` (filters by `event.orgId`).
-- Health derived on read: `status = lastSeen > now - ttl ? "healthy" : "unhealthy"`. Remove the mutating `expire()`.
-- Per-instance catalog cache: `Map<orgId, { revision, healthyUntil, entries }>`, recomputed when revision changes or the earliest `lastSeen + ttl` passes; at most 2 s old.
-- Registration body accepts optional `orgId`; when present it must equal the credential's org (`403` otherwise).
-- All gateway reads use the principal's `orgId` (catalog, `/api/catalog`, MCP, dispatch).
-- `GatewayOptions.defaultOrg?: string` = dedicated mode. Shared mode (no default org) arrives with routing in P15-10; until then `defaultOrg` is required.
-- Host: optional `GATEWAY_ORG_ID`; registration and heartbeat include it when set. Fix URL joining in `createRegistrationClient` so a `GATEWAY_URL` with a path prefix keeps it (use `new URL("register", base.endsWith("/") ? base : base + "/")`).
-- CLI: same URL-joining fix for `/api/catalog` and `/api/execute*` so `--base-url https://gw/o/acme` works.
-- `apps/gateway`: build `MemoryGatewayStore` from env (`GATEWAY_ORG_ID`, existing per-app secrets).
+- `GatewayRegistry` becomes an async façade over a store: `register(body, secret)`, `heartbeat(body, secret)`, `snapshot(orgId)`, `get(orgId, appId)`, `destinations(event)` (filters by `event.orgId`).
+- The registration's tenant and workspace come from the credential binding. An optional `orgId` in the body must match (`403` otherwise).
+- **Registrations persist** until removed. Status is derived on read: `healthy` when `lastSeen > now - ttl`, otherwise `unavailable`. Unavailable apps stay in `embody_apps` and `/api/catalog` with their status; their tools are omitted from `tools/list` and calls return `UNAVAILABLE`. (If scale-to-zero is adopted, `unavailable` becomes `idle` and stays routable — open question.)
+- Per-instance catalog cache keyed by tenant revision, at most 2 s old.
+- All gateway reads use the principal's tenant: catalog, `/api/catalog`, MCP, dispatch, events.
+- **Routing:** client routes (`/api/catalog`, `/api/execute*`, `/mcp`, `/mcp/:appId`) are registered under `/t/:tenant` as a Fastify plugin. `GatewayOptions.defaultTenant` also serves them unprefixed. Registration and heartbeat stay unprefixed (the credential decides the tenant). Unknown tenant → `404`; principal tenant ≠ URL tenant → `403`.
+- **Workspaces:** registration metadata and an `embody_apps` / `/api/catalog` field (`workspace`). Access is still decided by scopes.
+- **Legacy config:** `new GatewayRegistry({ credentials: Record<appId, secret> })` is accepted only together with `defaultTenant`, binding every credential to that tenant, for one release with a deprecation warning.
+- Host: `GATEWAY_ORG_ID` sent in registration and heartbeat. Fix URL joining in `createRegistrationClient` so a `GATEWAY_URL` with a path prefix keeps it.
+- CLI: same URL-joining fix for `/api/catalog` and `/api/execute*`, so `--base-url https://gw/t/acme` works.
+- `apps/gateway`: build `MemoryGatewayStore` (or Postgres after P15-08) from env.
 
 #### Tests
 
-- Store conformance suite (`packages/gateway/test/store-conformance.ts`) run against `MemoryGatewayStore` (and later Postgres): put/get/touch/stale generation/revision bumps.
-- Two orgs, each with `kanban` on different endpoints: each principal sees and calls only its own; same app ID does not collide.
-- Credential for org A cannot register into org B, including with a forged `orgId` body.
-- Events: `destinations` only returns the event's org.
-- Legacy constructor works and warns.
+- Store conformance suite (`packages/gateway/test/store-conformance.ts`) against `MemoryGatewayStore` (Postgres in P15-08): put/get/touch/stale generation/revision bumps/remove.
+- Two tenants, each with `kanban` on different endpoints: each principal sees and calls only its own; the same app ID does not collide.
+- A credential for tenant A cannot register into tenant B, including with a forged `orgId`; a workspace-bound credential cannot change its workspace.
+- Unavailable apps remain listed with status and return `UNAVAILABLE` on call.
+- Routing: `/t/<tenant>` works; unknown tenant and mismatched principal rejected; `defaultTenant` serves unprefixed routes.
+- Events: `destinations` only returns the event's tenant.
+- Legacy constructor works with `defaultTenant` and warns; rejected without it.
 - Host and CLI URL joining with and without path prefixes.
-- Existing single-org E2E passes unchanged.
 
 ---
 
@@ -352,17 +361,18 @@ export class MemoryGatewayStore implements GatewayStore { /* constructor({ orgs,
 
 ### M1 exit checklist
 
-- P15-01–P15-06 `DONE`.
-- E2E journey extended: MCP discovery (`embody_apps`), compact call path, veto message, delegated actor.
-- Manual verification in Claude Code and Codex with a token against a dedicated gateway, recorded in `mcp-client-support.md`.
-- Docs: `docs/agent-integrations/` guides for Claude Code, Codex, Cursor; Claude Desktop guide's veto example matches real output; Spec 05 updated (compact discovery, stateless, error format).
-- Release notes: informative errors, delegation behavior change, `mcp.actor: "token"` escape hatch.
+- P15-01 – P15-06, P15-08, P15-09 and P15-12 `DONE`.
+- E2E topology: two tenants, each with its own Kanban deployment (two replicas for one of them), two gateway instances on the PostgreSQL store behind a round-robin proxy.
+- E2E journey extended: MCP discovery (`embody_apps`), compact call path, veto message, delegated actor, tenant isolation of catalogs and calls.
+- Manual verification in Claude Code and Codex with a token, recorded in `mcp-client-support.md`.
+- Docs: `docs/agent-integrations/` guides for Claude Code, Codex, Cursor; Spec 05 updated (tenant URLs, compact discovery, stateless, error format); self-hosting guide updated (tenants, workspaces, Postgres store, JWKS).
+- Release notes: informative errors, delegation behavior change, tenant URLs, one deployment per tenant, HS256 deprecation.
 
 ---
 
 ## M2 — chat products
 
-### P15-07: OAuth resource server per org
+### P15-07: OAuth resource server per tenant
 
 **Packages:** `@embody/gateway`, `apps/gateway`, docs.
 
@@ -387,31 +397,31 @@ export interface OrgAuthConfig {
 }
 ```
 
-  Principals from OAuth tokens: `orgId` = the URL's org (never from the token alone; the token's issuer must be that org's issuer), `actorType: "human"` (then delegated by P15-06 on MCP), scopes = union of `scopeMap` entries for granted scopes and roles.
+  Principals from OAuth tokens: `orgId` = the URL's tenant (never from the token alone; the token's issuer must be that tenant's issuer), `actorType: "human"` (then delegated by P15-06 on MCP), scopes = union of `scopeMap` entries for granted scopes and roles.
 - Effect-aware scope patterns: `scopeAllows(principal, appId, target, effect)` accepts `@read` (any read target, all apps) and `<app>:@read`. Before issuing the gateway token, the gateway **expands** effect patterns into concrete per-target scopes for the target app, so app hosts' kernels need no change.
 - Routes:
-  - `GET /.well-known/oauth-protected-resource` (dedicated `/mcp`) and `GET /.well-known/oauth-protected-resource/o/:org/mcp` (RFC 9728 path form; available once P15-10 adds `/o/:org`): `{ resource, authorization_servers: [issuer], scopes_supported, bearer_methods_supported: ["header"] }`.
+  - `GET /.well-known/oauth-protected-resource/t/:tenant/mcp` (RFC 9728 path form) and, when `defaultTenant` is set, `GET /.well-known/oauth-protected-resource/mcp`: `{ resource, authorization_servers: [issuer], scopes_supported, bearer_methods_supported: ["header"] }`.
   - MCP routes: missing or invalid token → `401` with `WWW-Authenticate: Bearer resource_metadata="<url>", scope="<supported>"`. Insufficient scope on a call → MCP tool error **and**, for the HTTP request, `403` with `WWW-Authenticate: Bearer error="insufficient_scope", scope="<needed>"` when the whole request is unauthorized.
   - Audience check: token `aud` must contain the org's audience.
-- The auth chain per org: OAuth provider for that org first, then API keys (unchanged).
+- The auth chain per tenant: OAuth provider for that tenant first, then API keys (unchanged).
 - `apps/gateway`: env `GATEWAY_PUBLIC_URL`, `GATEWAY_OIDC_ISSUER`, `GATEWAY_OIDC_AUDIENCE`, `GATEWAY_OIDC_SCOPE_MAP` (JSON).
 
 #### Tests
 
 - Metadata JSON matches RFC 9728 fields; URLs absolute and correct behind a `publicUrl` with a path.
-- Challenges: no token, malformed token, wrong issuer, wrong audience, expired, other org's issuer → `401` with header; under-scoped → `403` with `insufficient_scope`.
+- Challenges: no token, malformed token, wrong issuer, wrong audience, expired, another tenant's issuer → `401` with header; under-scoped → `403` with `insufficient_scope`.
 - `@read` permits list/get, denies create/update/delete; expanded scopes accepted by the real Kanban host kernel.
 - CI: a local test identity provider (choice from P15-00, e.g. a containerized OIDC server) issues tokens; MCP Inspector CLI or SDK client completes the authorization code + PKCE flow in the E2E stack.
 
 #### M2 exit checklist
 
-Claude web/desktop custom connector and ChatGPT connector verified against a dedicated gateway with OAuth, recorded in the support matrix; setup guide for the chosen identity provider; agent-integration guides for both products.
+Claude web/desktop custom connector and ChatGPT connector verified against the gateway with OAuth, recorded in the support matrix; setup guide for the chosen identity provider; agent-integration guides for both products.
 
 ---
 
-## M3 — shared multi-tenant
+## Tenant infrastructure (M1) and production gate (M3)
 
-### P15-08: PostgreSQL `GatewayStore`
+### P15-08: PostgreSQL `GatewayStore` (M1)
 
 **Packages:** `@embody/gateway` (subpath export `@embody/gateway/postgres`, `pg` as optional peer dependency), `apps/gateway`.
 
@@ -461,7 +471,7 @@ CREATE TABLE gateway_registrations (
 
 ---
 
-### P15-09: asymmetric, org-bound gateway tokens
+### P15-09: asymmetric, tenant-bound gateway tokens (M1)
 
 **Packages:** `@embody/gateway`, `@embody/host`, `apps/gateway`, docs.
 
@@ -479,60 +489,97 @@ export interface SigningKey { readonly kid: string; readonly privateKey: KeyLike
   Sign with the single `active` key; publish all keys' public parts at `GET /.well-known/jwks.json` (`cache-control: max-age=300`). Token lifetime reduced from 300 s to 60 s.
 - Claims unchanged except they already include `orgId`; add standard `sub` = `actorId` for interoperability.
 - Host (`createAppHost`): if `GATEWAY_JWKS_URL` is set, use `gatewayJwtVerifier({ jwksUrl, algorithms: ["ES256"], issuer, audience: appId })` (already supported by `@embody/auth`). New required-with-JWKS `GATEWAY_ORG_ID`: verifier rejects tokens whose `orgId` differs. `GATEWAY_JWT_SECRET` path keeps working with a deprecation warning.
-- Gateway refuses to start in shared mode (no `defaultOrg`) with HS256.
+- Gateway refuses HS256 unless it serves a single tenant (`defaultTenant` set and no other tenants); then it logs a deprecation warning.
 - `apps/gateway`: `GATEWAY_SIGNING_KEYS` (JSON array of `{ kid, privateKeyPem, active }`), loaded at startup; documented KMS/secret-manager integration.
 
 #### Tests
 
-- Host rejects: other org, other app, unknown `kid`, HS256 when configured for JWKS, expired, wrong issuer.
+- Host rejects: other tenant, other app, unknown `kid`, HS256 when configured for JWKS, expired, wrong issuer.
 - Rotation: add key B inactive → publish → flip active → remove A after max token lifetime; calls succeed throughout.
 - E2E compose switches to ES256 + JWKS.
 
 ---
 
-### P15-10: tenant routing, endpoint safety, per-org limits
+### P15-10: endpoint safety and per-tenant limits (M3)
 
 **Packages:** `@embody/gateway`, `apps/gateway`.
 
 #### Changes
 
-- Routing: register all client-facing routes (`/api/catalog`, `/api/execute*`, `/mcp`, `/mcp/:appId`) under `/o/:org` as a Fastify plugin. In dedicated mode also register them at the root for `defaultOrg`. Registration/heartbeat stay unprefixed (the credential decides the org) and are also available under `/o/:org`.
-- Org resolution hook: unknown org → `404` with the same body as any not-found; after authentication, `principal.orgId !== urlOrg` → `403`.
-- Safe fetch: `createSafeFetch({ allowPrivate })` using an undici `Agent` with a `connect.lookup` that resolves, rejects any blocked address (reuse `blockedHost` rules for IPv4/IPv6, plus IPv4-mapped IPv6), and connects only to the validated address. Use it for dispatch and health checks. Redirects disabled (`redirect: "error"`). Shared mode forces `allowPrivate: false`; registration also validates DNS at registration time.
-- Per-org allowed origins from `OrgConfig.allowedOrigins`.
-- `OrgLimits` with defaults: `maxApps: 50`, `maxCatalogTools: 1,000`, `requestsPerMinute: 600` (per org per instance), `requestsPerMinutePerActor: 120`, `maxConcurrentCalls: 50` (per org per instance). Exceeding → `RATE_LIMITED` / registration `409` with clear messages.
-- Durable event relay (P7-04) and direct delivery use org-filtered `destinations` (from P15-05); add org check to relay path.
+- Safe fetch: `createSafeFetch({ allowPrivate })` using an undici `Agent` with a `connect.lookup` that resolves, rejects any blocked address (reuse `blockedHost` rules for IPv4/IPv6, plus IPv4-mapped IPv6), and connects only to the validated address. Use it for dispatch and health checks. Redirects disabled (`redirect: "error"`). Multi-tenant gateways force `allowPrivate: false` unless an operator allows private endpoints for a specific tenant (for example one whose apps run in a private network the gateway can reach); registration also validates DNS.
+- Per-tenant allowed origins from `TenantConfig.allowedOrigins`.
+- `TenantLimits` with defaults: `maxApps: 200`, `maxCatalogTools: 1,000`, `requestsPerMinute: 600` (per tenant per instance), `requestsPerMinutePerActor: 120`, `maxConcurrentCalls: 50` (per tenant per instance). Exceeding → `RATE_LIMITED` / registration `409` with clear messages.
+- Durable event relay (P7-04) and direct delivery use tenant-filtered `destinations` (from P15-05); add a tenant check to the relay path.
 
 #### Tests
 
-- Every client route reachable under `/o/<org>`; dedicated root routes still work; unknown org and mismatched token org rejected.
-- DNS rebinding fixture (resolver returns public then private address) blocked at connect; private IP and `localhost` registration rejected in shared mode; redirects refused.
-- Org A at its limits does not affect org B's calls.
-- Events from org A never reach org B's subscriber with the same app ID.
+- DNS rebinding fixture (resolver returns public then private address) blocked at connect; private IP and `localhost` registration rejected unless allowed for that tenant; redirects refused.
+- Tenant A at its limits does not affect tenant B's calls.
+- Events from tenant A never reach tenant B's subscriber with the same app ID.
 
 ---
 
-### P15-11: isolation gate and production readiness
+### P15-11: isolation gate and production readiness (M3)
 
 **Packages:** test fixtures, docs, `apps/gateway`.
 
 #### Deliverables
 
 1. **Cross-tenant suite** `test/fixtures/distributed-e2e/isolation.mjs` (release-blocking, runs in `pnpm test:e2e`) with two orgs, both running Kanban:
-   - org A token on org B URL (HTTP and MCP) → rejected;
+   - tenant A token on tenant B URL (HTTP and MCP) → rejected;
    - guessed app IDs and targets via `embody_describe`, `embody_read`, `/api/catalog` → no leakage, identical not-found responses;
-   - org A registration credential against org B → rejected;
-   - host of org B rejects a validly signed token for org A;
+   - tenant A registration credential against tenant B → rejected;
+   - host of tenant B rejects a validly signed token for tenant A;
    - events stay within org;
    - audit records carry the correct org;
    - catalog cache never serves one org's catalog to another (alternating requests under load).
 2. **Load test** (`scripts/load/gateway-mcp.mjs`): 100 orgs × 10 apps × 15 tools on PostgreSQL store, two instances; record p50/p95 for `tools/list` (compact and full) and calls in `docs/production/06-performance-baseline.md`.
 3. **Operations:** runbook entries in `docs/production/04-operations-runbook.md` (org provisioning, credential issue/revoke, signing key rotation, draining an instance, identity provider outage); metrics (requests/errors by org, surface, code; OAuth challenges; registrations; heartbeat lag; catalog cache hit rate) exposed through the existing observability approach; suggested alerts.
-4. **Docs:** self-hosting guide gains dedicated vs shared modes, stateless scaling, PostgreSQL store, JWKS setup, upgrade path from HS256 and app-keyed credentials; security doc gains the tenancy threat model; Spec 04/05 and SPEC-TRACEABILITY updated.
+4. **Docs:** self-hosting guide gains tenants and workspaces, stateless scaling, PostgreSQL store, JWKS setup, upgrade path from HS256 and app-keyed credentials; security doc gains the tenancy threat model; Spec 04/05 and SPEC-TRACEABILITY updated.
 
 #### M3 exit checklist
 
 Isolation suite green in CI; load numbers recorded; runbook reviewed; managed shared deployment configuration documented.
+
+---
+
+## Single-tenant app hosts (M1) and app-to-app calls (M2.5)
+
+### P15-12: stateless, single-tenant app hosts (M1)
+
+**Packages:** `@embody/host`, `@embody/auth`, examples, E2E fixtures, docs.
+
+#### Changes
+
+- Production hosts require `GATEWAY_ORG_ID`; the gateway token verifier rejects tokens whose `orgId` differs (`UNAUTHENTICATED`, value-free message). Development keeps working without it.
+- Registration from N replicas is idempotent: same `PUBLIC_URL`, same generation; heartbeats from any replica keep the registration healthy. Document that `PUBLIC_URL` must be the load-balanced URL, never a per-pod address.
+- Confirm no request depends on in-process state: worker leases in the database (already), SSE streams per request (already); add a check that production refuses SQLite (already) and document the stateless contract for plugin authors (no module-level caches of tenant data).
+- E2E: replace "two tenants share one Kanban deployment" with one Kanban deployment per tenant; run one of them with two replicas.
+- Docs: deployment guide section "one deployment per tenant, many replicas".
+
+#### Tests
+
+- Host rejects a valid token for another tenant; accepts its own.
+- Two host replicas register and heartbeat against one gateway store without conflicts; killing one replica keeps the app healthy.
+- E2E passes on the new topology.
+
+### P15-13: app-to-app calls within a tenant (M2.5)
+
+**Packages:** `@embody/core` (context API), `@embody/host`, `@embody/gateway`, docs, a reference example.
+
+#### Changes
+
+- Each registration gets an **app identity**: a system principal `{ actorType: "system", actorId: "app:<appId>" }` in its tenant, with scopes granted per app by the tenant's configuration (for example `crm:crm.task.create`).
+- Handlers call other apps through a typed context API, for example `context.apps.call("crm", "crm.task.create", input, { signal })`, which goes to the gateway with the host's registration credential and request context; the gateway authenticates the app, applies the shared dispatch pipeline (tenant check, scopes, rate limit, audit with `surface: "app"`), and issues a normal gateway token to the target host.
+- Calls never leave the tenant. Delegation is preserved when an agent's call triggers the automation (`delegation` from the originating request is carried, `actorType` stays `system`).
+- Loop protection: a bounded call depth (default 4) carried in the request context.
+- Reference: a small automation app that subscribes to a CRM-like event and calls back into it.
+
+#### Tests
+
+- Allowed call succeeds and is audited with surface and both app identities; unscoped call → `FORBIDDEN`; cross-tenant target → `NOT_FOUND`.
+- Target hooks see the calling app identity.
+- Call depth limit enforced; cancellation propagates.
 
 ---
 

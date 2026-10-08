@@ -1,7 +1,7 @@
 # ADR 0006: Central MCP gateway, org tenancy and delegated agent principal
 
-- Status: Accepted
-- Date: 2026-10-08 (accepted 2026-10-08)
+- Status: Accepted, amended (Amendment 1)
+- Date: 2026-10-08 (accepted 2026-10-08; Amendment 1 2026-10-08)
 - Decision gate: D-07
 - Plans: [design](../plans/central-mcp-gateway.md), [Phase 15](../implementation-plan/15-central-mcp-gateway.md)
 
@@ -31,6 +31,20 @@ The product direction is: each customer org is its own tenant; the gateway is st
 8. **Gateway → host tokens become asymmetric and org-bound.** The gateway signs with ES256 and publishes a JWKS; hosts verify signature, app audience and their configured org, and hold no signing secret. HS256 remains for dedicated deployments for one release; shared deployments refuse it.
 9. **The gateway is an OAuth resource server only.** It publishes protected-resource metadata per org, issues `401`/`403` challenges and validates tokens from the org's identity provider. It does not issue end-user tokens in production.
 10. **Errors are relayed, not replaced.** The host's sanitized error envelope (code, message, validation details, request ID) reaches MCP and HTTP clients; anything malformed becomes `INTERNAL`.
+
+## Amendment 1: tenants, workspaces and single-tenant apps (2026-10-08)
+
+Product direction clarified that Embody serves companies running many small, customized apps; that the gateway is multi-tenant; and that every app deployment belongs to one company. This amendment replaces decisions 2 and 3 and tightens 4 and 8. Other decisions are unchanged.
+
+- **Tenant = company = `orgId`.** The existing `orgId` (principal, storage row-level security, events, registry) is the tenant: the only hard isolation boundary. The code keeps the name `orgId`; documentation calls it the tenant.
+- **Workspaces** are units inside a tenant (for example "Sales EMEA") that own apps. They are registration metadata and a discovery grouping, not a data boundary. Access is decided by scopes, which identity providers may map from workspace groups.
+- **Apps are single-tenant.** Every app deployment belongs to exactly one tenant and is either tenant-wide (for example a CRM used by all workspaces) or owned by one workspace. App IDs are unique within a tenant. A deployment never registers for more than one tenant; tenants that run the same app run separate deployments. Sharing customized apps is code distribution, not a gateway feature.
+- **Registrations** are keyed `(tenant, appId)`, carry an optional owning `workspaceId`, and are persisted until removed. Registration credentials are bound to one `(tenant, appId)` and optionally a workspace; the registration's tenant and workspace come from the credential.
+- **URLs** are `/t/<tenant>/...` (replacing `/o/<org>/...`). An optional `defaultTenant` keeps unprefixed routes for gateways that serve one tenant.
+- **Statelessness covers app hosts too.** Production hosts require `GATEWAY_ORG_ID`, reject gateway tokens for other tenants, and run as idempotent replicas behind one `PUBLIC_URL`.
+- **Tenant safety moves into the first release.** Because the gateway is multi-tenant from the start, the PostgreSQL store, tenant routing and asymmetric tenant-bound tokens are part of M1, not a later shared-hosting milestone. HS256 is accepted only on single-tenant gateways, for one release.
+- **App-to-app calls** (an app calling another app's actions in the same tenant through the gateway, with its own system identity and scopes) are added to Phase 15 after M1.
+- **Superseded:** the dedicated vs shared deployment modes, and registration credentials covering several orgs.
 
 ## Consequences
 
