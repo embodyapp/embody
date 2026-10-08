@@ -83,6 +83,22 @@ When the agent calls a tool via `tools/call`:
 
 ---
 
+### Error results
+
+Failures are returned as MCP tool errors (`isError: true`). The text is the app's sanitized message; validation failures add one `- path: message` line per invalid field, and rate-limited calls add a retry hint. `_meta` carries the Embody error code and request ID for programmatic clients:
+
+```json
+{
+  "content": [{ "type": "text", "text": "Input is invalid\n- data.title: Required" }],
+  "isError": true,
+  "_meta": { "embody/errorCode": "VALIDATION_ERROR", "embody/requestId": "4f1c…" }
+}
+```
+
+Unexpected internal failures return `Tool execution failed` with the request ID, without internal details.
+
+---
+
 ## 🔌 Transports Supported
 
 Embody supports two official MCP transport methods:

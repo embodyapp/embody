@@ -7,9 +7,7 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
-  RateLimitedError,
   UnauthenticatedError,
-  UnavailableError,
   stableStringify,
   toErrorEnvelope,
   type AppManifest,
@@ -17,11 +15,39 @@ import {
 } from "@embody/core";
 import { DirectEventTransport, type EventDestination, type EventDirectory } from "@embody/host";
 import {
+  DispatchRateLimitedError,
+  MemoryAuditLog,
+  SseFrameDecoder,
+  interpretFrame,
+  parseErrorEnvelope,
+  parseExecutionStream,
+  prepareDispatch,
+  publicErrorFrom,
+  internalError,
+  type AuditOutcome,
+  type AuditSink,
+  type DispatchDeps,
+  type PublicError,
+} from "./dispatch.js";
+import {
   createMcpCatalog,
   McpHttpHandler,
   type McpCatalogEntry,
   type McpExecutionEvent,
 } from "@embody/mcp";
+
+export {
+  DispatchRateLimitedError,
+  MemoryAuditLog,
+  jsonLineAuditSink,
+  parseErrorEnvelope,
+  sanitizeText,
+  type AuditOutcome,
+  type AuditRecord,
+  type AuditSink,
+  type DispatchSurface,
+  type PublicError,
+} from "./dispatch.js";
 
 export interface Clock {
   now(): Date;
@@ -300,20 +326,6 @@ export async function issueGatewayToken(
     .setExpirationTime(now + 300)
     .sign(options.key);
 }
-export interface AuditRecord {
-  readonly requestId: string;
-  readonly appId?: string;
-  readonly target?: string;
-  readonly actorId?: string;
-  readonly outcome: string;
-  readonly durationMs: number;
-}
-export class MemoryAuditLog {
-  public readonly records: AuditRecord[] = [];
-  append(record: AuditRecord): void {
-    this.records.push(immutable(record));
-  }
-}
 export class FixedWindowRateLimiter {
   private readonly entries = new Map<string, { count: number; reset: number }>();
   public constructor(
@@ -338,7 +350,8 @@ export interface GatewayOptions {
   readonly auth: AuthChain;
   readonly token: GatewayTokenOptions;
   readonly fetch?: typeof fetch;
-  readonly audit?: MemoryAuditLog;
+  /** Defaults to an in-memory log; use `jsonLineAuditSink()` or a durable sink in production. */
+  readonly audit?: AuditSink;
   readonly limiter?: FixedWindowRateLimiter;
   readonly environment?: "development" | "production";
 }
@@ -355,6 +368,8 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
   app.setErrorHandler((error, request, reply) => {
     const requestId = String(reply.getHeader("x-request-id") ?? request.id);
     const result = toErrorEnvelope(error, requestId, options.environment ?? "production");
+    if (error instanceof DispatchRateLimitedError)
+      reply.header("retry-after", String(error.retryAfterSeconds));
     void reply.status(result.status).send(result.body);
   });
   app.addHook("onRequest", async (_request, reply) => {
@@ -418,68 +433,95 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         .map((entry) => ({ appId: entry.appId, manifest: entry.manifest })),
       scoped,
     ).filter((entry) => scopeAllows(principal, entry.appId, entry.target));
+  const dispatchDeps: DispatchDeps = {
+    lookup: (appId) => {
+      const registered = options.registry.get(appId);
+      return registered
+        ? {
+            endpoint: registered.endpoint,
+            status: registered.status,
+            actions: registered.manifest.actions,
+          }
+        : undefined;
+    },
+    scopeAllows,
+    ...(options.limiter ? { limit: (key: string) => options.limiter!.check(key) } : {}),
+    issueToken: (principal, appId, requestId) =>
+      issueGatewayToken(principal, appId, requestId, options.token),
+    audit,
+  };
+  const mcpError = (error: PublicError): McpExecutionEvent => ({
+    type: "error",
+    message: error.message,
+    code: error.code,
+    requestId: error.requestId,
+    ...(error.details === undefined ? {} : { details: error.details }),
+    ...(error.retryAfterSeconds === undefined
+      ? {}
+      : { retryAfterSeconds: error.retryAfterSeconds }),
+  });
   const remoteEvents = async function* (
     principal: Principal,
     entry: McpCatalogEntry,
     input: unknown,
     signal: AbortSignal,
   ): AsyncGenerator<McpExecutionEvent> {
-    const registered = options.registry.get(entry.appId);
-    if (!registered || registered.status !== "healthy") {
-      yield { type: "error", message: "App is unavailable" };
-      return;
-    }
-    if (!scopeAllows(principal, entry.appId, entry.target)) {
-      yield { type: "error", message: "Tool not found or no longer authorized" };
-      return;
-    }
     const requestId = randomUUID();
-    const response = await fetcher(new URL("/execute/stream", new URL(registered.endpoint)), {
-      method: "POST",
-      signal,
-      headers: {
-        "content-type": "application/json",
-        "x-request-id": requestId,
-        "x-gateway-auth": `Bearer ${await issueGatewayToken(principal, entry.appId, requestId, options.token)}`,
-      },
-      body: JSON.stringify({ protocolVersion: 1, target: entry.target, input }),
-    });
-    if (!response.ok || !response.body) {
-      yield { type: "error", message: "Tool execution failed" };
+    let prepared;
+    try {
+      prepared = await prepareDispatch(
+        { principal, appId: entry.appId, target: entry.target, requestId, surface: "mcp" },
+        dispatchDeps,
+      );
+    } catch (error) {
+      yield mcpError(publicErrorFrom(error, requestId));
       return;
     }
-    const decoder = new TextDecoder();
-    const reader = response.body.getReader();
-    let pending = "";
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      const bytes: unknown = chunk.value;
-      if (!(bytes instanceof Uint8Array)) throw new UnavailableError("Invalid remote stream");
-      pending += decoder.decode(bytes, { stream: true });
-      if (pending.length > 64 * 1024)
-        throw new UnavailableError("Remote progress frame is too large");
-      let boundary: number;
-      while ((boundary = pending.indexOf("\n\n")) >= 0) {
-        const frame = pending.slice(0, boundary);
-        pending = pending.slice(boundary + 2);
-        const event = /^event: (.+)$/m.exec(frame)?.[1];
-        const data = /^data: (.+)$/m.exec(frame)?.[1];
-        if (!event || !data) continue;
-        const value: unknown = JSON.parse(data);
-        if (event === "progress") {
-          const update = value as { percent?: number; message?: unknown };
-          if (typeof update.message === "string")
-            yield {
-              type: "progress",
-              update: {
-                message: update.message,
-                ...(typeof update.percent === "number" ? { percent: update.percent } : {}),
-              },
-            };
-        } else if (event === "result") yield { type: "result", value };
-        else if (event === "error") yield { type: "error", message: "Tool execution failed" };
+    let outcome: AuditOutcome = "failure";
+    let errorCode: PublicError["code"] | undefined = "INTERNAL_ERROR";
+    try {
+      const response = await fetcher(new URL("/execute/stream", prepared.endpoint), {
+        method: "POST",
+        signal,
+        headers: prepared.headers,
+        body: JSON.stringify({ protocolVersion: 1, target: entry.target, input }),
+      });
+      if (!response.ok || !response.body) {
+        let body: unknown;
+        try {
+          body = await response.json();
+        } catch {
+          body = undefined;
+        }
+        const error = parseErrorEnvelope(body, requestId);
+        errorCode = error.code;
+        yield mcpError(error);
+        return;
       }
+      for await (const event of parseExecutionStream(response.body, requestId)) {
+        if (event.type === "progress") yield event;
+        else if (event.type === "result") {
+          outcome = "success";
+          errorCode = undefined;
+          yield event;
+        } else {
+          errorCode = event.error.code;
+          yield mcpError(event.error);
+        }
+      }
+    } catch (error) {
+      if (signal.aborted) {
+        outcome = "cancelled";
+        errorCode = undefined;
+        throw error;
+      }
+      yield mcpError(publicErrorFrom(error, requestId));
+    } finally {
+      if (signal.aborted && outcome !== "success") {
+        outcome = "cancelled";
+        errorCode = undefined;
+      }
+      prepared.finish({ outcome, ...(errorCode === undefined ? {} : { errorCode }) });
     }
   };
   const mcp = new McpHttpHandler<Principal>({ catalog: catalogFor, execute: remoteEvents });
@@ -514,54 +556,82 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       ),
     );
     const { appId, target } = request.params as { appId: string; target: string };
-    const registered = options.registry.get(appId);
-    if (!registered || registered.status !== "healthy")
-      throw new UnavailableError("App is unavailable");
-    if (!(target in registered.manifest.actions))
-      throw new NotFoundError("Target is not advertised");
-    if (!scopeAllows(principal, appId, target)) throw new ForbiddenError();
     const requestId = String(reply.getHeader("x-request-id"));
+    const prepared = await prepareDispatch(
+      { principal, appId, target, requestId, surface: "stream" },
+      dispatchDeps,
+    );
     const controller = new AbortController();
     request.raw.once("aborted", () => controller.abort());
-    const response = await fetcher(new URL("/execute/stream", new URL(registered.endpoint)), {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "content-type": "application/json",
-        "x-request-id": requestId,
-        "x-gateway-auth": `Bearer ${await issueGatewayToken(principal, appId, requestId, options.token)}`,
-      },
-      body: JSON.stringify({ protocolVersion: 1, target, input: request.body }),
-    });
-    if (!response.ok || !response.body) {
-      reply.status(response.status);
-      return await response.json();
-    }
-    reply.hijack();
-    reply.raw.writeHead(200, {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-cache, no-transform",
-      connection: "keep-alive",
-      "x-request-id": requestId,
-    });
+    let outcome: AuditOutcome = "failure";
+    let errorCode: PublicError["code"] | undefined = "INTERNAL_ERROR";
+    let hijacked = false;
     try {
-      for await (const chunk of response.body) {
-        if (!reply.raw.write(chunk))
-          await new Promise<void>((resolve) => {
-            reply.raw.once("drain", resolve);
-            reply.raw.once("close", resolve);
-          });
+      const response = await fetcher(new URL("/execute/stream", prepared.endpoint), {
+        method: "POST",
+        signal: controller.signal,
+        headers: prepared.headers,
+        body: JSON.stringify({ protocolVersion: 1, target, input: request.body }),
+      });
+      if (!response.ok || !response.body) {
+        const body: unknown = await response.json().catch(() => undefined);
+        errorCode = parseErrorEnvelope(body, requestId).code;
+        reply.status(response.status);
+        return body;
       }
+      reply.hijack();
+      hijacked = true;
+      reply.raw.writeHead(200, {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache, no-transform",
+        connection: "keep-alive",
+        "x-request-id": requestId,
+      });
+      // Bytes are relayed unchanged; the tap only observes the terminal event for audit.
+      const tap = new SseFrameDecoder();
+      let tapping = true;
+      try {
+        for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+          if (tapping) {
+            try {
+              for (const frame of tap.push(chunk)) {
+                const event = interpretFrame(frame, requestId);
+                if (event?.type === "result") {
+                  outcome = "success";
+                  errorCode = undefined;
+                } else if (event?.type === "error") errorCode = event.error.code;
+              }
+            } catch {
+              tapping = false;
+            }
+          }
+          if (!reply.raw.write(chunk))
+            await new Promise<void>((resolve) => {
+              reply.raw.once("drain", resolve);
+              reply.raw.once("close", resolve);
+            });
+        }
+      } finally {
+        controller.abort();
+        reply.raw.end();
+      }
+      return undefined;
+    } catch (error) {
+      if (controller.signal.aborted && outcome !== "success") {
+        outcome = "cancelled";
+        errorCode = undefined;
+      } else if (!hijacked) errorCode = publicErrorFrom(error, requestId).code;
+      if (hijacked) return undefined;
+      throw error;
     } finally {
-      controller.abort();
-      reply.raw.end();
+      prepared.finish({ outcome, ...(errorCode === undefined ? {} : { errorCode }) });
     }
   });
   app.post("/api/execute/:appId/:target", async (request, reply) => {
     const started = Date.now();
     const requestId = String(reply.getHeader("x-request-id"));
-    let principal: Principal | undefined;
-    let outcome = "failure";
+    const { appId, target } = request.params as { appId: string; target: string };
+    let principal: Principal;
     try {
       principal = await options.auth.authenticate(
         bearer(
@@ -570,47 +640,48 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
             : undefined,
         ),
       );
-      const appId = (request.params as { appId: string }).appId;
-      const target = (request.params as { target: string }).target;
-      const registered = options.registry.get(appId);
-      if (!registered || registered.status !== "healthy")
-        throw new UnavailableError("App is unavailable");
-      if (!(target in registered.manifest.actions))
-        throw new NotFoundError("Target is not advertised");
-      if (!scopeAllows(principal, appId, target)) throw new ForbiddenError();
-      const retry = options.limiter?.check(
-        `${principal.orgId}:${principal.actorId}:${appId}:${target}`,
-      );
-      if (retry !== undefined) {
-        reply.header("retry-after", String(retry));
-        throw new RateLimitedError();
-      }
-      const endpoint = new URL(registered.endpoint);
-      const controller = new AbortController();
-      request.raw.once("aborted", () => controller.abort());
-      const response = await fetcher(new URL("/execute", endpoint), {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "content-type": "application/json",
-          "x-request-id": requestId,
-          "x-gateway-auth": `Bearer ${await issueGatewayToken(principal, appId, requestId, options.token)}`,
-        },
-        body: JSON.stringify({ protocolVersion: 1, target, input: request.body }),
-      });
-      const body = await response.json();
-      reply.status(response.status);
-      outcome = response.ok ? "success" : "downstream-failure";
-      return body;
-    } finally {
+    } catch (error) {
       audit.append({
         requestId,
-        ...(principal ? { actorId: principal.actorId } : {}),
-        appId: (request.params as { appId: string }).appId,
-        target: (request.params as { target: string }).target,
-        outcome,
+        appId,
+        target,
+        surface: "http",
+        outcome: "failure",
+        errorCode: "UNAUTHENTICATED",
         durationMs: Date.now() - started,
       });
+      throw error;
+    }
+    const prepared = await prepareDispatch(
+      { principal, appId, target, requestId, surface: "http" },
+      dispatchDeps,
+    );
+    let outcome: AuditOutcome = "failure";
+    let errorCode: PublicError["code"] | undefined = "INTERNAL_ERROR";
+    const controller = new AbortController();
+    request.raw.once("aborted", () => controller.abort());
+    try {
+      const response = await fetcher(new URL("/execute", prepared.endpoint), {
+        method: "POST",
+        signal: controller.signal,
+        headers: prepared.headers,
+        body: JSON.stringify({ protocolVersion: 1, target, input: request.body }),
+      });
+      const body: unknown = await response.json();
+      reply.status(response.status);
+      if (response.ok) {
+        outcome = "success";
+        errorCode = undefined;
+      } else errorCode = parseErrorEnvelope(body, requestId).code;
+      return body;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        outcome = "cancelled";
+        errorCode = undefined;
+      } else errorCode = internalError(requestId).code;
+      throw error;
+    } finally {
+      prepared.finish({ outcome, ...(errorCode === undefined ? {} : { errorCode }) });
     }
   });
   return app;

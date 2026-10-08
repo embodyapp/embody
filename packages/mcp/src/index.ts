@@ -25,7 +25,20 @@ export interface McpCatalogEntry {
 export type McpExecutionEvent =
   | { readonly type: "progress"; readonly update: ProgressUpdate }
   | { readonly type: "result"; readonly value: unknown }
-  | { readonly type: "error"; readonly message: string };
+  | ({ readonly type: "error" } & McpErrorDetails);
+
+/** Public, already-sanitized error information relayed to MCP clients. */
+export interface McpErrorDetails {
+  readonly message: string;
+  /** Embody error code, e.g. `HOOK_VETO` or `VALIDATION_ERROR`. */
+  readonly code?: string;
+  readonly requestId?: string;
+  readonly details?: readonly {
+    readonly path: readonly (string | number)[];
+    readonly message: string;
+  }[];
+  readonly retryAfterSeconds?: number;
+}
 
 /** Maps canonical dotted targets to MCP-safe, stable snake-case names. */
 export function mcpTargetName(target: string): string {
@@ -74,6 +87,28 @@ export function createMcpCatalog(
 
 export function mcpError(message = "Tool execution failed"): CallToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
+}
+/**
+ * Builds an informative tool error: the message, one line per validation issue and a retry
+ * hint, with the error code and request ID in `_meta` for programmatic clients.
+ */
+export function mcpErrorResult(error: McpErrorDetails): CallToolResult {
+  const lines = [error.message];
+  for (const issue of error.details ?? [])
+    lines.push(`- ${issue.path.length > 0 ? issue.path.join(".") : "(input)"}: ${issue.message}`);
+  if (error.retryAfterSeconds !== undefined)
+    lines.push(`Retry after ${error.retryAfterSeconds} seconds.`);
+  if (error.code === "INTERNAL_ERROR" && error.requestId !== undefined)
+    lines.push(`Request ID: ${error.requestId}`);
+  const meta = {
+    ...(error.code === undefined ? {} : { "embody/errorCode": error.code }),
+    ...(error.requestId === undefined ? {} : { "embody/requestId": error.requestId }),
+  };
+  return {
+    content: [{ type: "text", text: lines.join("\n") }],
+    isError: true,
+    ...(Object.keys(meta).length === 0 ? {} : { _meta: meta }),
+  };
 }
 export function mcpResult(value: unknown): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(value) }] };
@@ -172,7 +207,9 @@ export class McpHttpHandler<TContext> {
                 },
               });
           } else if (event.type === "result") terminal = mcpResult(event.value);
-          else terminal = mcpError(event.message);
+          else {
+            terminal = mcpErrorResult(event);
+          }
         }
         return terminal ?? mcpError("Remote stream ended without a result");
       } catch {
