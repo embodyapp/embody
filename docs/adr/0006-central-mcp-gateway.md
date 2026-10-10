@@ -1,6 +1,6 @@
 # ADR 0006: Central MCP gateway, org tenancy and delegated agent principal
 
-- Status: Accepted, amended (Amendment 1)
+- Status: Accepted, amended (Amendments 1 and 2)
 - Date: 2026-10-08 (accepted 2026-10-08; Amendment 1 2026-10-08)
 - Decision gate: D-07
 - Plans: [design](../plans/central-mcp-gateway.md), [Phase 15](../implementation-plan/15-central-mcp-gateway.md)
@@ -49,6 +49,17 @@ Product direction clarified that Embody serves companies running many small, cus
 - **Tenant safety is part of the MVP:** PostgreSQL store, workspace routing, asymmetric workspace-bound tokens and an isolation suite.
 - **App-to-app calls** within a workspace, with the calling app's own system identity and scopes, are part of the MVP.
 - **Superseded:** dedicated vs shared deployment modes; credentials covering several orgs; health from heartbeats; hiding tools of unhealthy apps.
+
+## Amendment 2: request-only hosted MVP delivery profile (2026-10-08)
+
+The owner selected a narrower first hosted release: [minimal MVP](../mvp/README.md). Its M01–M18 tracker is the delivery order for this profile; the broad Phase 15 requirements above remain the follow-on plan, not implicit launch requirements or completed functionality.
+
+- Users deploy supported request-driven apps via CLI, then control app actions through the workspace gateway using CLI/MCP. Deployment/admin authority is separate from app-caller authority.
+- Actual scale-to-zero for gateway and apps, persistent discovery, workspace isolation and asymmetric app-bound identity remain mandatory before launch.
+- OAuth, compact discovery, team UI, app-to-app RPC, GenUI and background events/workflows are deferred for this profile. Declared unsupported workloads must be rejected; request-only outbox behavior is an explicit M08 decision, not silent data loss.
+- No app wake sweep or daily safety wake is needed for unsupported background workloads. The deployment controller still needs durable jobs and external recovery independent of gateway processes.
+- An `idempotent` annotation alone does not authorize ambiguous mutation replay. Generated updates and Kanban bulk moves run hooks/publish events again and must not automatically claim idempotency. M07 requires proven retry semantics or an explicit unknown outcome.
+- Implementation evidence for P15-01/02/06 on the integration branch does not establish persistent tenancy, safe sleep or production readiness; see the [M01 integration report](../mvp/evidence/M01-integration.md).
 
 ## Consequences
 

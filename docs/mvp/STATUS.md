@@ -1,6 +1,6 @@
 # Minimal hosted MVP status
 
-**Last updated: 2026-10-08. M01 integration in progress; no implementation completion or fresh cloud verification claimed.**
+**Last updated: 2026-10-10. M01 is IN_REVIEW with fresh local evidence; combined CI and independent review remain pending. No cloud verification claimed.**
 
 Scope: [README](./README.md). Tasks and acceptance cases: [IMPLEMENTATION](./IMPLEMENTATION.md). Required evidence: [VERIFICATION](./VERIFICATION.md).
 
@@ -19,7 +19,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 
 | ID | Task | Depends on | State | Owner | Evidence / PR / blocker |
 |---|---|---|---|---|---|
-| M01 | Integrate/reconcile existing gateway work | — | IN_PROGRESS | pi | Local integration branch `feat/mvp-m01-integration`; review PRs #29–#32 and run combined-candidate regressions |
+| M01 | Integrate/reconcile existing gateway work | — | IN_REVIEW | pi | [Integration evidence](./evidence/M01-integration.md); candidate `d295465`; Node 22/24 verify, Docker E2E and npm-11 consumer pass; CI/reviewer pending |
 | M02 | Supported profile and deployment contracts | M01 | NOT_STARTED | — | Request-only scope recorded; executable contracts pending |
 | M03 | Trustworthy DB, package and cloud test gates | M01 | NOT_STARTED | — | Dedicated Postgres CI wiring/skip behavior requires correction |
 | M04 | Durable workspace catalog and credentials | M02, M03 | NOT_STARTED | — | Reuse P15-05/P15-08 work if available |
@@ -71,5 +71,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 - 2026-10-08 — Planning: added focused scope, 18 implementation tasks with acceptance cases, verification matrix and completion tracker at the user's request. No code/infra implementation, tests, deployments or runtime completion claimed. Existing `.gitignore` modification left untouched.
 
 - 2026-10-08 — pi — M01 — NOT_STARTED → IN_PROGRESS — `feat/mvp-m01-integration` — refreshed GitHub refs; #29–#32 remain open. Isolated integration worktree preserves original uncommitted files; no remote merge/push authorized by this task execution.
+
+- 2026-10-10 — pi — M01 — IN_PROGRESS → IN_REVIEW — `feat/mvp-m01-integration`, code candidate `d295465` — integrated #29/#30/#31/#32 locally; fixed auth-failure audit parity, unsafe update idempotency metadata and Compose init. Node 22/24 `pnpm verify`: 193 passed, 8 explicit Postgres skips each; Docker E2E passes on both; packed consumer passes with npm 11 on both; production audit clean. [Full evidence and limitations](./evidence/M01-integration.md). Combined CI/independent review pending; no remote push/merge. M03 DB gate remains open.
 
 Append entries as: `date — owner — task — state transition — branch/PR — commands/result/evidence — review or blocker`.

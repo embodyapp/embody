@@ -1,6 +1,8 @@
 # Implementation status
 
-Last updated: 2026-09-19 by `pi/01a0b7d0`
+Last updated: 2026-10-10 by `pi` (M01 integration review; broader completion states retained)
+
+The first hosted release follows the [request-only MVP tracker](../mvp/STATUS.md), not every broader Phase 15 milestone. See [M01 evidence and reuse mapping](../mvp/evidence/M01-integration.md). Integration on a local branch is not a remote merge or production-readiness claim.
 
 This file is intentionally simple so small agents can coordinate without a project-management service. Update one row when claiming and completing work. Preserve item IDs because plans and commits may reference them.
 
@@ -69,19 +71,19 @@ This file is intentionally simple so small agents can coordinate without a proje
 | P14-06 | `@embody/genui-pi` native adapter | NOT_STARTED | — | P14-02,P14-05 | Pi extension/TUI standard renderer, mode-safe text/browser fallback, keyboard/accessibility and lifecycle/package tests. |
 | P14-07 | GenUI reference E2E, hardening, docs, and release gate | NOT_STARTED | — | P10-03,P14-04,P14-05,P14-06 | Kanban parity journey across plain MCP/MCP Apps/browser/Pi/CLI; fuzz, soak, performance, security, artifacts, compatibility and dated vendor smoke evidence. |
 | P15-00 | ADR 0006, plan alignment and MCP client spike | IN_PROGRESS | claude | P8-01 | Stage 0. ADR 0006 accepted with Amendment 1 (workspaces, teams, single-tenant apps that can sleep); hosting plan aligned; client spike remains |
-| P15-01 | Shared dispatch pipeline, real errors, audit on every surface | IN_REVIEW | claude | P8-01 | Stage 1. PR #29; `pnpm verify` and `pnpm test:e2e` passed (E2E with the SQL init-script fix applied locally) |
-| P15-02 | Action effects and app metadata | IN_REVIEW | claude | D-07 | Stage 1. PR #30; `pnpm verify` passed |
+| P15-01 | Shared dispatch pipeline, real errors, audit on every surface | IN_REVIEW | claude | P8-01 | Stage 1. PR #29 integrated on `feat/mvp-m01-integration`; auth-denial parity fix and committed SQL initializer; fresh Node 22/24 verify/E2E evidence in M01 report. Combined CI/review pending. |
+| P15-02 | Action effects and app metadata | IN_REVIEW | claude | D-07 | Stage 1. PR #30 integrated in M01; removed unsafe generated-update idempotency claim; real repeated-update hook/event test. Fresh Node 22/24 verification recorded; combined review pending. |
 | P15-03 | MCP tool metadata, structured results, compact discovery | NOT_STARTED | — | P15-01,P15-02 | Stage 1 |
 | P15-04 | Stateless MCP transport | NOT_STARTED | — | P15-03,P15-05 | Stage 1 |
 | P15-05 | Workspace store, routing, teams and app status | NOT_STARTED | — | D-07,P15-01 | Stage 1. `/w/<workspace>` routing; heartbeats optional; status from real calls |
-| P15-06 | Delegated agent principal | IN_REVIEW | claude | P15-01 | Stage 1. PR #31 (stacked on #29); `pnpm verify` passed |
+| P15-06 | Delegated agent principal | IN_REVIEW | claude | P15-01 | Stage 1. PR #31 integrated after #29 in M01; real signed-host/MCP delegated veto regression passes on Node 22/24; combined review pending. |
 | P15-07 | OAuth resource server per workspace | NOT_STARTED | — | P15-05,P15-06 | Stage 4 |
 | P15-08 | PostgreSQL `GatewayStore` | NOT_STARTED | — | P15-05 | Stage 1 |
 | P15-09 | Asymmetric, workspace-bound gateway tokens | NOT_STARTED | — | P15-05 | Stage 3 (= hosting HD05) |
 | P15-10 | Endpoint safety and per-workspace limits | NOT_STARTED | — | P15-05,P15-09 | Stage 3 |
 | P15-11 | Isolation gate and production readiness | NOT_STARTED | — | P15-07,P15-08,P15-10,P15-12 | Stage 3 isolation suite; load test and runbook may follow the MVP |
 | P15-12 | Stateless, single-tenant app hosts | NOT_STARTED | — | P15-05,P15-09 | Stage 3 |
-| P15-13 | App-to-app calls within a workspace | NOT_STARTED | — | P15-05,P15-06,P15-14 | Stage 5 (MVP) |
+| P15-13 | App-to-app calls within a workspace | NOT_STARTED | — | P15-05,P15-06,P15-14 | Stage 5 of broader roadmap; deferred from request-only hosted MVP by ADR 0006 Amendment 2 |
 | P15-14 | Sleep-safe gateway: wake-tolerant calls, safe retries, status, due-time wake sweep | NOT_STARTED | — | P15-05,P15-08 | Stage 2 |
 | P15-15 | Host sleep mode: no timers, events before response, wake endpoint, readiness check | NOT_STARTED | — | P15-14 | Stage 2 (first slice of hosting CH9-01) |
 | P15-16 | MVP proof on Cloud Run | NOT_STARTED | — | P15-07,P15-11,P15-13,P15-15 | Stage 6 |

@@ -2,6 +2,10 @@
 
 **Design:** [central MCP gateway plan](../plans/central-mcp-gateway.md); [ADR 0006](../adr/0006-central-mcp-gateway.md) with Amendment 1. **Status:** accepted (D-07). **Depends on:** P7-01–P7-03, P8-01–P8-03, P10-03. **Coordinates with:** the Embody Cloud hosting plan (`docs/hosting/`, ADR 0007, ADR 0008); see design plan §8 for ownership.
 
+## First-release scope overlay
+
+The [minimal hosted MVP](../mvp/README.md) and ADR 0006 Amendment 2 define the first release. The stages below describe the broader Phase 15 roadmap, not the minimal launch checklist. Reuse this phase's implementations through the [M01 mapping](../mvp/evidence/M01-integration.md); OAuth, compact discovery, team UI, app-to-app calls and background work are deferred. The hosted request-only profile still requires actual gateway/app scale-to-zero, persistent catalogs, tenant safety, durable limits/audit and deployment recovery. Do not implement a second store or dispatch pipeline for the narrower plan.
+
 ## Objective
 
 Make the Embody gateway the one MCP endpoint people in a company connect to from Claude, Codex, ChatGPT, Cursor and other MCP clients, with:
@@ -167,7 +171,7 @@ All surfaces audited and rate-limited; agents receive actionable errors; existin
 - `ActionManifest` (`packages/core/src/manifest.ts`) and its zod schema in `protocol.ts` gain optional `title` (≤ 80), `effect: "read" | "write" | "destructive"`, `idempotent: boolean`.
 - `AppManifest` gains optional `app: { title?: string; description?: string; instructions?: string }` (≤ 80 / 500 / 2,048 chars, no control characters except `\n`).
 - Plugin action definitions accept `effect`, `title`, `idempotent`; values flow into the compiled manifest.
-- Generated CRUD actions set: `get`, `list` → `read`; `create` → `write`; `update` → `write`, `idempotent: true`; `delete` → `destructive`. Workflow controls: `status` → `read`; `start`, `retry` → `write`; `cancel` → `destructive`.
+- Generated CRUD actions set: `get`, `list` → `read`; `create` → `write`; `update` → `write` without an automatic idempotency claim (hooks/events run again); `delete` → `destructive`. Workflow controls: `status` → `read`; `start`, `retry` → `write`; `cancel` → `destructive`.
 - `defineApp` / `createAppHost` accept `title`, `description`, `instructions` and place them in `manifest.app`.
 - Helper `actionEffect(action: ActionManifest): ActionEffect` returns `action.effect ?? "write"`. Export from core; use it everywhere instead of reading the field directly.
 - Gateway `validateRegistration`: enforce limits and characters; reject app ID `embody`.
@@ -447,7 +451,7 @@ Claude web/desktop custom connector and ChatGPT connector verified against the g
 - **Wake-tolerant dispatch** around the host call in the shared dispatch pipeline:
   - `wakeBudgetMs` per workspace or app (default 30,000).
   - **Not-delivered** failures: `ECONNREFUSED`, `ENOTFOUND`/`EAI_AGAIN`, a socket reset before any request bytes were written, or a platform `503`/`429` without an Embody error envelope. Retry with backoff (250 ms doubling, max 5 s) until the budget ends.
-  - **Ambiguous** failures (after request bytes were sent): retry only when `actionEffect(action) === "read"` or `action.idempotent === true`. Otherwise return `UNAVAILABLE` with "Outcome unknown: <app> may or may not have completed this. Check before retrying." and `_meta["embody/outcome"] = "unknown"`.
+  - **Ambiguous** failures (after request bytes were sent): retry only when the read semantics or a durable end-to-end idempotency contract make replay safe. An `action.idempotent` annotation by itself is insufficient. Otherwise return `UNAVAILABLE` with "Outcome unknown: <app> may or may not have completed this. Check before retrying." and `_meta["embody/outcome"] = "unknown"`.
   - When the client supplied a progress token, emit "Starting <app title>…" on the first retry and every 5 s, so MCP clients that reset timeouts on progress keep waiting.
   - Budget exhausted: `UNAVAILABLE`, "<app title> did not start. Try again in a minute."
 - **Status recording** through `GatewayStore.recordOutcome` (rate-limited per app): success → `ready`, `consecutiveFailures = 0`; wake failure → `consecutiveFailures + 1`, `unavailable` at 3; `ready` → `idle` is computed on read after `idleAfter`. Tools are never removed for status.

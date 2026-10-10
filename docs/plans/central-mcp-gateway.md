@@ -2,6 +2,8 @@
 
 **Status: accepted.** [ADR 0006](../adr/0006-central-mcp-gateway.md), amended 2026-10-08 (Amendment 1: workspaces, teams, single-tenant apps that can sleep). Written against `main` at `3f44ab7`.
 
+**First hosted release:** [the request-only minimal MVP](../mvp/README.md) narrows the delivery scope through ADR 0006 Amendment 2. This document remains the broader gateway roadmap. Its background-work, OAuth and app-to-app milestones are not requirements for that first profile, and are not marked complete by M01 integration.
+
 **Implementation plan:** [Phase 15](../implementation-plan/15-central-mcp-gateway.md) holds the work items, interfaces and tests. This document holds the model and the reasoning.
 
 **Hosting plan:** Embody Cloud hosting on Cloud Run ([hosting plan](../hosting/PLAN.md), ADR 0007 and ADR 0008 on the `docs/cloud-run-hosting-plan` branch) owns everything provider-specific. This plan owns the framework and gateway code both rely on. [§8](#8-relationship-to-the-hosting-plan) lists who owns what.
