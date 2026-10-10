@@ -38,7 +38,8 @@ describe("action effects", () => {
       "kanban.card.delete": { effect: "destructive", idempotent: undefined },
       "kanban.card.get": { effect: "read", idempotent: undefined },
       "kanban.card.list": { effect: "read", idempotent: undefined },
-      "kanban.card.update": { effect: "write", idempotent: true },
+      // Updates run lifecycle hooks and publish events again, even for an identical patch.
+      "kanban.card.update": { effect: "write", idempotent: undefined },
     });
   });
 

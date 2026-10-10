@@ -185,7 +185,8 @@ function generatedActions(
     create: { effect: "write" },
     get: { effect: "read" },
     list: { effect: "read" },
-    update: { effect: "write", idempotent: true },
+    // Identical patches still run hooks and publish events; no retry-safety claim.
+    update: { effect: "write" },
     delete: { effect: "destructive" },
   };
   return Object.fromEntries(

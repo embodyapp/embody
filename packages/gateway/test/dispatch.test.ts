@@ -293,6 +293,33 @@ describe("HTTP execution audit and limits", () => {
     ]);
   });
 
+  it.each([
+    ["http", "/api/execute/kanban/kanban.ping"],
+    ["stream", "/api/execute/stream/kanban/kanban.ping"],
+    ["mcp", "/mcp"],
+  ])("audits authentication failures on %s without contacting the host", async (surface, url) => {
+    let hostCalls = 0;
+    const { gateway, audit } = fixture(() => {
+      hostCalls++;
+      return Response.json({});
+    });
+    const response = await gateway.inject({
+      method: "POST",
+      url,
+      headers: { authorization: "Bearer wrong" },
+      payload: {},
+    });
+    expect(response.statusCode).toBe(401);
+    expect(hostCalls).toBe(0);
+    expect(audit.records).toHaveLength(1);
+    expect(audit.records[0]).toMatchObject({
+      surface,
+      outcome: "failure",
+      errorCode: "UNAUTHENTICATED",
+    });
+    expect(audit.records[0]?.actorId).toBeUndefined();
+  });
+
   it("audits authentication failures on JSON execution", async () => {
     const { gateway, audit } = fixture(() => Response.json({}));
     const response = await gateway.inject({

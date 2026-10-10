@@ -29,6 +29,7 @@ import {
   type AuditOutcome,
   type AuditSink,
   type DispatchDeps,
+  type DispatchSurface,
   type PublicError,
 } from "./dispatch.js";
 import {
@@ -594,14 +595,30 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       "mcp.actor 'token' is deprecated: MCP calls keep the credential's actor type, so agent-only guardrails do not apply to human credentials",
     );
   const mcp = new McpHttpHandler<Principal>({ catalog: catalogFor, execute: remoteEvents });
+  const authenticateSurface = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    surface: DispatchSurface,
+  ): Promise<Principal> => {
+    const started = Date.now();
+    try {
+      return await options.auth.authenticate(bearer(request.headers.authorization));
+    } catch (error) {
+      const params = request.params as { appId?: string; target?: string };
+      audit.append({
+        requestId: String(reply.getHeader("x-request-id")),
+        ...(params.appId === undefined ? {} : { appId: params.appId }),
+        ...(params.target === undefined ? {} : { target: params.target }),
+        surface,
+        outcome: "failure",
+        errorCode: publicErrorFrom(error, request.id).code,
+        durationMs: Date.now() - started,
+      });
+      throw error;
+    }
+  };
   const mcpRoute = async (request: FastifyRequest, reply: FastifyReply) => {
-    const principal = await options.auth.authenticate(
-      bearer(
-        typeof request.headers["authorization"] === "string"
-          ? request.headers["authorization"]
-          : undefined,
-      ),
-    );
+    const principal = await authenticateSurface(request, reply, "mcp");
     const scoped = (request.params as { appId?: string }).appId;
     reply.hijack();
     await mcp.handle({
@@ -618,13 +635,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     app.route({ method: ["GET", "POST", "DELETE"], url, handler: mcpRoute });
   app.addHook("onClose", async () => mcp.close());
   app.post("/api/execute/stream/:appId/:target", async (request, reply) => {
-    const principal = await options.auth.authenticate(
-      bearer(
-        typeof request.headers["authorization"] === "string"
-          ? request.headers["authorization"]
-          : undefined,
-      ),
-    );
+    const principal = await authenticateSurface(request, reply, "stream");
     const { appId, target } = request.params as { appId: string; target: string };
     const requestId = String(reply.getHeader("x-request-id"));
     const prepared = await prepareDispatch(
@@ -698,30 +709,9 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     }
   });
   app.post("/api/execute/:appId/:target", async (request, reply) => {
-    const started = Date.now();
     const requestId = String(reply.getHeader("x-request-id"));
     const { appId, target } = request.params as { appId: string; target: string };
-    let principal: Principal;
-    try {
-      principal = await options.auth.authenticate(
-        bearer(
-          typeof request.headers["authorization"] === "string"
-            ? request.headers["authorization"]
-            : undefined,
-        ),
-      );
-    } catch (error) {
-      audit.append({
-        requestId,
-        appId,
-        target,
-        surface: "http",
-        outcome: "failure",
-        errorCode: "UNAUTHENTICATED",
-        durationMs: Date.now() - started,
-      });
-      throw error;
-    }
+    const principal = await authenticateSurface(request, reply, "http");
     const prepared = await prepareDispatch(
       { principal, appId, target, requestId, surface: "http" },
       dispatchDeps,

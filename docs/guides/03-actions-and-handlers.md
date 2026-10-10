@@ -83,7 +83,8 @@ exportBoard: define.action({
 
 - `read`: no side effects. `write`: creates or changes state. `destructive`: deletes or irreversibly changes state.
 - Actions without `effect` are treated as `write`, so they never appear read-only by accident.
-- Generated CRUD actions are marked automatically: `get`/`list` are `read`, `create` and `update` are `write` (`update` is idempotent), `delete` is `destructive`. Workflow `status` is `read`, `start`/`retry` are `write`, `cancel` is `destructive`.
+- An `idempotent` declaration is app-author metadata, not a durable retry guarantee. Include hooks, published events and external effects when evaluating it; never blindly replay an ambiguous mutation based only on this flag.
+- Generated CRUD actions are marked automatically: `get`/`list` are `read`, `create` and `update` are `write` (updates are not automatically marked idempotent because hooks and events run again), `delete` is `destructive`. Workflow `status` is `read`, `start`/`retry` are `write`, `cancel` is `destructive`.
 
 ---
 
