@@ -72,7 +72,7 @@ Sanitized JSON defaults to `.artifacts/verification/` (ignored by Git); override
 
 Raw Vitest JSON is temporary and deleted, not published as evidence. Child output replaces known secret/URL/password variants; public reports do not contain env values, query payloads, tokens or connection strings. Redaction is defense in depth, not permission to log arbitrary customer data. Failures exit nonzero and write failed evidence; empty/all-skipped reports cannot pass.
 
-CI uploads the sanitized JSON on success/failure as `postgres-mvp-evidence` and `baseline-evidence-node-22`/`-24`; missing evidence files fail upload. The DB job provisions a disposable PostgreSQL 16 fixture, executes deliberate prerequisite regressions, then mandatory DB/MVP tests. The baseline matrix builds/packs/runs actual E2E on both supported Node majors. Retain the run link and exact tested head in dated task evidence. No skipped DB job is accepted as successful conformance.
+CI uploads the sanitized JSON on success/failure as `postgres-mvp-evidence` and `baseline-evidence-node-22`/`-24`; missing evidence files fail upload. The DB job provisions a disposable PostgreSQL 16 fixture, executes deliberate prerequisite regressions, then mandatory DB/MVP tests. The baseline matrix builds/packs/runs actual E2E on both supported Node majors. A stable `e2e-artifacts` aggregate preserves the existing protected check name and succeeds only when both matrix legs succeed (failed/skipped/cancelled matrix results fail the check). Retain the run link and exact tested head in dated task evidence. No skipped DB job is accepted as successful conformance.
 
 ## Future cloud qualification gate
 

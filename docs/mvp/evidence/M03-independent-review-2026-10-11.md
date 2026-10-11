@@ -28,3 +28,9 @@ Both code findings fixed: redaction now covers raw/trimmed/normalized URLs and e
 > No edits, env/auth/credential inspection, service execution or remote writes performed.
 
 Local reviewer artifacts: `/tmp/embody-m03-independent-review.md`, `/tmp/embody-m03-independent-rereview.md` and corresponding `*-agent.log` files. Final candidate CI and integrator acceptance belong in the dated M03 evidence report, not this code-review assertion.
+
+## Protected-check compatibility addendum
+
+After all five initial CI jobs passed, the repository's unchanged protection required stable `e2e-artifacts`, not the new matrix check names. Added a stable aggregate job depending on the renamed matrix and accepting only result `success`; no branch-protection/admin bypass.
+
+Separate read-only automated review in `/tmp/embody-m03-ci-compatibility-review.md` concluded **ACCEPT — no blocker for this CI compatibility fix**. It verified GitHub expression/dependency syntax, fail-fast behavior and that failure/skipped/cancelled results cannot pass the stable check. No `continue-on-error`; both Node legs remain mandatory. Static review, not live CI or human approval. The updated candidate requires another full CI run.
