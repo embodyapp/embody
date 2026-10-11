@@ -21,3 +21,7 @@ Also added actual compiled hosted-bootstrap and warm closed-pool failure tests. 
 > Review remained read-only, with no credential/environment/auth inspection or remote/service actions.
 
 Integrator then reran the final local Node24 `pnpm verify` and mandatory MVP suites successfully (261 optional-layer Vitest passes/11 DB skips + runner17; MVP130 with zero required skips). Exact committed candidate CI and final acceptance are recorded separately in dated M04 evidence. Local reviewer outputs: `/tmp/m04-independent-review.md`, `/tmp/m04-independent-final-review.md`, corresponding `*-agent.log` files. M05/M06/M07/M12 qualification was not claimed or treated as a completed requirement.
+
+## Packed-consumer follow-up
+
+First candidate CI exposed the new cloud-contracts dependency missing from the external consumer's local tarball install order. A narrow independent read-only review (`/tmp/m04-packaging-review.md`) **ACCEPTED** installing that tarball before gateway and adding actual packaged ESM/contract/memory-store smoke. Reviewer verified dependency ordering, public exports resolved from the temporary consumer, fail-closed assertions and awaited cleanup; syntax check passed. Hash inequality alone is only a smoke assertion, not hashing/persistence proof (covered separately by conformance). Reviewer did not rerun services/full baseline. No runtime/store source changes; complete clean-candidate CI still required.
