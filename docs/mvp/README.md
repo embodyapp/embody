@@ -7,6 +7,7 @@
 - [Implementation tasks](./IMPLEMENTATION.md): ordered work, dependencies, acceptance cases, documentation requirements.
 - [Completion tracker](./STATUS.md): claim work and record completion evidence here.
 - [Verification contract](./VERIFICATION.md): test layers, release journey, evidence format and launch gate.
+- [Durable workspaces and credentials](./WORKSPACES.md): hosted provisioning, identity/name bindings, route migration and cache/failure semantics.
 - [Verification commands and prerequisites](./TESTING.md): mandatory DB/runtime-role fixture, MVP/cloud failure gates, clean packed/E2E runs and sanitized evidence.
 - [M02 API/CLI and workload contracts](./CONTRACTS.md): implemented schemas and policy; deployment endpoints/commands still await their implementation tasks.
 

@@ -9,6 +9,7 @@ import {
   countsFromVitest,
   evidence,
   postgresConfiguration,
+  platformConfiguration,
   redact,
   requireVariables,
   root,
@@ -26,6 +27,7 @@ function cleanEnv(directory) {
   for (const key of Object.keys(env))
     if (
       key.startsWith("EMBODY_POSTGRES") ||
+      key.startsWith("EMBODY_PLATFORM") ||
       key.startsWith("EMBODY_MVP_CLOUD") ||
       key === "GOOGLE_APPLICATION_CREDENTIALS"
     )
@@ -49,6 +51,50 @@ for (const script of ["test-postgres.mjs", "postgres-prerequisites.mjs", "test-m
     }
   });
 }
+for (const script of ["test-gateway-store.mjs", "platform-prerequisites.mjs", "test-mvp.mjs"]) {
+  test(`M04 ${script} fails when platform configuration is omitted`, async () => {
+    const directory = await mkdtemp(join(tmpdir(), "embody-platform-negative-"));
+    try {
+      const result = spawnSync(process.execPath, [`scripts/${script}`], {
+        cwd: root,
+        env: { ...cleanEnv(directory), ...fixture },
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /EMBODY_PLATFORM_URL/);
+      assert.doesNotMatch(result.stdout, /vitest|Build succeeded|passed/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}
+test("platform prerequisites reject reused app database or role", () => {
+  const config = {
+    ...fixture,
+    EMBODY_PLATFORM_URL: "postgresql://gateway:platform-password@localhost:5432/platform",
+    EMBODY_PLATFORM_MIGRATION_URL:
+      "postgresql://platform-maintenance:maintenance-password@localhost:5432/platform",
+  };
+  assert.equal(platformConfiguration(config).runtime.pathname, "/platform");
+  assert.throws(
+    () => platformConfiguration({ ...config, EMBODY_PLATFORM_URL: fixture.EMBODY_POSTGRES_URL }),
+    /roles must differ|same test database/,
+  );
+  assert.throws(
+    () =>
+      platformConfiguration({
+        ...config,
+        EMBODY_PLATFORM_URL: "postgresql://runtime:platform-password@localhost:5432/platform",
+      }),
+    /distinct from app/,
+  );
+});
+test("platform credential redaction covers normalized/password-only errors", () => {
+  const secret = " padded-platform-password ";
+  const url = ` postgresql://gateway:${encodeURIComponent(secret)}@localhost:5432/platform `;
+  const output = redact(`${url.trim()} ${secret}`, { EMBODY_PLATFORM_URL: url });
+  assert.doesNotMatch(output, /padded-platform-password|postgresql/);
+});
 test("rejects whitespace config and invalid URLs without exposing values", () => {
   assert.throws(() => requireVariables(["REQUIRED"], { REQUIRED: " " }), /REQUIRED/);
   assert.throws(

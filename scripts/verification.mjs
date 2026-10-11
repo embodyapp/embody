@@ -45,10 +45,32 @@ export function postgresConfiguration(env = process.env) {
     throw new Error("Other-app test database must be distinct on the same PostgreSQL server");
   return { runtime, migration, other };
 }
+export function platformConfiguration(env = process.env) {
+  requireVariables(["EMBODY_PLATFORM_URL", "EMBODY_PLATFORM_MIGRATION_URL"], env);
+  const app = postgresConfiguration(env);
+  const config = postgresConfiguration({
+    ...env,
+    EMBODY_POSTGRES_URL: env.EMBODY_PLATFORM_URL,
+    EMBODY_POSTGRES_MIGRATION_URL: env.EMBODY_PLATFORM_MIGRATION_URL,
+    EMBODY_POSTGRES_OTHER_URL: app.runtime.href,
+  });
+  const appRoles = [app.runtime, app.migration, app.other].map((url) =>
+    decodeURIComponent(url.username),
+  );
+  if (
+    config.runtime.pathname === app.other.pathname ||
+    [config.runtime, config.migration].some((url) =>
+      appRoles.includes(decodeURIComponent(url.username)),
+    )
+  )
+    throw new Error("Platform database/roles must be distinct from app fixtures");
+  return config;
+}
 export function redact(text, env = process.env) {
   const secrets = Object.entries(env)
     .filter(
-      ([key, value]) => value && /(?:PASSWORD|TOKEN|SECRET|POSTGRES.*URL|CREDENTIAL)/u.test(key),
+      ([key, value]) =>
+        value && /(?:PASSWORD|TOKEN|SECRET|POSTGRES.*URL|PLATFORM.*URL|CREDENTIAL)/u.test(key),
     )
     .flatMap(([, value]) => {
       try {
@@ -168,6 +190,7 @@ export async function evidence(gate, status, counts = null, images = [], details
     node: process.version,
     lockfileSha256: await hash("pnpm-lock.yaml"),
     schemaSourceSha256: await hash("packages/storage/src/index.ts"),
+    platformSchemaSourceSha256: await hash("packages/gateway/src/store.ts"),
     postgresFixtureSha256: await hash("test/postgres/init.sql"),
     counts,
     images,

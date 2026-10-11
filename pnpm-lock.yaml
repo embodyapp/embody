@@ -181,6 +181,9 @@ importers:
 
   packages/gateway:
     dependencies:
+      '@embody/cloud-contracts':
+        specifier: workspace:*
+        version: link:../cloud-contracts
       '@embody/core':
         specifier: workspace:*
         version: link:../core
@@ -190,12 +193,18 @@ importers:
       '@embody/mcp':
         specifier: workspace:*
         version: link:../mcp
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
       fastify:
         specifier: ^5.12.5
         version: 5.12.5
       jose:
         specifier: ^6.2.10
         version: 6.2.10
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
     devDependencies:
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1

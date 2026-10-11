@@ -23,7 +23,9 @@ const manifest: AppManifest = {
 
 describe("gateway remote dispatch", () => {
   it("forwards the versioned execution envelope required by app hosts", async () => {
+    let now = 0;
     const registry = new GatewayRegistry({
+      clock: { now: () => new Date(now) },
       allowPrivateEndpoints: true,
       credentials: { kanban: "registration-secret" },
     });
@@ -76,6 +78,20 @@ describe("gateway remote dispatch", () => {
       target: "kanban.ping",
       input: { value: 1 },
     });
+    // Hosted persistence is a trusted gateway option, not a legacy registration payload flag.
+    await gateway.inject({
+      method: "POST",
+      url: "/register",
+      headers: { authorization: "Bearer registration-secret" },
+      payload: { ...registry.get("kanban"), discoverable: true },
+    });
+    now = 90_001;
+    const expired = await gateway.inject({
+      url: "/api/catalog",
+      headers: { authorization: "Bearer api-key" },
+    });
+    expect(expired.statusCode).toBe(200);
+    expect(expired.json()).toEqual([]);
     await gateway.close();
   });
 });
