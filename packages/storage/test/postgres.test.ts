@@ -5,7 +5,9 @@ import { compileEntity, HookVetoError, Kernel, z } from "@embody/core";
 
 import { PostgresStorage } from "../src/index.js";
 
-const connectionString = process.env["EMBODY_POSTGRES_URL"];
+const connectionString = process.env["EMBODY_POSTGRES_URL"]?.trim() || undefined;
+if (process.env["EMBODY_POSTGRES_REQUIRED"] === "true" && !connectionString)
+  throw new Error("Mandatory PostgreSQL suite requires EMBODY_POSTGRES_URL");
 const describePostgres = connectionString === undefined ? describe.skip : describe;
 let storage: PostgresStorage | undefined;
 
@@ -150,6 +152,78 @@ describePostgres("PostgreSQL storage conformance", () => {
       await client.query("ROLLBACK");
       client.release();
       await pool.end();
+    }
+  });
+
+  it("uses a non-owner role without elevated privileges or migration authority", async () => {
+    const pool = new Pool({ connectionString });
+    try {
+      const role = await pool.query(
+        "SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname = current_user",
+      );
+      expect(role.rows[0]).toEqual({
+        rolsuper: false,
+        rolbypassrls: false,
+        rolcreatedb: false,
+        rolcreaterole: false,
+      });
+      const owners = await pool.query(
+        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'embody_%' AND tableowner = current_user",
+      );
+      expect(owners.rows).toEqual([]);
+      const quoteRole = (url: string) =>
+        `"${decodeURIComponent(new URL(url).username).replaceAll('"', '""')}"`;
+      const migrationUrl = process.env["EMBODY_POSTGRES_MIGRATION_URL"];
+      if (!migrationUrl) throw new Error("Isolation case requires EMBODY_POSTGRES_MIGRATION_URL");
+      for (const sql of [
+        "CREATE TABLE public.runtime_migration_attempt (id integer)",
+        "ALTER TABLE embody_entities DISABLE ROW LEVEL SECURITY",
+        "INSERT INTO embody_schema_migrations (version, applied_at) VALUES (99999, now())",
+        `ALTER ROLE ${quoteRole(connectionString!)} BYPASSRLS`,
+        `SET ROLE ${quoteRole(migrationUrl)}`,
+      ])
+        await expect(pool.query(sql)).rejects.toMatchObject({ code: "42501" });
+      await expect(storage!.ensureSchema()).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("cannot bypass RLS via row_security=off or cross-tenant inserts", async () => {
+    const pool = new Pool({ connectionString });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL row_security = off");
+      await expect(client.query("SELECT * FROM embody_entities")).rejects.toMatchObject({
+        code: "42501",
+      });
+      await client.query("ROLLBACK");
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('app.current_org', $1, true)", ["runtime-tenant"]);
+      await expect(
+        client.query(
+          "INSERT INTO embody_entities (id, org_id, entity_type, data, created_at, updated_at) VALUES ($1, $2, 'card', '{}', now(), now())",
+          [randomUUID(), "other-tenant"],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+      await pool.end();
+    }
+  });
+
+  it("cannot connect to a second app database with its runtime credentials", async () => {
+    const otherUrl = process.env["EMBODY_POSTGRES_OTHER_URL"];
+    if (!otherUrl) throw new Error("Isolation case requires EMBODY_POSTGRES_OTHER_URL");
+    const wrongDatabase = new URL(connectionString!);
+    wrongDatabase.pathname = new URL(otherUrl).pathname;
+    const otherPool = new Pool({ connectionString: wrongDatabase.href });
+    try {
+      await expect(otherPool.query("SELECT 1")).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await otherPool.end();
     }
   });
 

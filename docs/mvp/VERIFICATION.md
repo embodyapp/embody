@@ -9,17 +9,17 @@
 - Missing required DB/cloud credentials must fail the selected gate, not silently skip it. Local unit suites may explicitly skip optional environments, but cannot satisfy release gates.
 - Tests use injected clocks/barriers for determinism. Real cloud scale-down uses bounded observation of provider metrics, not an arbitrary sleep followed by an assumption.
 - Evidence must not include tokens, connection strings, source secrets or customer payloads.
-- New scripts listed here are **proposed**, not currently runnable. M03 implements and documents the runners; later tasks add their suites.
+- M03 implements the local/CI runners documented in [TESTING.md](./TESTING.md). Later tasks extend their explicit suite list. The cloud entry point fails closed until actual M09–M17 qualification suites exist; a runnable prerequisite gate is not cloud qualification.
 
-## Test layers and proposed commands
+## Test layers and commands
 
 | Layer | Runner | Evidence |
 |---|---|---|
 | Workspace regression | Existing `pnpm verify` | Supported Node versions; lint/typecheck/build/API/format/license checks and tests |
-| Real database | Existing `pnpm test:postgres`, strengthened by M03 | Explicit URL, pre-migrated non-owner runtime role, required cases execute; include kernel/gateway cases |
-| Packed/distributed regression | Existing `pnpm test:consumer`, `pnpm test:e2e` | Clean installed CLI/scaffold, real HTTP/MCP and database |
-| MVP contracts/integration | Proposed `pnpm test:mvp` | Deployment state, source/build adversaries, isolation, failure injection and effect ledgers |
-| Real provider qualification | Proposed `pnpm test:mvp:cloud` | IAM/storage/build/deploy/restore/zero-instance checks; requires explicit test project and budget approval |
+| Real database | `pnpm test:postgres` | Explicit runtime/migration/other-app URLs and actual Docker container ID; maintenance migrations, non-owner runtime SQL negatives, storage and kernel cases, zero required skips; add durable gateway-store cases in M04 |
+| Packed/distributed regression | `pnpm test:baseline` (wraps existing consumer/E2E journeys) | Clean installed CLI/scaffold, real HTTP/MCP/database, Node 22/24 CI matrix and image-hash evidence |
+| MVP contracts/integration | `pnpm test:mvp` | Current contracts/gateway + mandatory DB/isolation/failure-path suites; later tasks add source/build adversaries, controller recovery and effect ledgers |
+| Real provider qualification | `pnpm test:mvp:cloud` prerequisite gate; real suites not yet implemented | Fails on missing project/budget/credentials and on unimplemented qualification; M09–M17 must add IAM/storage/build/deploy/restore/zero-instance checks before it can pass |
 | Real client smoke | Versioned fixture and documented manual steps | Named MCP product/version, setup, cold call, quiescence and known limitations |
 | Release audit | Proposed evidence checker plus human review | Every task/case has matching candidate evidence; customer/operating approvals are manual |
 

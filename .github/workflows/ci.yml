@@ -31,6 +31,11 @@ jobs:
 
   postgres:
     runs-on: ubuntu-latest
+    env:
+      # Disposable public fixture credentials, never customer/provider credentials.
+      EMBODY_POSTGRES_URL: postgresql://embody_runtime:fixture-only-runtime@127.0.0.1:5432/embody_test
+      EMBODY_POSTGRES_MIGRATION_URL: postgresql://embody_migrator:fixture-only-migrator@127.0.0.1:5432/embody_test
+      EMBODY_POSTGRES_OTHER_URL: postgresql://embody_other:fixture-only-other@127.0.0.1:5432/embody_other
     services:
       postgres:
         image: postgres:16
@@ -52,10 +57,32 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:postgres
+      - name: Provision isolated disposable app databases and least-privilege roles
+        run: psql -v ON_ERROR_STOP=1 -f test/postgres/init.sql
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: postgres
+          PGDATABASE: postgres
+          PGPASSWORD: postgres
+      - name: Deliberate missing-configuration and false-green regressions
+        run: pnpm test:verification
+      - name: Mandatory PostgreSQL, kernel adapter, MVP contract and gateway cases (zero skips)
+        run: pnpm test:mvp
+        env:
+          EMBODY_POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: postgres-mvp-evidence
+          path: .artifacts/verification/*.json
+          if-no-files-found: error
 
   e2e-artifacts:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -63,11 +90,15 @@ jobs:
           version: 11.25.0
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
       - run: npm install --global npm@11
       - run: npm --version
-      - run: node scripts/test-packed-consumer.mjs
-      - run: pnpm test:e2e
+      - run: pnpm test:baseline
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: baseline-evidence-node-${{ matrix.node }}
+          path: .artifacts/verification/*.json
+          if-no-files-found: error
