@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { signingIdentity } from "./signing-fixture.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -76,10 +77,7 @@ export function storeConformance(
       const server = createWorkspaceGateway({
         store: backend,
         fetch: fetcher,
-        token: {
-          issuer: "m04-test",
-          key: new TextEncoder().encode("test-key-at-least-thirty-two-bytes"),
-        },
+        token: signingIdentity,
         ...(clock ? { clock } : {}),
       });
       closers.push(() => server.close());

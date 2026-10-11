@@ -206,6 +206,9 @@ importers:
         specifier: ^8.23.0
         version: 8.23.0
     devDependencies:
+      '@embody/auth':
+        specifier: workspace:*
+        version: link:../auth
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
         version: 1.32.1(supports-color@8.1.1)(zod@4.5.4)
@@ -247,6 +250,9 @@ importers:
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
+      jose:
+        specifier: ^6.2.10
+        version: 6.2.10
 
   packages/mcp:
     dependencies:

@@ -43,6 +43,7 @@
     "fastify": "^5.12.5"
   },
   "devDependencies": {
+    "jose": "^6.2.10",
     "@types/node": "^22.20.1"
   }
 }

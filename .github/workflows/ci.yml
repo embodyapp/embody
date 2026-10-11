@@ -29,8 +29,11 @@ jobs:
       - run: pnpm api-report
       - run: pnpm format:check
 
-  postgres:
+  postgres-matrix:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
     env:
       # Disposable public fixture credentials, never customer/provider credentials.
       EMBODY_POSTGRES_URL: postgresql://embody_runtime:fixture-only-runtime@127.0.0.1:5432/embody_test
@@ -56,7 +59,7 @@ jobs:
           version: 11.25.0
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Provision isolated disposable app databases and least-privilege roles
@@ -76,9 +79,20 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: postgres-mvp-evidence
+          name: postgres-mvp-evidence-node-${{ matrix.node }}
           path: .artifacts/verification/*.json
           if-no-files-found: error
+
+  # Keep the protected PostgreSQL check stable while requiring both supported Node majors.
+  postgres:
+    runs-on: ubuntu-latest
+    needs: [postgres-matrix]
+    if: always()
+    steps:
+      - name: Require both mandatory PostgreSQL/MVP matrix runs
+        env:
+          MATRIX_RESULT: ${{ needs['postgres-matrix'].result }}
+        run: test "$MATRIX_RESULT" = success
 
   e2e-artifacts-matrix:
     runs-on: ubuntu-latest

@@ -278,6 +278,8 @@ export interface DispatchDeps {
   readonly scopeAllows: (principal: Principal, appId: string, target: string) => boolean;
   readonly limit?: (key: string) => number | undefined;
   readonly issueToken: (principal: Principal, appId: string, requestId: string) => Promise<string>;
+  /** Provider identity token for the trusted catalog origin, independent of principal JWTs. */
+  readonly invocationToken?: (origin: string) => Promise<string>;
   readonly audit: AuditSink;
   readonly now?: () => number;
 }
@@ -343,13 +345,18 @@ export async function prepareDispatch(
       `${context.principal.orgId}:${context.principal.actorId}:${context.appId}:${context.target}`,
     );
     if (retry !== undefined) throw new DispatchRateLimitedError(retry);
+    const endpoint = new URL(registered.endpoint);
+    const invocationToken = await deps.invocationToken?.(endpoint.origin);
+    if (invocationToken !== undefined && (!invocationToken || /\s/.test(invocationToken)))
+      throw new UnavailableError("Invalid provider invocation token");
     const token = await deps.issueToken(context.principal, context.appId, context.requestId);
     return {
-      endpoint: new URL(registered.endpoint),
+      endpoint,
       headers: {
         "content-type": "application/json",
         "x-request-id": context.requestId,
         "x-gateway-auth": `Bearer ${token}`,
+        ...(invocationToken === undefined ? {} : { authorization: `Bearer ${invocationToken}` }),
       },
       finish,
     };

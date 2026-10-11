@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { signingIdentity, privateKeyPem, publicKeys } from "./signing-fixture.js";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { promisify } from "node:util";
@@ -57,7 +58,11 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
           ...process.env,
           GATEWAY_PROFILE: "hosted",
           GATEWAY_PLATFORM_DATABASE_URL: url!,
-          GATEWAY_JWT_SECRET: "public-test-key-at-least-thirty-two-bytes",
+          GATEWAY_SERVICE_ACCOUNT_EMAIL: "gateway@fixture-project.iam.gserviceaccount.com",
+          GATEWAY_JWT_ISSUER: "test",
+          GATEWAY_JWT_KID: "test-key",
+          GATEWAY_JWT_PRIVATE_KEY: privateKeyPem,
+          GATEWAY_JWT_PUBLIC_JWKS: JSON.stringify({ keys: publicKeys }),
           PORT: "0",
           HOST: "127.0.0.1",
         },
@@ -106,10 +111,7 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
       store,
       fetch: fetcher,
       environment: "development",
-      token: {
-        issuer: "test",
-        key: new TextEncoder().encode("public-test-key-at-least-thirty-two-bytes"),
-      },
+      token: signingIdentity,
     });
     try {
       await store.createWorkspace(workspace);

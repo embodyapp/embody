@@ -12,10 +12,19 @@ export {
   type CredentialWrite,
 } from "./store.js";
 export { createWorkspaceGateway, type WorkspaceGatewayOptions } from "./workspace.js";
+export { hostedSigningIdentity } from "./identity.js";
+export { cloudRunInvocationToken, type CloudRunInvocationOptions } from "./cloud-run.js";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { SignJWT, createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
+import {
+  SignJWT,
+  createRemoteJWKSet,
+  jwtVerify,
+  type JWTPayload,
+  type CryptoKey,
+  type JWK,
+} from "jose";
 import {
   BadRequestError,
   ConflictError,
@@ -311,10 +320,15 @@ export function oidcProvider(options: OidcProviderOptions): GatewayAuthProvider 
 }
 function principalClaims(claims: JWTPayload): Principal | null {
   const { orgId, actorId, actorType, roles, scopes } = claims;
+  // Default OIDC mapping does not accept caller-supplied delegation. A trusted custom mapper
+  // must explicitly authorize any upstream delegation contract.
+  if (claims["delegation"] !== undefined) return null;
   // `azp` (OIDC) or `client_id` (OAuth token exchange/introspection style) identify the client app.
   const client = typeof claims["azp"] === "string" ? claims["azp"] : claims["client_id"];
   return typeof orgId === "string" &&
+    orgId.length > 0 &&
     typeof actorId === "string" &&
+    actorId.length > 0 &&
     (actorType === "agent" || actorType === "human" || actorType === "system") &&
     Array.isArray(roles) &&
     roles.every((x) => typeof x === "string") &&
@@ -382,8 +396,11 @@ export function scopeAllows(principal: Principal, app: string, target: string): 
 }
 export interface GatewayTokenOptions {
   readonly issuer: string;
-  readonly key: Uint8Array;
+  readonly key: Uint8Array | CryptoKey;
+  /** ES256 is mandatory for the hosted profile; HS256 remains reference-only. */
+  readonly algorithm?: "HS256" | "ES256";
   readonly kid?: string;
+  readonly publicJwks?: { keys: readonly JWK[] };
   readonly clock?: Clock;
 }
 export async function issueGatewayToken(
@@ -392,9 +409,17 @@ export async function issueGatewayToken(
   requestId: string,
   options: GatewayTokenOptions,
 ): Promise<string> {
+  if (
+    options.algorithm === "ES256" &&
+    (options.key instanceof Uint8Array || options.key.type !== "private" || !options.kid)
+  )
+    throw new TypeError("ES256 requires a private signing key and kid");
   const now = Math.floor((options.clock ?? { now: () => new Date() }).now().getTime() / 1000);
   return new SignJWT({ ...principal, requestId })
-    .setProtectedHeader({ alg: "HS256", ...(options.kid ? { kid: options.kid } : {}) })
+    .setProtectedHeader({
+      alg: options.algorithm ?? "HS256",
+      ...(options.kid ? { kid: options.kid } : {}),
+    })
     .setIssuer(options.issuer)
     .setAudience(app)
     .setJti(randomUUID())
@@ -431,6 +456,8 @@ export interface GatewayOptions {
   readonly auth: AuthChain;
   readonly token: GatewayTokenOptions;
   readonly fetch?: typeof fetch;
+  /** Trusted platform invocation identity. Never derived from caller credentials. */
+  readonly invocationToken?: (origin: string) => Promise<string>;
   /** Defaults to an in-memory log; use `jsonLineAuditSink()` or a durable sink in production. */
   readonly audit?: AuditSink;
   readonly limiter?: FixedWindowRateLimiter;
@@ -530,6 +557,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       scoped,
     ).filter((entry) => scopeAllows(principal, entry.appId, entry.target));
   const dispatchDeps: DispatchDeps = {
+    ...(options.invocationToken ? { invocationToken: options.invocationToken } : {}),
     lookup: (appId) => {
       const registered = options.registry.get(appId);
       return registered
@@ -579,6 +607,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       const response = await fetcher(new URL("/execute/stream", prepared.endpoint), {
         method: "POST",
         signal,
+        redirect: "error",
         headers: prepared.headers,
         body: JSON.stringify({ protocolVersion: 1, target: entry.target, input }),
       });
@@ -715,6 +744,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     try {
       const response = await fetcher(new URL("/execute/stream", prepared.endpoint), {
         method: "POST",
+        redirect: "error",
         signal: controller.signal,
         headers: prepared.headers,
         body: JSON.stringify({ protocolVersion: 1, target, input: request.body }),
@@ -799,6 +829,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     try {
       const response = await fetcher(new URL("/execute", prepared.endpoint), {
         method: "POST",
+        redirect: "error",
         signal: controller.signal,
         headers: prepared.headers,
         body: JSON.stringify({ protocolVersion: 1, target, input: request.body }),
