@@ -1,5 +1,9 @@
 # M05 local candidate acceptance — 2026-10-11
 
+Historical `fae5169` implementation acceptance snapshot, before owner cloud authorization.
+Current access/budget/foundation progress is in [the foundation spike](./M05-foundation.md).
+The counts and missing-access statements below describe this candidate's original disposition.
+
 ## Exact implementation and CI
 
 - Draft PR: [#37](https://github.com/embodyapp/embody/pull/37), `feat/mvp-m05-identity`.

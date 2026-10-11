@@ -11,7 +11,8 @@ This is **local dirty-worktree development evidence**, not an exact committed ca
 independent review, remote merge, provider qualification or M05 completion. The SHA in
 JSON identifies the base; `dirty: true` explicitly identifies uncommitted implementation.
 Implementation is committed on `feat/mvp-m05-identity` in [draft PR#37](https://github.com/embodyapp/embody/pull/37).
-M05 is BLOCKED on approved cloud fixture/access/budget and real provider acceptance.
+Owner access and one-off budget are now authorized; M05 is IN_PROGRESS with
+[Terraform/GCS foundation work](./M05-foundation.md), still awaiting real runtime/provider acceptance.
 See [independent local acceptance](./M05-independent-review.md). The JSON in `M05-local`
 is historical dirty development evidence, not current candidate or provider proof.
 

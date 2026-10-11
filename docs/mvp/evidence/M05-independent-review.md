@@ -1,5 +1,9 @@
 # M05 independent local review — 2026-10-11
 
+Historical runtime/probe review snapshot. Owner subsequently supplied access/one-off budget;
+[current Terraform/GCS progress](./M05-foundation.md) does not change the lack of full live
+runtime IAM/SQL/ingress/rotation acceptance described here.
+
 Separate Claude Code read-only review sessions used only Read/Grep/Glob tools. Reviewers
 made no edits, ran no tests and contacted no cloud. Retained verbatim reports:
 

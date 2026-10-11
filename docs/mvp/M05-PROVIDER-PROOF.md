@@ -13,9 +13,11 @@ M05 cannot be marked DONE merely because these scripts or a role matrix exist.
 - Selected region, fixture resource prefix beginning `embody-test-`, cleanup owner/deadline.
 - Gateway/platform/app/migration/build/deployer identities matching [the role matrix](./IDENTITY.md).
 
-No such project/access/budget was configured in this development environment. Do not
-substitute an existing unrelated project, operator ADC or service-account impersonation
-for app runtime metadata evidence. Budget attestations are not hard spending caps.
+Owner has now authorized `embody-cloud`, operator gcloud access, aim $0 and one-off
+maximum $10 USD. [Terraform/GCS foundation spike](./evidence/M05-foundation.md) is applied;
+actual hosted fixture and runtime qualification are still pending. Do not substitute
+operator credentials, ADC or service-account impersonation for app runtime metadata
+evidence. Budget attestations are not hard spending caps; no monthly launch budget approved.
 
 ## Disposable fixture requirements
 
