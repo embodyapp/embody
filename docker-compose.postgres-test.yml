@@ -1,0 +1,16 @@
+# Disposable M03 verification only. Never use these public fixture credentials in production.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: fixture-only-bootstrap
+      POSTGRES_DB: postgres
+    ports: ["127.0.0.1:${EMBODY_POSTGRES_TEST_PORT:-55432}:5432"]
+    volumes:
+      - ./test/postgres/init.sql:/docker-entrypoint-initdb.d/10-isolated-apps.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 1s
+      timeout: 2s
+      retries: 30

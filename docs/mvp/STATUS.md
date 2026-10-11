@@ -1,6 +1,6 @@
 # Minimal hosted MVP status
 
-**Last updated: 2026-10-11. M01 and M02 are DONE: independent automated reviews accepted after fixes; combined candidate CI passed on Node 22/24, packed consumer and Docker E2E. No cloud verification claimed; M03's standalone PostgreSQL gate remains open.**
+**Last updated: 2026-10-11. M01–M03 are DONE with independent automated review and exact-candidate CI. M03 executes 91 mandatory DB/MVP cases with zero skips and clean packed/E2E baselines on Node 22/24. No cloud/provider or hosted release verification claimed.**
 
 Scope: [README](./README.md). Tasks and acceptance cases: [IMPLEMENTATION](./IMPLEMENTATION.md). Required evidence: [VERIFICATION](./VERIFICATION.md).
 
@@ -21,7 +21,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 |---|---|---|---|---|---|
 | M01 | Integrate/reconcile existing gateway work | — | DONE | pi | #33 merged; acceptance fixes in [#34](https://github.com/embodyapp/embody/pull/34); [independent review](./evidence/M01-independent-review-2026-10-11.md) accepted; [final evidence](./evidence/M01-integration.md); candidate CI `38131459302` passed |
 | M02 | Supported profile and deployment contracts | M01 | DONE | pi | [Contracts](./CONTRACTS.md), [evidence](./evidence/M02-2026-10-11.md); independent code/scope review accepted; [#34](https://github.com/embodyapp/embody/pull/34), candidate CI `38131459302`: Node 22/24 241 pass, 8 existing DB skips; 38 contract tests, zero skips |
-| M03 | Trustworthy DB, package and cloud test gates | M01 | NOT_STARTED | — | Dedicated Postgres CI wiring/skip behavior requires correction |
+| M03 | Trustworthy DB, package and cloud test gates | M01 | DONE | pi | [#35](https://github.com/embodyapp/embody/pull/35), [commands](./TESTING.md), [evidence](./evidence/M03-2026-10-11.md); independent review accepted; CI `38133604952`: mandatory DB/MVP 91 pass/zero skips, 12 runner negatives pass, clean Node 22/24 packed/E2E pass |
 | M04 | Durable workspace catalog and credentials | M02, M03 | NOT_STARTED | — | Reuse P15-05/P15-08 work if available |
 | M05 | App-bound identity and tenant isolation | M04 | NOT_STARTED | — | Asymmetric tokens and actual provider IAM proof pending |
 | M06 | Stateless MCP and supported client contract | M04, M05 | NOT_STARTED | — | Must verify per-request capability and idle behavior |
@@ -38,7 +38,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | M17 | Real zero-instance and centralized-control proof | M03–M16 | NOT_STARTED | — | Requires actual cloud/client evidence |
 | M18 | Candidate review and controlled release | M01–M17 | NOT_STARTED | — | Owner release decision required |
 
-**Completed implementation tasks: 2 / 18.** Existing framework code is a foundation, not proof these hosted acceptance cases have passed. Update this count when task states change.
+**Completed implementation tasks: 3 / 18.** Existing framework code is a foundation, not proof these hosted acceptance cases have passed. Update this count when task states change.
 
 ## Decision ledger
 
@@ -59,7 +59,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 
 | Gate | Required tasks | State | Evidence |
 |---|---|---|---|
-| G0: integrated baseline/contracts/tests | M01–M03 | NOT_EVALUATED | — |
+| G0: integrated baseline/contracts/tests | M01–M03 | PASSED | M01–M03 accepted; #33/#34/#35 evidence. Later release candidates must rerun exact integrated gates; no cloud/release approval. |
 | G1: secure persistent request-only gateway/runtime | M04–M09 | NOT_EVALUATED | — |
 | G2: user-operated deploy and management | M10–M15 | NOT_EVALUATED | — |
 | G3: recoverable operated candidate | M16 | NOT_EVALUATED | — |
@@ -79,5 +79,11 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 - 2026-10-11 — pi — M01 — IN_REVIEW → DONE — #33 / [#34](https://github.com/embodyapp/embody/pull/34) — independent automated review accepted after HTTP/MCP normalization/audit and stream-outcome fixes; exact combined candidate `bf74c4d6eee95607ba2c1b9a45065e85b35b50a3` [CI 38131459302](https://github.com/embodyapp/embody/actions/runs/38131459302) passed Node 22/24 quality, packed external consumer and actual Docker/PostgreSQL E2E. Integration/provenance reconciled. Standalone DB skips remain M03, not conformance evidence. Integrator acceptance under owner-directed completion; no human-review claim.
 
 - 2026-10-11 — pi — M02 — IN_REVIEW → DONE — [#34](https://github.com/embodyapp/embody/pull/34), candidate `bf74c4d` — independent code/scope review accepted after app-generation response, separate fence scopes, nested freeze and repository-test fixes; 38 contract tests passed, zero skips. Exact candidate CI Node 22/24: 241 passed, 8 existing optional DB skips each; packed consumer/E2E passed. v1 design defaults accepted by integrator; provider qualification, spending/customer-data approvals and real-store enforcement remain later tasks.
+
+- 2026-10-11 — pi — M03 — NOT_STARTED → IN_PROGRESS — `feat/mvp-m03-verification`, isolated `../embody-m03`, fast-forwarded to remote main `a2b5623` — mandatory PostgreSQL/runtime-role isolation, failure-path tests, MVP/cloud prerequisites, Node 22/24 packed/E2E evidence; no verification success yet claimed.
+
+- 2026-10-11 — pi — M03 — IN_PROGRESS → IN_REVIEW — `feat/mvp-m03-verification` — mandatory PostgreSQL fixture: 12 DB/kernel cases; contracts/gateway plus DB: 91 passed, zero skips; 12 runner failure/redaction regressions pass; Node 24 verify: 241 passed, 11 optional DB skips plus 12 runner cases. Independent automated review accepted after normalized-credential redaction and actual DB image evidence fixes. [Evidence](./evidence/M03-2026-10-11.md); exact committed-candidate CI and clean Node 22/24 packed/E2E still pending.
+
+- 2026-10-11 — pi — M03 — IN_REVIEW → DONE — [#35](https://github.com/embodyapp/embody/pull/35), head `8c7689d27a8b583fa89612a3e869a2b8f0f10469` — [CI 38133604952](https://github.com/embodyapp/embody/actions/runs/38133604952): actual DB/kernel 12 + contracts 38 + gateway 41 = 91 passed, zero required skips; 12 deliberate failure/redaction/budget cases passed; clean packed/distributed baselines passed on Node 22/24. Synthetic checkout `db1d389e` has identical implementation tree; sanitized image/version/count artifacts retained in evidence. Independent automated review and integrator acceptance; no human/provider/release approval claim. Local fixture cleaned. G0 passed, 3/18 tasks DONE.
 
 Append entries as: `date — owner — task — state transition — branch/PR — commands/result/evidence — review or blocker`.

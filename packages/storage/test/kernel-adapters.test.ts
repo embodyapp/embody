@@ -35,7 +35,9 @@ describe("kernel storage adapter integration", () => {
     await boots(new SqliteStorage({ filename: join(directory, "storage.sqlite") }));
   });
 
-  const connectionString = process.env["EMBODY_POSTGRES_URL"];
+  const connectionString = process.env["EMBODY_POSTGRES_URL"]?.trim() || undefined;
+  if (process.env["EMBODY_POSTGRES_REQUIRED"] === "true" && !connectionString)
+    throw new Error("Mandatory PostgreSQL adapter suite requires EMBODY_POSTGRES_URL");
   const postgres = connectionString === undefined ? it.skip : it;
   postgres("boots with a real PostgreSQL runtime-role adapter", async () => {
     const storage = new PostgresStorage({ connectionString });

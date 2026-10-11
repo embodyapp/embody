@@ -15,3 +15,5 @@ firebase.json
 .post.*
 .reddit*
 .try
+
+.artifacts/
