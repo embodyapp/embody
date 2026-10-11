@@ -10,7 +10,10 @@ No other branch/worktree was reset, rebased or overwritten.
 This is **local dirty-worktree development evidence**, not an exact committed candidate,
 independent review, remote merge, provider qualification or M05 completion. The SHA in
 JSON identifies the base; `dirty: true` explicitly identifies uncommitted implementation.
-M05 remains IN_PROGRESS pending the open gates below.
+Implementation is committed on `feat/mvp-m05-identity` in [draft PR#37](https://github.com/embodyapp/embody/pull/37).
+M05 is BLOCKED on approved cloud fixture/access/budget and real provider acceptance.
+See [independent local acceptance](./M05-independent-review.md). The JSON in `M05-local`
+is historical dirty development evidence, not current candidate or provider proof.
 
 ## Changes
 
@@ -36,7 +39,8 @@ M05 remains IN_PROGRESS pending the open gates below.
   cross-workspace/revocation cases continue executing under asymmetric signing.
 - Real gateway-to-host JWT round-trip uses the gateway public JWKS across HTTP/SSE/MCP;
   provider and principal headers stay separate on all three paths, and unauthorized
-  workspace requests cannot acquire provider tokens. Missing-kid, unsigned and array-
+  workspace requests cannot acquire provider tokens. Actual exported SQL role inspection
+  and CONNECT-stage classifier now run against real PostgreSQL within mandatory store coverage. Missing-kid, unsigned and array-
   audience negatives added; unknown-ID JWKS refresh has a one-second cooldown.
 - Targeted runtime-metadata IAM/SQL and private-invocation probes plus six local fail-closed
   runner tests; [live procedure](../M05-PROVIDER-PROOF.md). No provider evidence claimed.
@@ -86,11 +90,10 @@ base SHA/dirty flag, lockfile/schema hashes and actual image identities.
   catalog/action/MCP cases pass. **Private provider ingress remains unproven.** Logs,
   source and secret APIs have not landed and are not claimed complete/authorized.
 
-Independent read-only automated review found no critical local security defect and
-conditionally accepted local code, requiring documentation/evidence consistency and final
-candidate reruns. Suggested metadata clock-skew, round-trip/header-path and algorithm/kid
-coverage hardening is implemented. Review did **not** accept M05 DONE without live proof.
-A final review and exact candidate CI are still pending at this development snapshot.
+[Independent local review](./M05-independent-review.md) accepted runtime code and, after
+false-green/parser hardening and actual PostgreSQL regression, qualification tooling.
+Review did **not** accept M05 DONE without live proof. Initial clean candidate CI passed
+all eight checks on Node22/24; the final probe-hardening candidate must rerun exact CI.
 
 Before DONE: committed-candidate independent security/scope review, Node 22/24 CI and
 packed/E2E evidence; approved cloud project/budget and distinct provider identities;

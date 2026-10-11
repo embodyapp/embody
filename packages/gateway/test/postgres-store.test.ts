@@ -175,6 +175,36 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
     one.pathname = platform.pathname;
     const two = new URL(platform);
     two.pathname = app.pathname;
+    // Exercise the production probe's SQL inspection/parser and CONNECT-stage classifier,
+    // not only an injected tagged error. No metadata/cloud request is made by this child.
+    const probe = await promisify(execFile)(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import assert from 'node:assert/strict';
+      import { Client } from 'pg';
+      import { createRuntimeSqlProbe } from '../../scripts/probe-m05-runtime.mjs';
+      const sql = createRuntimeSqlProbe(Client);
+      const own = new URL(process.env.EMBODY_POSTGRES_URL);
+      const role = decodeURIComponent(own.username);
+      await sql(own.href, role, 'inspect');
+      const platform = new URL(own);
+      platform.pathname = new URL(process.env.EMBODY_PLATFORM_URL).pathname;
+      await assert.rejects(sql(platform.href, role, 'connect-only'), error => error.code === '42501' && error.stage === 'connect');
+      const migration = new URL(process.env.EMBODY_POSTGRES_MIGRATION_URL);
+      await assert.rejects(sql(migration.href, decodeURIComponent(migration.username), 'inspect'), /elevated or mismatched/);
+      console.log(JSON.stringify({ ownRole: 'restricted', platformConnect: 'denied', elevatedMigrator: 'rejected' }));
+    `,
+      ],
+      { cwd: import.meta.dirname + "/..", env: process.env },
+    );
+    expect(JSON.parse(probe.stdout)).toEqual({
+      ownRole: "restricted",
+      platformConnect: "denied",
+      elevatedMigrator: "rejected",
+    });
     for (const connectionString of [one.href, two.href]) {
       const pool = new Pool({ connectionString });
       try {

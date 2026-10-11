@@ -2,7 +2,7 @@
 import { readFile, mkdir, writeFile, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL, URL } from "node:url";
-import { validateRuntimeProbe } from "./probe-m05-runtime.mjs";
+import { validateRuntimeProbe, fixtureConfigDigest } from "./probe-m05-runtime.mjs";
 
 const { fetch, AbortSignal } = globalThis;
 export async function probePrivateInvocation(
@@ -39,6 +39,10 @@ export async function probePrivateInvocation(
   if ((await health({ "x-gateway-auth": `Bearer ${principalToken}` })).status !== 403)
     throw new Error("Leaked Embody principal token bypasses private provider invocation");
   checks.push("principal-token-without-provider-identity-denied");
+  const confused = await health({ authorization: `Bearer ${principalToken}` });
+  if (confused.status !== 401 && confused.status !== 403)
+    throw new Error("Embody principal token accepted as provider identity");
+  checks.push("principal-token-as-provider-identity-denied");
   const provider = await invocationToken(origin.origin);
   const response = await health({
     authorization: `Bearer ${provider}`,
@@ -50,6 +54,22 @@ export async function probePrivateInvocation(
   if (result.appId !== config.appAudience || result.live !== true || result.ready !== true)
     throw new Error("Gateway invoked the wrong or unready fixture app");
   checks.push("gateway-workload-invocation-positive-control");
+  const otherProvider = await invocationToken(config.otherAppOrigin);
+  const other = await fetcher(new URL("/health", config.otherAppOrigin), {
+    method: "GET",
+    headers: { authorization: `Bearer ${otherProvider}` },
+    redirect: "error",
+    signal: AbortSignal.timeout(5000),
+  });
+  if (other.status !== 200) throw new Error("Other app gateway positive control failed");
+  const otherHealth = await other.json();
+  if (
+    otherHealth.appId !== config.otherAppAudience ||
+    otherHealth.live !== true ||
+    otherHealth.ready !== true
+  )
+    throw new Error("Other app fixture identity/ready positive control failed");
+  checks.push("other-app-gateway-invocation-positive-control");
   return {
     gate: "m05-private-invocation",
     status: "passed",
@@ -58,6 +78,8 @@ export async function probePrivateInvocation(
     resourcePrefix: config.prefix,
     gatewayIdentity: config.gateway,
     appOrigin: config.appOrigin,
+    appOrigins: [config.appOrigin, config.otherAppOrigin],
+    fixtureConfigSha256: fixtureConfigDigest(config),
     checks,
   };
 }

@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { pathToFileURL, URL } from "node:url";
 import { Buffer } from "node:buffer";
 import { dirname, resolve } from "node:path";
+import { createHash } from "node:crypto";
 
 const { fetch, AbortSignal } = globalThis;
 const metadata =
@@ -14,19 +15,23 @@ export function validateRuntimeProbe(config) {
     !config ||
     !/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(config.project ?? "") ||
     !/^embody-test-[a-z0-9-]+$/.test(config.prefix ?? "") ||
-    !/^[a-f0-9]{40}$/.test(config.candidateSha ?? "")
+    !/^[a-f0-9]{40}$/.test(config.candidateSha ?? "") ||
+    config.candidateSha === "0".repeat(40)
   )
     throw new Error("Runtime probe requires a dedicated test project/prefix and candidate SHA");
-  for (const name of ["runtime", "gateway"]) {
+  const identityFields = ["runtime", "gateway", "builder", "deployer", "migrator", "otherRuntime"];
+  for (const name of identityFields) {
     if (
       typeof config[name] !== "string" ||
-      !config[name].startsWith(`${config.prefix}-`) ||
-      !config[name].endsWith(`@${config.project}.iam.gserviceaccount.com`)
+      !new RegExp(
+        `^${config.prefix}-[a-z0-9-]+@${config.project}\\.iam\\.gserviceaccount\\.com$`,
+      ).test(config[name]) ||
+      config[name].split("@")[0].length > 30
     )
       throw new Error("Runtime probe service accounts must be dedicated project fixtures");
   }
-  if (config.runtime === config.gateway)
-    throw new Error("Runtime and gateway identities must differ");
+  if (new Set(identityFields.map((field) => config[field])).size !== identityFields.length)
+    throw new Error("All fixture workload identities must differ");
   if (!/^[a-z]+-[a-z]+[0-9]{1,2}$/.test(config.region ?? ""))
     throw new Error("Runtime probe requires a fixture region");
   const services = [config.ownService, config.gatewayService, config.otherService];
@@ -40,6 +45,32 @@ export function validateRuntimeProbe(config) {
     )
   )
     throw new Error("Runtime probe requires distinct fixture service resources");
+  if (
+    typeof config.artifactRepository !== "string" ||
+    !config.artifactRepository.startsWith(`${config.prefix}-`) ||
+    !/^[a-z0-9-]+$/.test(config.artifactRepository)
+  )
+    throw new Error("Runtime probe requires the fixture builder artifact repository");
+  for (const [field, service] of [
+    ["appOrigin", config.ownService],
+    ["otherAppOrigin", config.otherService],
+  ]) {
+    const url = new URL(config[field]);
+    if (
+      url.origin !== config[field] ||
+      url.protocol !== "https:" ||
+      !url.hostname.endsWith(".run.app") ||
+      !url.hostname.startsWith(`${service}-`)
+    )
+      throw new Error("Runtime probe requires the actual fixture service origins");
+  }
+  if (
+    config.appOrigin === config.otherAppOrigin ||
+    !/^[a-z][a-z0-9_-]+$/.test(config.appAudience ?? "") ||
+    !/^[a-z][a-z0-9_-]+$/.test(config.otherAppAudience ?? "") ||
+    config.appAudience === config.otherAppAudience
+  )
+    throw new Error("Runtime probe requires distinct fixture app origins and audiences");
   if (!/^ws_[a-z0-9]{8,64}$/.test(config.workspaceId ?? ""))
     throw new Error("Runtime probe requires the provisioned fixture workspace");
   const secrets = [
@@ -69,6 +100,16 @@ export function validateRuntimeProbe(config) {
   return config;
 }
 
+export function fixtureConfigDigest(config) {
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        Object.fromEntries(Object.entries(config).sort(([a], [b]) => a.localeCompare(b))),
+      ),
+    )
+    .digest("hex");
+}
+
 export function assertRuntimeSqlRole(row, role) {
   if (
     !row ||
@@ -77,6 +118,7 @@ export function assertRuntimeSqlRole(row, role) {
     row.rolbypassrls !== false ||
     row.rolcreatedb !== false ||
     row.rolcreaterole !== false ||
+    row.rolreplication !== false ||
     row.can_create_database_objects !== false ||
     row.can_create_public_objects !== false ||
     row.owns_objects !== false ||
@@ -146,41 +188,119 @@ export async function probeRuntimeIsolation(config, { fetch: fetcher = fetch, sq
     if (response.status !== 403) throw new Error(`${label}: expected permission denial`);
     checks.push(label);
   }
-  const permissions = ["run.services.create", "run.services.update", "cloudbuild.builds.create"];
-  const policy = await request(
-    `https://cloudresourcemanager.googleapis.com/v1/projects/${config.project}:testIamPermissions`,
-    {
+  const noPermissions = async (url, permissions) => {
+    const response = await request(url, {
       method: "POST",
       headers,
       body: JSON.stringify({ permissions }),
+    });
+    if (response.status !== 200) throw new Error("Effective permission query unavailable");
+    const body = await response.json();
+    // Google protobuf JSON omits an empty repeated permissions field. Reject every other shape.
+    if (
+      !body ||
+      Array.isArray(body) ||
+      typeof body !== "object" ||
+      Object.keys(body).some((key) => key !== "permissions") ||
+      (body.permissions !== undefined &&
+        (!Array.isArray(body.permissions) || body.permissions.length !== 0))
+    )
+      throw new Error("Runtime has prohibited permissions or invalid permission response");
+  };
+  const ownPolicy = await request(
+    `https://secretmanager.googleapis.com/v1/projects/${config.project}/secrets/${config.ownDatabaseSecret}:testIamPermissions`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        permissions: [
+          "secretmanager.versions.access",
+          "secretmanager.versions.add",
+          "secretmanager.secrets.setIamPolicy",
+          "secretmanager.secrets.update",
+        ],
+      }),
     },
   );
-  if (policy.status !== 200) throw new Error("Deployment/build effective-permission query failed");
-  const result = await policy.json();
   if (
-    result.permissions !== undefined &&
-    (!Array.isArray(result.permissions) || result.permissions.length !== 0)
+    ownPolicy.status !== 200 ||
+    JSON.stringify((await ownPolicy.json()).permissions) !== '["secretmanager.versions.access"]'
   )
-    throw new Error("Runtime has deployment/build permissions");
+    throw new Error("Own-secret effective-permission positive control failed");
+  checks.push("effective-permission-positive-control");
+  for (const name of [config.platformDatabaseSecret, config.otherAppSecret, config.signingSecret]) {
+    await noPermissions(
+      `https://secretmanager.googleapis.com/v1/projects/${config.project}/secrets/${name}:testIamPermissions`,
+      [
+        "secretmanager.versions.access",
+        "secretmanager.versions.add",
+        "secretmanager.secrets.setIamPolicy",
+        "secretmanager.secrets.update",
+      ],
+    );
+  }
+  checks.push("foreign-secret-version-policy-and-write-denied");
+  const permissions = [
+    "run.services.create",
+    "run.services.update",
+    "run.services.delete",
+    "run.services.setIamPolicy",
+    "run.jobs.create",
+    "run.jobs.run",
+    "run.jobs.runWithOverrides",
+    "cloudbuild.builds.create",
+    "iam.serviceAccounts.actAs",
+    "iam.serviceAccountKeys.create",
+    "resourcemanager.projects.setIamPolicy",
+    "secretmanager.versions.access",
+    "secretmanager.versions.add",
+    "secretmanager.secrets.setIamPolicy",
+    "secretmanager.secrets.update",
+    "cloudsql.instances.update",
+    "cloudsql.users.create",
+    "cloudsql.users.update",
+    "cloudsql.databases.create",
+    "artifactregistry.repositories.uploadArtifacts",
+    "logging.logEntries.list",
+  ];
+  await noPermissions(
+    `https://cloudresourcemanager.googleapis.com/v1/projects/${config.project}:testIamPermissions`,
+    permissions,
+  );
   checks.push("deployment-and-build-denied");
   for (const service of [config.ownService, config.gatewayService, config.otherService]) {
-    const response = await request(
+    await noPermissions(
       `https://run.googleapis.com/v2/projects/${config.project}/locations/${config.region}/services/${service}:testIamPermissions`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ permissions: ["run.services.update", "run.services.setIamPolicy"] }),
-      },
+      [
+        "run.services.update",
+        "run.services.delete",
+        "run.services.setIamPolicy",
+        "run.routes.invoke",
+      ],
     );
-    if (response.status !== 200) throw new Error("Service effective-permission query failed");
-    const result = await response.json();
-    if (
-      result.permissions !== undefined &&
-      (!Array.isArray(result.permissions) || result.permissions.length !== 0)
-    )
-      throw new Error("Runtime has service-scoped deployment/IAM permissions");
   }
   checks.push("service-scoped-deployment-and-iam-denied");
+  await noPermissions(
+    `https://artifactregistry.googleapis.com/v1/projects/${config.project}/locations/${config.region}/repositories/${config.artifactRepository}:testIamPermissions`,
+    ["artifactregistry.repositories.uploadArtifacts", "artifactregistry.repositories.setIamPolicy"],
+  );
+  checks.push("builder-artifact-write-denied");
+  for (const field of ["runtime", "gateway", "builder", "deployer", "migrator", "otherRuntime"]) {
+    await noPermissions(
+      `https://iam.googleapis.com/v1/projects/-/serviceAccounts/${config[field]}:testIamPermissions`,
+      [
+        "iam.serviceAccounts.getAccessToken",
+        "iam.serviceAccounts.getOpenIdToken",
+        "iam.serviceAccounts.implicitDelegation",
+        "iam.serviceAccounts.signJwt",
+        "iam.serviceAccounts.signBlob",
+        "iam.serviceAccounts.actAs",
+        "iam.serviceAccountKeys.create",
+        "iam.serviceAccounts.setIamPolicy",
+      ],
+    );
+  }
+  checks.push("workload-impersonation-signing-and-actas-denied");
   const impersonation = await request(
     `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${config.gateway}:generateAccessToken`,
     {
@@ -192,11 +312,46 @@ export async function probeRuntimeIsolation(config, { fetch: fetcher = fetch, sq
       }),
     },
   );
-  if (impersonation.status !== 403)
-    throw new Error("Gateway impersonation: expected permission denial");
+  const denied = impersonation.status === 403 ? await impersonation.json() : undefined;
+  if (
+    denied?.error?.status !== "PERMISSION_DENIED" ||
+    !denied.error.details?.some(
+      (detail) =>
+        detail.reason === "IAM_PERMISSION_DENIED" &&
+        detail.metadata?.permission === "iam.serviceAccounts.getAccessToken",
+    )
+  )
+    throw new Error(
+      "Gateway impersonation: actual IAM permission denial required, not a disabled API",
+    );
   checks.push("gateway-impersonation-denied");
   if (typeof sql !== "function") throw new Error("Real SQL probe dependency required");
-  await sql(ownDsn, config.databaseRole);
+  for (const origin of [config.appOrigin, config.otherAppOrigin]) {
+    const idToken = await (
+      await metadataRequest(`identity?audience=${encodeURIComponent(origin)}&format=full`)
+    ).text();
+    let claims;
+    try {
+      claims = JSON.parse(Buffer.from(idToken.split(".")[1], "base64url").toString("utf8"));
+    } catch {
+      throw new Error("Runtime metadata ID token invalid");
+    }
+    if (
+      claims.aud !== origin ||
+      claims.email !== config.runtime ||
+      claims.email_verified !== true ||
+      !["accounts.google.com", "https://accounts.google.com"].includes(claims.iss) ||
+      !(claims.exp > Date.now() / 1000)
+    )
+      throw new Error("Runtime metadata ID token identity/audience invalid");
+    const response = await request(new URL("/health", origin), {
+      headers: { authorization: `Bearer ${idToken}` },
+    });
+    if (response.status !== 403)
+      throw new Error("Non-gateway authenticated app invocation not denied");
+  }
+  checks.push("non-gateway-authenticated-own-and-other-app-invocation-denied");
+  await sql(ownDsn, config.databaseRole, "inspect");
   checks.push("own-database-least-privilege-positive-control");
   for (const [label, name] of [
     ["platform-database-connect-denied", config.platformDatabase],
@@ -205,9 +360,10 @@ export async function probeRuntimeIsolation(config, { fetch: fetcher = fetch, sq
     const target = new URL(ownDsn);
     target.pathname = `/${name}`;
     try {
-      await sql(target.href, config.databaseRole);
+      await sql(target.href, config.databaseRole, "connect-only");
     } catch (error) {
-      if (error?.code !== "42501") throw new Error(`${label}: not a PostgreSQL permission denial`);
+      if (error?.code !== "42501" || error?.stage !== "connect")
+        throw new Error(`${label}: not a PostgreSQL CONNECT permission denial`);
       checks.push(label);
       continue;
     }
@@ -220,7 +376,49 @@ export async function probeRuntimeIsolation(config, { fetch: fetcher = fetch, sq
     project: config.project,
     resourcePrefix: config.prefix,
     runtimeIdentity: identity,
+    fixtureConfigSha256: fixtureConfigDigest(config),
+    appOrigins: [config.appOrigin, config.otherAppOrigin],
     checks,
+  };
+}
+
+export function createRuntimeSqlProbe(Client) {
+  return async (connectionString, role, mode) => {
+    const client = new Client({
+      connectionString,
+      connectionTimeoutMillis: 5000,
+      query_timeout: 5000,
+    });
+    try {
+      try {
+        await client.connect();
+      } catch (error) {
+        if (
+          error.code === "42501" &&
+          error.severity === "FATAL" &&
+          /permission denied for database/i.test(error.message)
+        )
+          throw Object.assign(new Error("Runtime database CONNECT denied"), {
+            code: "42501",
+            stage: "connect",
+          });
+        throw error;
+      }
+      if (mode === "connect-only") return;
+      const result = await client.query(`
+        SELECT current_user AS name, rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, rolreplication,
+          has_database_privilege(current_user, current_database(), 'CREATE') AS can_create_database_objects,
+          has_schema_privilege(current_user, 'public', 'CREATE') AS can_create_public_objects,
+          (EXISTS (SELECT 1 FROM pg_class WHERE relowner = r.oid) OR
+           EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = r.oid)) AS owns_objects,
+          ARRAY(SELECT granted.rolname::text FROM pg_roles granted
+                WHERE granted.rolname <> current_user AND pg_has_role(current_user, granted.oid, 'MEMBER')) AS memberships
+        FROM pg_roles r WHERE rolname = current_user
+      `);
+      assertRuntimeSqlRole(result.rows[0], role);
+    } finally {
+      await client.end();
+    }
   };
 }
 
@@ -230,7 +428,6 @@ async function main() {
     "m05-runtime-isolation.json",
   );
   await rm(path, { force: true });
-  // Read-only tests still need explicit authorization and fixture boundaries.
   if (
     process.env.EMBODY_MVP_CLOUD_BUDGET_APPROVED !== "true" ||
     !Number.isFinite(Number(process.env.EMBODY_MVP_CLOUD_BUDGET_USD)) ||
@@ -248,29 +445,7 @@ async function main() {
     throw new Error("Runtime probe config does not match approved project/prefix");
   const require = createRequire(new URL("../packages/gateway/package.json", import.meta.url));
   const { Client } = require("pg");
-  const sql = async (connectionString, role) => {
-    const client = new Client({
-      connectionString,
-      connectionTimeoutMillis: 5000,
-      query_timeout: 5000,
-    });
-    try {
-      await client.connect();
-      const result = await client.query(`
-        SELECT current_user AS name, rolsuper, rolbypassrls, rolcreatedb, rolcreaterole,
-          has_database_privilege(current_user, current_database(), 'CREATE') AS can_create_database_objects,
-          has_schema_privilege(current_user, 'public', 'CREATE') AS can_create_public_objects,
-          (EXISTS (SELECT 1 FROM pg_class WHERE relowner = r.oid) OR
-           EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = r.oid)) AS owns_objects,
-          ARRAY(SELECT granted.rolname FROM pg_roles granted
-                WHERE granted.rolname <> current_user AND pg_has_role(current_user, granted.oid, 'MEMBER')) AS memberships
-        FROM pg_roles r WHERE rolname = current_user
-      `);
-      assertRuntimeSqlRole(result.rows[0], role);
-    } finally {
-      await client.end();
-    }
-  };
+  const sql = createRuntimeSqlProbe(Client);
   const report = await probeRuntimeIsolation(config, { sql });
   await mkdir(dirname(path), { recursive: true });
   await writeFile(

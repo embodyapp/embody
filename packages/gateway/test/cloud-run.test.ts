@@ -89,9 +89,9 @@ it("rejects wrong identity/audience/lifetime, missing metadata flavor, unsafe or
   for (const unsafe of [
     "http://app.example",
     "https://custom-domain.example",
-    "https://app.example/path",
-    "https://user:pass@app.example",
-    "https://app.example/?query=1",
+    "https://admitted-app.a.run.app/path",
+    "https://user:pass@admitted-app.a.run.app",
+    "https://admitted-app.a.run.app/?query=1",
   ])
     await expect(invoke(unsafe)).rejects.toThrow("HTTPS origin");
   expect(fetcher).not.toHaveBeenCalled();

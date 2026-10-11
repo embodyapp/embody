@@ -3,7 +3,7 @@ import { generateKeyPair, exportJWK, SignJWT } from "jose";
 import { expect, it, vi } from "vitest";
 import type { Kernel } from "@embody/core";
 import { gatewayJwtVerifier } from "@embody/auth";
-import { createHost, parseAppEnvironment } from "../src/index.js";
+import { createHost, createAppHost, parseAppEnvironment } from "../src/index.js";
 
 it("host HTTP and streaming paths reject workspace, app, delegation and unsigned callers before execution", async () => {
   const pair = await generateKeyPair("ES256");
@@ -85,7 +85,7 @@ it("host HTTP and streaming paths reject workspace, app, delegation and unsigned
   }
 });
 
-it("hosted environment rejects shared signing secrets, non-production, missing workspace and insecure JWKS", () => {
+it("hosted environment rejects shared signing secrets, non-production, missing workspace and insecure JWKS", async () => {
   const env = {
     NODE_ENV: "production",
     EMBODY_HOST_PROFILE: "hosted",
@@ -95,6 +95,15 @@ it("hosted environment rejects shared signing secrets, non-production, missing w
     GATEWAY_JWKS_URL: "https://gateway.example/.well-known/jwks.json",
   };
   expect(parseAppEnvironment(env).EMBODY_WORKSPACE_ID).toBe("ws_workspace0001");
+  await expect(
+    createAppHost(
+      { appId: "kanban", version: "1", plugins: [] },
+      {
+        env,
+        verifier: { id: "injected", verify: () => Promise.reject(new Error("must not run")) },
+      },
+    ),
+  ).rejects.toThrow("cannot be overridden");
   for (const override of [
     { GATEWAY_JWT_SECRET: "private-secret-must-not-reach-runtime" },
     { GATEWAY_JWT_PRIVATE_KEY: "private-material" },
