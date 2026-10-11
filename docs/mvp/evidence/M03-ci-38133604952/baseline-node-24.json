@@ -1,0 +1,31 @@
+{
+  "gate": "baseline",
+  "status": "passed",
+  "timestamp": "2026-10-11T10:57:35.735Z",
+  "commit": "db1d389e5d3f6869dab448a636bb90bc1c1ae8a9",
+  "dirty": false,
+  "node": "v24.21.0",
+  "lockfileSha256": "c1b8bbede8e35aeeab06fc72ca30808c44b51b32e85c8be007202618b319b18f",
+  "schemaSourceSha256": "5b9f98f62202e5aa3c154a6d6e5487cd6198da4703e6638b4a1413c951b0b5e6",
+  "postgresFixtureSha256": "099a0447d52515934d97ee46c75e953c54ca158cd50511c1eeffac19d5e76235",
+  "counts": {
+    "packedConsumerJourneys": 1,
+    "distributedJourneys": 1,
+    "failed": 0,
+    "skipped": 0
+  },
+  "images": [
+    {
+      "name": "embody-e2e-apps",
+      "id": "sha256:0f03d60fc862cb69e50db8fcf2b5f4d51f2d825b09479bae7dfa7a728fa13977",
+      "repoDigests": []
+    },
+    {
+      "name": "postgres:16-alpine",
+      "id": "sha256:81bd698b4594e751a3269e4dcd3e03a4a0ec0daf7b72e7aa1abd43cce9887542",
+      "repoDigests": [
+        "postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea"
+      ]
+    }
+  ]
+}

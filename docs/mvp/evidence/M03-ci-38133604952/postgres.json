@@ -1,0 +1,27 @@
+{
+  "gate": "postgres",
+  "status": "passed",
+  "timestamp": "2026-10-11T10:55:02.054Z",
+  "commit": "db1d389e5d3f6869dab448a636bb90bc1c1ae8a9",
+  "dirty": false,
+  "node": "v22.23.3",
+  "lockfileSha256": "c1b8bbede8e35aeeab06fc72ca30808c44b51b32e85c8be007202618b319b18f",
+  "schemaSourceSha256": "5b9f98f62202e5aa3c154a6d6e5487cd6198da4703e6638b4a1413c951b0b5e6",
+  "postgresFixtureSha256": "099a0447d52515934d97ee46c75e953c54ca158cd50511c1eeffac19d5e76235",
+  "counts": {
+    "passed": 12,
+    "failed": 0,
+    "skipped": 0
+  },
+  "images": [
+    {
+      "name": "postgres-service",
+      "id": "sha256:275447c94b11b151decd1f29877965301d5a77032037c46de93d990f739f00a9",
+      "repoDigests": [
+        "postgres@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d"
+      ],
+      "containerId": "2287a270f4d79e49548fec341e2c955ad2761c5775ea52130aa231ae89820c9a"
+    }
+  ],
+  "postgresVersion": 160015
+}
