@@ -19,8 +19,6 @@ import { DirectEventTransport, type EventDestination, type EventDirectory } from
 import {
   DispatchRateLimitedError,
   MemoryAuditLog,
-  SseFrameDecoder,
-  interpretFrame,
   parseErrorEnvelope,
   parseExecutionStream,
   prepareDispatch,
@@ -580,7 +578,9 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         errorCode = undefined;
         throw error;
       }
-      yield mcpError(publicErrorFrom(error, requestId));
+      const publicError = publicErrorFrom(error, requestId);
+      errorCode = publicError.code;
+      yield mcpError(publicError);
     } finally {
       if (signal.aborted && outcome !== "success") {
         outcome = "cancelled";
@@ -594,7 +594,35 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     app.log.warn(
       "mcp.actor 'token' is deprecated: MCP calls keep the credential's actor type, so agent-only guardrails do not apply to human credentials",
     );
-  const mcp = new McpHttpHandler<Principal>({ catalog: catalogFor, execute: remoteEvents });
+  const mcp = new McpHttpHandler<Principal>({
+    catalog: catalogFor,
+    execute: remoteEvents,
+    rejectTool: (principal, name, scopedAppId) => {
+      const requestId = randomUUID();
+      const entry = createMcpCatalog(
+        options.registry.snapshot().map((app) => ({ appId: app.appId, manifest: app.manifest })),
+        scopedAppId,
+      ).find((candidate) => candidate.tool.name === name);
+      audit.append({
+        requestId,
+        orgId: principal.orgId,
+        actorId: principal.actorId,
+        ...(entry ? { appId: entry.appId, target: entry.target } : {}),
+        ...(principal.delegation
+          ? {
+              subjectId: principal.delegation.subjectId,
+              ...(principal.delegation.client ? { client: principal.delegation.client } : {}),
+            }
+          : {}),
+        surface: "mcp",
+        outcome: "failure",
+        errorCode: "FORBIDDEN",
+        durationMs: 0,
+      });
+      // Identical public response for nonexistent and unauthorized tools: no catalog oracle.
+      return { code: "FORBIDDEN", message: "Tool not found or no longer authorized", requestId };
+    },
+  });
   const authenticateSurface = async (
     request: FastifyRequest,
     reply: FastifyReply,
@@ -643,6 +671,10 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       dispatchDeps,
     );
     const controller = new AbortController();
+    const clientClosed = () => {
+      if (!reply.raw.writableEnded) controller.abort();
+    };
+    reply.raw.once("close", clientClosed);
     request.raw.once("aborted", () => controller.abort());
     let outcome: AuditOutcome = "failure";
     let errorCode: PublicError["code"] | undefined = "INTERNAL_ERROR";
@@ -656,9 +688,10 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       });
       if (!response.ok || !response.body) {
         const body: unknown = await response.json().catch(() => undefined);
-        errorCode = parseErrorEnvelope(body, requestId).code;
-        reply.status(response.status);
-        return body;
+        const error = parseErrorEnvelope(body, requestId);
+        errorCode = error.code;
+        reply.status(response.ok ? 502 : response.status);
+        return { error };
       }
       reply.hijack();
       hijacked = true;
@@ -668,43 +701,53 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         connection: "keep-alive",
         "x-request-id": requestId,
       });
-      // Bytes are relayed unchanged; the tap only observes the terminal event for audit.
-      const tap = new SseFrameDecoder();
-      let tapping = true;
-      try {
-        for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
-          if (tapping) {
-            try {
-              for (const frame of tap.push(chunk)) {
-                const event = interpretFrame(frame, requestId);
-                if (event?.type === "result") {
-                  outcome = "success";
-                  errorCode = undefined;
-                } else if (event?.type === "error") errorCode = event.error.code;
-              }
-            } catch {
-              tapping = false;
-            }
-          }
-          if (!reply.raw.write(chunk))
-            await new Promise<void>((resolve) => {
-              reply.raw.once("drain", resolve);
-              reply.raw.once("close", resolve);
-            });
-        }
-      } finally {
-        controller.abort();
-        reply.raw.end();
+      // Use the same bounded parser and public errors as MCP; never relay raw host errors.
+      for await (const event of parseExecutionStream(response.body, requestId)) {
+        if (event.type === "result") {
+          outcome = "success";
+          errorCode = undefined;
+        } else if (event.type === "error") errorCode = event.error.code;
+        const data =
+          event.type === "progress"
+            ? event.update
+            : event.type === "result"
+              ? event.value
+              : { error: event.error };
+        if (!reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify(data)}\n\n`))
+          await new Promise<void>((resolve) => {
+            const done = () => {
+              reply.raw.off("drain", done);
+              reply.raw.off("close", done);
+              resolve();
+            };
+            reply.raw.once("drain", done);
+            reply.raw.once("close", done);
+          });
+        if (controller.signal.aborted) break;
       }
       return undefined;
     } catch (error) {
       if (controller.signal.aborted && outcome !== "success") {
         outcome = "cancelled";
         errorCode = undefined;
-      } else if (!hijacked) errorCode = publicErrorFrom(error, requestId).code;
-      if (hijacked) return undefined;
+      } else errorCode = publicErrorFrom(error, requestId).code;
+      if (hijacked) {
+        if (!controller.signal.aborted && !reply.raw.destroyed)
+          reply.raw.write(
+            `event: error\ndata: ${JSON.stringify({ error: publicErrorFrom(error, requestId) })}\n\n`,
+          );
+        return undefined;
+      }
       throw error;
     } finally {
+      if (controller.signal.aborted && outcome !== "success") {
+        outcome = "cancelled";
+        errorCode = undefined;
+      }
+      reply.raw.off("close", clientClosed);
+      if (hijacked) reply.raw.end();
+      // Cleanup abort must not change failure into a client cancellation.
+      controller.abort();
       prepared.finish({ outcome, ...(errorCode === undefined ? {} : { errorCode }) });
     }
   });
@@ -727,12 +770,19 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         headers: prepared.headers,
         body: JSON.stringify({ protocolVersion: 1, target, input: request.body }),
       });
-      const body: unknown = await response.json();
+      // Malformed successful JSON is a transport failure, never an audited success.
+      const body: unknown = response.ok
+        ? await response.json()
+        : await response.json().catch(() => undefined);
       reply.status(response.status);
       if (response.ok) {
         outcome = "success";
         errorCode = undefined;
-      } else errorCode = parseErrorEnvelope(body, requestId).code;
+      } else {
+        const error = parseErrorEnvelope(body, requestId);
+        errorCode = error.code;
+        return { error };
+      }
       return body;
     } catch (error) {
       if (controller.signal.aborted) {

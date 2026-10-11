@@ -98,6 +98,7 @@ export function parseErrorEnvelope(value: unknown, requestId: string): PublicErr
   };
   if (typeof code !== "string" || !ERROR_CODES.has(code) || typeof message !== "string")
     return internalError(requestId);
+  if (code === "INTERNAL_ERROR") return internalError(requestId);
   const parsedIssues = issues(details);
   return {
     code: code as EmbodyErrorCode,
@@ -174,7 +175,7 @@ export function interpretFrame(
     return {
       type: "progress",
       update: {
-        message: update.message,
+        message: sanitizeText(update.message),
         ...(typeof update.percent === "number" ? { percent: update.percent } : {}),
       },
     };
@@ -205,7 +206,10 @@ export async function* parseExecutionStream(
         if (event.type !== "progress") return;
       }
     }
+    yield { type: "error", error: internalError(requestId) };
   } finally {
+    // Stop reading at the first terminal frame, including malformed/oversized streams.
+    await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }

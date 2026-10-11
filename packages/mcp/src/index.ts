@@ -115,6 +115,8 @@ export function mcpResult(value: unknown): CallToolResult {
 }
 
 export interface McpHttpOptions<TContext> {
+  /** Audit a rejected call without exposing entries omitted from the caller's catalog. */
+  readonly rejectTool?: (context: TContext, name: string, scopedAppId?: string) => McpErrorDetails;
   readonly catalog: (context: TContext, scopedAppId?: string) => readonly McpCatalogEntry[];
   readonly execute: (
     context: TContext,
@@ -185,7 +187,14 @@ export class McpHttpHandler<TContext> {
       const entry = this.options
         .catalog(session.context, session.scopedAppId)
         .find((candidate) => candidate.tool.name === request.params.name);
-      if (!entry) return mcpError("Tool not found or no longer authorized");
+      if (!entry) {
+        const error = this.options.rejectTool?.(
+          session.context,
+          request.params.name,
+          session.scopedAppId,
+        );
+        return error ? mcpErrorResult(error) : mcpError("Tool not found or no longer authorized");
+      }
       let terminal: CallToolResult | undefined;
       try {
         for await (const event of this.options.execute(
