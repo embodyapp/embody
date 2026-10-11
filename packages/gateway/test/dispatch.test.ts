@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppManifest } from "@embody/core";
 import {
   apiKeyProvider,
@@ -36,7 +36,7 @@ function sse(...frames: readonly [event: string, data: string][]): Response {
 const envelope = (code: string, message: string, details?: unknown) =>
   JSON.stringify({ error: { code, message, requestId: "host-request", details } });
 
-function fixture(host: HostReply, limiter?: FixedWindowRateLimiter) {
+function fixture(host: HostReply, limiter?: FixedWindowRateLimiter, scopes = ["kanban:*"]) {
   const registry = new GatewayRegistry({
     allowPrivateEndpoints: true,
     credentials: { kanban: "registration-secret" },
@@ -65,7 +65,7 @@ function fixture(host: HostReply, limiter?: FixedWindowRateLimiter) {
             actorId: "agent-1",
             actorType: "agent",
             roles: [],
-            scopes: ["kanban:*"],
+            scopes,
           },
         },
       ]),
@@ -79,8 +79,8 @@ function fixture(host: HostReply, limiter?: FixedWindowRateLimiter) {
   return { gateway, audit };
 }
 
-async function mcpCall(host: HostReply, limiter?: FixedWindowRateLimiter) {
-  const { gateway, audit } = fixture(host, limiter);
+async function mcpCall(host: HostReply, limiter?: FixedWindowRateLimiter, scopes?: string[]) {
+  const { gateway, audit } = fixture(host, limiter, scopes);
   const address = await gateway.listen({ port: 0, host: "127.0.0.1" });
   const client = new Client({ name: "test", version: "1.0.0" });
   await client.connect(
@@ -95,7 +95,7 @@ async function mcpCall(host: HostReply, limiter?: FixedWindowRateLimiter) {
       undefined,
       signal ? { signal } : undefined,
     );
-  return { call, audit };
+  return { call, audit, client };
 }
 
 function text(result: Awaited<ReturnType<Client["callTool"]>>): string {
@@ -239,6 +239,165 @@ describe("MCP execution errors", () => {
     expect(text(limited)).toMatch(/Retry after \d+ seconds\.$/);
     expect(limited._meta?.["embody/errorCode"]).toBe("RATE_LIMITED");
     expect(audit.records.map((record) => record.errorCode)).toEqual([undefined, "RATE_LIMITED"]);
+  });
+});
+
+describe("M01 review regressions: error and audit parity", () => {
+  it.each(["/api/execute/kanban/kanban.ping", "/api/execute/stream/kanban/kanban.ping"])(
+    "normalizes raw host failure bodies at %s",
+    async (url) => {
+      for (const body of [
+        "raw stack secret",
+        envelope("UNKNOWN", "raw stack secret"),
+        envelope("INTERNAL_ERROR", "raw stack secret"),
+      ]) {
+        const { gateway, audit } = fixture(() => new Response(body, { status: 500 }));
+        const response = await gateway.inject({
+          method: "POST",
+          url,
+          headers: { authorization: "Bearer api-key" },
+          payload: {},
+        });
+        expect(response.statusCode).toBe(500);
+        expect(response.body).not.toContain("raw stack secret");
+        expect(response.json()).toEqual({
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "Tool execution failed",
+            requestId: response.headers["x-request-id"],
+          },
+        });
+        expect(audit.records[0]).toMatchObject({ outcome: "failure", errorCode: "INTERNAL_ERROR" });
+      }
+    },
+  );
+  it.each([
+    ["error", envelope("UNKNOWN", "raw stack secret"), "INTERNAL_ERROR"],
+    ["error", "malformed raw stack secret", "INTERNAL_ERROR"],
+    ["progress", JSON.stringify({ message: "x".repeat(70_000) }), "UNAVAILABLE"],
+  ])("normalizes HTTP SSE %s frames with code %s", async (event, data, code) => {
+    const { gateway, audit } = fixture(() => sse([event, data]));
+    const response = await gateway.inject({
+      method: "POST",
+      url: "/api/execute/stream/kanban/kanban.ping",
+      headers: { authorization: "Bearer api-key" },
+      payload: {},
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("event: error");
+    expect(response.body).toContain(code);
+    expect(response.body).not.toContain("raw stack secret");
+    expect(response.body).not.toContain("xxxx");
+    expect(audit.records[0]).toMatchObject({ outcome: "failure", errorCode: code });
+  });
+  it("audits forbidden and unknown MCP calls without catalog disclosure or host calls", async () => {
+    let calls = 0;
+    const { call, client, audit } = await mcpCall(
+      () => {
+        calls++;
+        return sse(["result", "{}"]);
+      },
+      undefined,
+      [],
+    );
+    expect((await client.listTools()).tools).toEqual([]);
+    const forbidden = await call();
+    const unknown = await client.callTool({ name: "missing__tool", arguments: {} });
+    for (const result of [forbidden, unknown]) {
+      expect(result.isError).toBe(true);
+      expect(text(result)).toBe("Tool not found or no longer authorized");
+      expect(result._meta?.["embody/errorCode"]).toBe("FORBIDDEN");
+      expect(result._meta?.["embody/requestId"]).toEqual(expect.any(String));
+    }
+    expect(calls).toBe(0);
+    expect(audit.records).toHaveLength(2);
+    expect(audit.records[0]).toMatchObject({
+      surface: "mcp",
+      appId: "kanban",
+      target: "kanban.ping",
+      outcome: "failure",
+      errorCode: "FORBIDDEN",
+    });
+    expect(audit.records[1]).toMatchObject({
+      surface: "mcp",
+      outcome: "failure",
+      errorCode: "FORBIDDEN",
+    });
+  });
+  it("records a disconnected host stream as failure, not cancellation, across surfaces", async () => {
+    const disconnected = () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(new Error("raw transport secret"));
+          },
+        }),
+      );
+    const { gateway, audit } = fixture(disconnected);
+    const response = await gateway.inject({
+      method: "POST",
+      url: "/api/execute/stream/kanban/kanban.ping",
+      headers: { authorization: "Bearer api-key" },
+      payload: {},
+    });
+    expect(response.body).toContain("INTERNAL_ERROR");
+    expect(response.body).not.toContain("raw transport secret");
+    expect(audit.records[0]).toMatchObject({ outcome: "failure", errorCode: "INTERNAL_ERROR" });
+    const mcp = await mcpCall(disconnected);
+    expect((await mcp.call())._meta?.["embody/errorCode"]).toBe("INTERNAL_ERROR");
+    expect(mcp.audit.records[0]).toMatchObject({ outcome: "failure", errorCode: "INTERNAL_ERROR" });
+  });
+  it("fails closed and audits malformed successful JSON as failure", async () => {
+    const { gateway, audit } = fixture(
+      () => new Response("raw successful response secret", { status: 200 }),
+    );
+    const response = await gateway.inject({
+      method: "POST",
+      url: "/api/execute/kanban/kanban.ping",
+      headers: { authorization: "Bearer api-key" },
+      payload: {},
+    });
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toContain("INTERNAL_ERROR");
+    expect(response.body).not.toContain("raw successful response secret");
+    expect(audit.records[0]).toMatchObject({ outcome: "failure", errorCode: "INTERNAL_ERROR" });
+  });
+  it("audits client closure during stream backpressure as cancellation without throwing", async () => {
+    const { gateway, audit } = fixture(() =>
+      sse(["progress", '{"message":"working"}'], ["result", "{}"]),
+    );
+    gateway.addHook("onRequest", (_request, reply, done) => {
+      const write = reply.raw.write.bind(reply.raw);
+      vi.spyOn(reply.raw, "write").mockImplementationOnce((chunk: string | Uint8Array) => {
+        write(chunk);
+        // Deterministic close after the backpressure waiter is installed, no timers.
+        queueMicrotask(() => reply.raw.emit("close"));
+        return false;
+      });
+      done();
+    });
+    await expect(
+      gateway.inject({
+        method: "POST",
+        url: "/api/execute/stream/kanban/kanban.ping",
+        headers: { authorization: "Bearer api-key" },
+        payload: {},
+      }),
+    ).rejects.toThrow("response destroyed before completion");
+    await expect.poll(() => audit.records.length).toBe(1);
+    expect(audit.records[0]?.outcome).toBe("cancelled");
+    expect(audit.records[0]?.errorCode).toBeUndefined();
+  });
+  it("returns an audited error when a stream ends without a terminal frame", async () => {
+    const { gateway, audit } = fixture(() => sse(["progress", '{"message":"working"}']));
+    const response = await gateway.inject({
+      method: "POST",
+      url: "/api/execute/stream/kanban/kanban.ping",
+      headers: { authorization: "Bearer api-key" },
+      payload: {},
+    });
+    expect(response.body).toContain("INTERNAL_ERROR");
+    expect(audit.records[0]).toMatchObject({ outcome: "failure", errorCode: "INTERNAL_ERROR" });
   });
 });
 

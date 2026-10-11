@@ -154,11 +154,22 @@ No Dependabot PRs were closed and no security alerts were dismissed. Reassess fr
 
 Deferred explicitly: P15-07 OAuth, P15-13 app-to-app RPC, compact discovery/team UI, hosted background events/workflows (including due-work scheduling/version wake), GenUI, previews and billing automation. Broader plans retain their acceptance criteria for when those capabilities are offered.
 
-## Acceptance assessment and next step
+## Historical local acceptance assessment (superseded by the update below)
 
 - **M01.a:** locally demonstrated on both supported Node versions; attach combined CI before acceptance.
 - **M01.b:** locally demonstrated by dispatch, attribution, rate-limit, veto and new real-host integration regressions.
 - **M01.c:** this report records exact integration/preserved-work provenance, scope mapping and fresh evidence.
 - **Not yet DONE:** no independent reviewer, no remote CI for the combined branch, eight skipped standalone Postgres cases disclosed and handed to M03.
 
-Next: review the integration commit and scope overlay; authorize a push/PR and run combined CI. Then accept M01 or record required corrections. Do not begin user hosting or label the gateway stateless/sleep-capable based on this integration alone.
+At that snapshot the next step was independent review and combined CI. Do not begin user hosting or label the gateway stateless/sleep-capable based on this integration alone.
+
+## 2026-10-11 remote reconciliation and acceptance fixes
+
+- Integration [PR #33](https://github.com/embodyapp/embody/pull/33) merged 2026-10-11 at `024df01acf7b7460275c59eefb6321105a32687a`. CI-tested head was `c0d7eccdb680c36289357e1f1851f8906587c007`; head and squash merge have identical tree `bdac854c9c44e537a44dd8bdbea46b8a3e987ea1`.
+- Combined [CI run 38127104108](https://github.com/embodyapp/embody/actions/runs/38127104108): quality Node 22/24 and e2e-artifacts passed (packed consumer and actual distributed Docker/PostgreSQL journey). Standalone postgres job was green with **all 7 selected tests skipped**, not conformance evidence. M03 remains open.
+- PRs #29/#30/#31/#32 remain OPEN as of this reconciliation; their integrated source SHAs are in the provenance table above. Their contents were reused through #33, not separately merged; any newer work requires its own reconciliation. No branch/worktree deleted and no redundant merge performed. GenUI/WIP histories remain preserved.
+- Independent read-only automated review found HTTP/MCP normalization/audit gaps and incorrect stream-failure classification, then two further malformed-JSON/client-close paths. Fixed all with regressions; final [independent reviewer decision: ACCEPTED](./M01-independent-review-2026-10-11.md). This is an automated code review, not a claim of human approval.
+- Fresh acceptance-fix candidate on `feat/mvp-m02-contracts`: Node 22.23.3/24.21.0 `pnpm verify` each passed with **241 passed, 8 existing optional Postgres skips** (includes 38 new M02 contract tests); gateway suite **41 passed**. Local Docker E2E passed again: CLI, MCP, HTTP, events, restart, TTL and isolation.
+- Followup candidate [PR #34](https://github.com/embodyapp/embody/pull/34), `bf74c4d6eee95607ba2c1b9a45065e85b35b50a3`, passed [CI 38131459302](https://github.com/embodyapp/embody/actions/runs/38131459302): quality Node 22/24 each **241 passed, 8 optional DB skips**; packed external consumer and Docker E2E passed. Logs inspected: standalone postgres again selected **7 skipped, 0 executed**, explicitly not conformance evidence.
+- **Final integrator decision: M01 ACCEPTED / DONE**, under the owner's instruction to complete the milestone, with separate automated reviewer acceptance, combined candidate CI and corrected provenance. M01.a–c are satisfied. No human-review claim. Documentation-only acceptance updates are rechecked by PR CI; exact final head/checks and merge record are on #34. No code change after the reviewed/tested candidate.
+- The skipped standalone DB gate does not block this integration task's documented acceptance but continues to block M03/release verification. No later task or hosted release is marked complete.

@@ -1,6 +1,6 @@
 # Minimal hosted MVP status
 
-**Last updated: 2026-10-10. M01 is IN_REVIEW with fresh local evidence; combined CI and independent review remain pending. No cloud verification claimed.**
+**Last updated: 2026-10-11. M01 and M02 are DONE: independent automated reviews accepted after fixes; combined candidate CI passed on Node 22/24, packed consumer and Docker E2E. No cloud verification claimed; M03's standalone PostgreSQL gate remains open.**
 
 Scope: [README](./README.md). Tasks and acceptance cases: [IMPLEMENTATION](./IMPLEMENTATION.md). Required evidence: [VERIFICATION](./VERIFICATION.md).
 
@@ -19,8 +19,8 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 
 | ID | Task | Depends on | State | Owner | Evidence / PR / blocker |
 |---|---|---|---|---|---|
-| M01 | Integrate/reconcile existing gateway work | — | IN_REVIEW | pi | [Integration evidence](./evidence/M01-integration.md); candidate `d295465`; Node 22/24 verify, Docker E2E and npm-11 consumer pass; CI/reviewer pending |
-| M02 | Supported profile and deployment contracts | M01 | NOT_STARTED | — | Request-only scope recorded; executable contracts pending |
+| M01 | Integrate/reconcile existing gateway work | — | DONE | pi | #33 merged; acceptance fixes in [#34](https://github.com/embodyapp/embody/pull/34); [independent review](./evidence/M01-independent-review-2026-10-11.md) accepted; [final evidence](./evidence/M01-integration.md); candidate CI `38131459302` passed |
+| M02 | Supported profile and deployment contracts | M01 | DONE | pi | [Contracts](./CONTRACTS.md), [evidence](./evidence/M02-2026-10-11.md); independent code/scope review accepted; [#34](https://github.com/embodyapp/embody/pull/34), candidate CI `38131459302`: Node 22/24 241 pass, 8 existing DB skips; 38 contract tests, zero skips |
 | M03 | Trustworthy DB, package and cloud test gates | M01 | NOT_STARTED | — | Dedicated Postgres CI wiring/skip behavior requires correction |
 | M04 | Durable workspace catalog and credentials | M02, M03 | NOT_STARTED | — | Reuse P15-05/P15-08 work if available |
 | M05 | App-bound identity and tenant isolation | M04 | NOT_STARTED | — | Asymmetric tokens and actual provider IAM proof pending |
@@ -38,7 +38,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | M17 | Real zero-instance and centralized-control proof | M03–M16 | NOT_STARTED | — | Requires actual cloud/client evidence |
 | M18 | Candidate review and controlled release | M01–M17 | NOT_STARTED | — | Owner release decision required |
 
-**Completed implementation tasks: 0 / 18.** Existing framework code is a foundation, not proof these hosted acceptance cases have passed. Update this count when task states change.
+**Completed implementation tasks: 2 / 18.** Existing framework code is a foundation, not proof these hosted acceptance cases have passed. Update this count when task states change.
 
 ## Decision ledger
 
@@ -73,5 +73,11 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 - 2026-10-08 — pi — M01 — NOT_STARTED → IN_PROGRESS — `feat/mvp-m01-integration` — refreshed GitHub refs; #29–#32 remain open. Isolated integration worktree preserves original uncommitted files; no remote merge/push authorized by this task execution.
 
 - 2026-10-10 — pi — M01 — IN_PROGRESS → IN_REVIEW — `feat/mvp-m01-integration`, code candidate `d295465` — integrated #29/#30/#31/#32 locally; fixed auth-failure audit parity, unsafe update idempotency metadata and Compose init. Node 22/24 `pnpm verify`: 193 passed, 8 explicit Postgres skips each; Docker E2E passes on both; packed consumer passes with npm 11 on both; production audit clean. [Full evidence and limitations](./evidence/M01-integration.md). Combined CI/independent review pending; no remote push/merge. M03 DB gate remains open.
+
+- 2026-10-11 — pi — M02 — NOT_STARTED → IN_PROGRESS → IN_REVIEW — `feat/mvp-m02-contracts`, isolated `../embody-mvp-m02` on remote main `024df01` after fetch-all/pull — implemented strict v1 schemas, request-only profile, scoped permissions, bounded transitions/retries, fingerprint/repository contract and CAS/cancellation predicates. Node 22/24 `pnpm verify`: 225 passed, 8 existing optional DB skips each; contract suite: 32 passed, zero skips. [Evidence](./evidence/M02-2026-10-11.md). Independent scope/defaults review and CI pending; M01 merged via #33, historical tracker acceptance still requires reconciliation. Original checkout changes preserved.
+
+- 2026-10-11 — pi — M01 — IN_REVIEW → DONE — #33 / [#34](https://github.com/embodyapp/embody/pull/34) — independent automated review accepted after HTTP/MCP normalization/audit and stream-outcome fixes; exact combined candidate `bf74c4d6eee95607ba2c1b9a45065e85b35b50a3` [CI 38131459302](https://github.com/embodyapp/embody/actions/runs/38131459302) passed Node 22/24 quality, packed external consumer and actual Docker/PostgreSQL E2E. Integration/provenance reconciled. Standalone DB skips remain M03, not conformance evidence. Integrator acceptance under owner-directed completion; no human-review claim.
+
+- 2026-10-11 — pi — M02 — IN_REVIEW → DONE — [#34](https://github.com/embodyapp/embody/pull/34), candidate `bf74c4d` — independent code/scope review accepted after app-generation response, separate fence scopes, nested freeze and repository-test fixes; 38 contract tests passed, zero skips. Exact candidate CI Node 22/24: 241 passed, 8 existing optional DB skips each; packed consumer/E2E passed. v1 design defaults accepted by integrator; provider qualification, spending/customer-data approvals and real-store enforcement remain later tasks.
 
 Append entries as: `date — owner — task — state transition — branch/PR — commands/result/evidence — review or blocker`.

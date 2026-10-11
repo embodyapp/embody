@@ -7,6 +7,7 @@
 - [Implementation tasks](./IMPLEMENTATION.md): ordered work, dependencies, acceptance cases, documentation requirements.
 - [Completion tracker](./STATUS.md): claim work and record completion evidence here.
 - [Verification contract](./VERIFICATION.md): test layers, release journey, evidence format and launch gate.
+- [M02 API/CLI and workload contracts](./CONTRACTS.md): implemented schemas and policy; deployment endpoints/commands still await their implementation tasks.
 
 This is the delivery plan for a **narrow, invite-only hosted MVP**, not a declaration that the broader framework or managed-hosting plans are complete. All commands, endpoints and new directories described below are proposals until their implementation task passes.
 
