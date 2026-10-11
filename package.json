@@ -29,6 +29,7 @@
     "test:postgres": "node scripts/test-postgres.mjs",
     "test:verification": "node --test test/verification/*.test.mjs",
     "test:mvp": "node scripts/test-mvp.mjs",
+    "test:gateway-store": "node scripts/test-gateway-store.mjs",
     "test:mvp:cloud": "node scripts/test-mvp-cloud.mjs",
     "test:baseline": "node scripts/test-baseline.mjs",
     "test:e2e": "pnpm -r --if-present test:e2e",

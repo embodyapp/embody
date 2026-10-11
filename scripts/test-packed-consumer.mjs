@@ -72,6 +72,7 @@ try {
   // tarball arguments. Install in dependency order, as a registry exposes each package.
   const installOrder = [
     "@embody/core",
+    "@embody/cloud-contracts",
     "@embody/storage",
     "@embody/auth",
     "@embody/mcp",
@@ -97,6 +98,28 @@ try {
       { cwd: app },
     );
   }
+  run(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import { MemoryGatewayStore, newCredential } from '@embody/gateway';
+    import { WorkspaceIdSchema, HOSTED_PROFILE } from '@embody/cloud-contracts';
+    const workspaceId = WorkspaceIdSchema.parse('ws_packed0001');
+    if (HOSTED_PROFILE.version !== 'request-only-v1') throw new Error('Packed contract mismatch');
+    const store = new MemoryGatewayStore();
+    try {
+      await store.createWorkspace(workspaceId);
+      const issued = newCredential({workspaceId, principal:{orgId:workspaceId,actorId:'packed',actorType:'human',roles:[],scopes:['*']},grants:[],expiresAt:'2099-01-01T00:00:00.000Z'});
+      const record = await store.putCredential(issued.credential,null);
+      if (record.hash === issued.token || (await store.snapshot(workspaceId)).workspace.revision !== 2) throw new Error('Packed gateway store mismatch');
+      console.log('Packed hosted gateway/contract imports passed.');
+    } finally { await store.close(); }
+  `,
+    ],
+    { cwd: app },
+  );
   run("npm", ["run", "typecheck"], { cwd: app });
   run("npm", ["test"], { cwd: app });
   run("npm", ["run", "build"], { cwd: app });

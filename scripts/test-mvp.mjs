@@ -6,14 +6,17 @@ import {
   evidence,
   main,
   postgresConfiguration,
+  platformConfiguration,
   root,
   runVitest,
 } from "./verification.mjs";
 
 await main("mvp", async () => {
   postgresConfiguration();
+  platformConfiguration();
   command("pnpm", ["test:verification"]);
   command("pnpm", ["test:postgres"]);
+  command("pnpm", ["test:gateway-store"]);
   const directory = await mkdtemp(join(tmpdir(), "embody-mvp-report-"));
   let passed = 0;
   const suites = {};
@@ -45,6 +48,18 @@ await main("mvp", async () => {
         "utf8",
       ),
     );
+    const platformEvidence = JSON.parse(
+      await readFile(
+        resolve(
+          root,
+          process.env.EMBODY_TEST_EVIDENCE_DIR ?? ".artifacts/verification",
+          "gateway-store.json",
+        ),
+        "utf8",
+      ),
+    );
+    suites["gateway-store"] = platformEvidence.counts;
+    passed += platformEvidence.counts.passed;
     suites.postgres = dbEvidence.counts;
     passed += dbEvidence.counts.passed;
     await evidence("mvp", "passed", { passed, failed: 0, skipped: 0 }, dbEvidence.images, {

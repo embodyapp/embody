@@ -1,3 +1,17 @@
+export {
+  MemoryGatewayStore,
+  PostgresGatewayStore,
+  credentialHash,
+  newCredential,
+  type GatewayStore,
+  type Workspace,
+  type WorkspaceSnapshot,
+  type CatalogApp,
+  type CatalogWrite,
+  type WorkspaceCredential,
+  type CredentialWrite,
+} from "./store.js";
+export { createWorkspaceGateway, type WorkspaceGatewayOptions } from "./workspace.js";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -63,6 +77,13 @@ export interface Registration {
   readonly manifestHash?: string;
 }
 export interface RegisteredApp extends Registration {
+  /** Hosted catalogs persist independently of instance health/heartbeat. */
+  readonly workspaceId?: string;
+  readonly catalogAppId?: string;
+  readonly revision?: number;
+  readonly promotionGeneration?: number;
+  readonly activeRelease?: string | null;
+  readonly state?: "idle" | "ready" | "unavailable" | "disabled" | "deleted";
   readonly generation: string;
   readonly lastSeen?: string;
   readonly status: "unknown" | "healthy" | "unhealthy";
@@ -124,7 +145,7 @@ function validEndpoint(value: string, options: GatewayRegistryOptions, allowPath
 const RESERVED_APP_IDS: ReadonlySet<string> = new Set(["embody"]);
 const actionTitleSchema = appMetadataSchema.shape.title.unwrap();
 
-function validateRegistration(value: Registration, options: GatewayRegistryOptions): string {
+export function validateRegistration(value: Registration, options: GatewayRegistryOptions): string {
   if (
     value.protocolVersion !== 1 ||
     !appId(value.appId) ||
@@ -401,7 +422,12 @@ export class FixedWindowRateLimiter {
 }
 
 export interface GatewayOptions {
-  readonly registry: GatewayRegistry;
+  readonly registry: Pick<GatewayRegistry, "snapshot" | "get" | "register" | "heartbeat">;
+  readonly routePrefix?: string;
+  readonly registrationRoutes?: boolean;
+  readonly catalogMaxAgeSeconds?: 0 | 30;
+  readonly discoverUnavailable?: boolean;
+  readonly sessionIdentity?: (principal: Principal) => string;
   readonly auth: AuthChain;
   readonly token: GatewayTokenOptions;
   readonly fetch?: typeof fetch;
@@ -455,11 +481,12 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     const body = request.body as { appId: string; generation: string };
     return options.registry.heartbeat(body.appId, body.generation, registration(request));
   };
-  for (const prefix of ["", "/api/registry"]) {
-    app.post(`${prefix}/register`, register);
-    app.post(`${prefix}/heartbeat`, heartbeat);
+  const route = (path: string) => `${options.routePrefix ?? ""}${path}`;
+  for (const prefix of options.registrationRoutes === false ? [] : ["", "/api/registry"]) {
+    app.post(route(`${prefix}/register`), register);
+    app.post(route(`${prefix}/heartbeat`), heartbeat);
   }
-  app.get("/api/catalog", async (request, reply) => {
+  app.get(route("/api/catalog"), async (request, reply) => {
     const principal = await options.auth.authenticate(
       bearer(
         typeof request.headers["authorization"] === "string"
@@ -469,7 +496,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     );
     const catalog = options.registry
       .snapshot()
-      .filter((entry) => entry.status === "healthy")
+      .filter((entry) => options.discoverUnavailable === true || entry.status === "healthy")
       .map((entry) => ({
         ...entry,
         manifest: {
@@ -483,7 +510,13 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       }))
       .filter((entry) => Object.keys(entry.manifest.actions).length > 0);
     const etag = `"${createHash("sha256").update(stableStringify(catalog)).digest("hex")}"`;
-    reply.header("etag", etag).header("cache-control", "private, max-age=30");
+    reply
+      .header("etag", etag)
+      .header("vary", "authorization")
+      .header(
+        "cache-control",
+        `private, max-age=${options.catalogMaxAgeSeconds ?? 30}, must-revalidate`,
+      );
     if (request.headers["if-none-match"] === etag) return reply.status(304).send();
     return catalog;
   });
@@ -491,7 +524,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     createMcpCatalog(
       options.registry
         .snapshot()
-        .filter((entry) => entry.status === "healthy")
+        .filter((entry) => options.discoverUnavailable === true || entry.status === "healthy")
         .filter((entry) => scoped === undefined || entry.appId === scoped)
         .map((entry) => ({ appId: entry.appId, manifest: entry.manifest })),
       scoped,
@@ -655,14 +688,14 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       ...(request.body === undefined ? {} : { body: request.body }),
       ...(scoped === undefined ? {} : { scopedAppId: scoped }),
       // Sessions stay pinned to the authenticated credential, not the derived agent identity.
-      identity: `${principal.orgId}:${principal.actorId}`,
+      identity: options.sessionIdentity?.(principal) ?? `${principal.orgId}:${principal.actorId}`,
       context: mcpActor === "token" ? principal : delegatedAgentPrincipal(principal),
     });
   };
   for (const url of ["/mcp", "/mcp/:appId"])
-    app.route({ method: ["GET", "POST", "DELETE"], url, handler: mcpRoute });
+    app.route({ method: ["GET", "POST", "DELETE"], url: route(url), handler: mcpRoute });
   app.addHook("onClose", async () => mcp.close());
-  app.post("/api/execute/stream/:appId/:target", async (request, reply) => {
+  app.post(route("/api/execute/stream/:appId/:target"), async (request, reply) => {
     const principal = await authenticateSurface(request, reply, "stream");
     const { appId, target } = request.params as { appId: string; target: string };
     const requestId = String(reply.getHeader("x-request-id"));
@@ -751,7 +784,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       prepared.finish({ outcome, ...(errorCode === undefined ? {} : { errorCode }) });
     }
   });
-  app.post("/api/execute/:appId/:target", async (request, reply) => {
+  app.post(route("/api/execute/:appId/:target"), async (request, reply) => {
     const requestId = String(reply.getHeader("x-request-id"));
     const { appId, target } = request.params as { appId: string; target: string };
     const principal = await authenticateSurface(request, reply, "http");

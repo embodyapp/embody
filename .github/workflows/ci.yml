@@ -36,6 +36,8 @@ jobs:
       EMBODY_POSTGRES_URL: postgresql://embody_runtime:fixture-only-runtime@127.0.0.1:5432/embody_test
       EMBODY_POSTGRES_MIGRATION_URL: postgresql://embody_migrator:fixture-only-migrator@127.0.0.1:5432/embody_test
       EMBODY_POSTGRES_OTHER_URL: postgresql://embody_other:fixture-only-other@127.0.0.1:5432/embody_other
+      EMBODY_PLATFORM_URL: postgresql://embody_platform_runtime:fixture-only-platform-runtime@127.0.0.1:5432/embody_platform
+      EMBODY_PLATFORM_MIGRATION_URL: postgresql://embody_platform_migrator:fixture-only-platform-migrator@127.0.0.1:5432/embody_platform
     services:
       postgres:
         image: postgres:16
@@ -67,7 +69,7 @@ jobs:
           PGPASSWORD: postgres
       - name: Deliberate missing-configuration and false-green regressions
         run: pnpm test:verification
-      - name: Mandatory PostgreSQL, kernel adapter, MVP contract and gateway cases (zero skips)
+      - name: Mandatory app/platform PostgreSQL, multi-gateway, kernel, contract and gateway cases (zero skips)
         run: pnpm test:mvp
         env:
           EMBODY_POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}

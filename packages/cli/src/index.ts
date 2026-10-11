@@ -13,6 +13,14 @@ export {
 } from "./dev.js";
 export { startMcpBridge, type McpBridge, type McpBridgeOptions } from "./mcp-bridge.js";
 
+function gatewayUrl(base: string | URL | undefined, path: string): URL {
+  const url = new URL(base ?? "");
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/${path}`;
+  url.search = "";
+  url.hash = "";
+  return url;
+}
+
 export const EXIT = {
   usage: 2,
   auth: 3,
@@ -220,7 +228,7 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
   );
   const cached = await readCache(cachePath);
   try {
-    const response = await fetcher(new URL("/api/catalog", baseUrl), {
+    const response = await fetcher(gatewayUrl(baseUrl, "api/catalog"), {
       headers: {
         authorization: `Bearer ${token}`,
         ...(cached?.etag ? { "if-none-match": cached.etag } : {}),
@@ -341,9 +349,9 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
   }
   try {
     const response = await fetcher(
-      new URL(
-        `/api/execute/stream/${encodeURIComponent(app.appId)}/${encodeURIComponent(target)}`,
+      gatewayUrl(
         baseUrl,
+        `api/execute/stream/${encodeURIComponent(app.appId)}/${encodeURIComponent(target)}`,
       ),
       {
         method: "POST",

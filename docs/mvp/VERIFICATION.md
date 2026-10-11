@@ -16,7 +16,7 @@
 | Layer | Runner | Evidence |
 |---|---|---|
 | Workspace regression | Existing `pnpm verify` | Supported Node versions; lint/typecheck/build/API/format/license checks and tests |
-| Real database | `pnpm test:postgres` | Explicit runtime/migration/other-app URLs and actual Docker container ID; maintenance migrations, non-owner runtime SQL negatives, storage and kernel cases, zero required skips; add durable gateway-store cases in M04 |
+| Real database | `pnpm test:postgres` | Explicit runtime/migration/other-app URLs and actual Docker container ID; maintenance migrations, non-owner runtime SQL negatives, storage and kernel cases, zero required skips; `pnpm test:gateway-store` additionally migrates a distinct platform DB and runs durable store/two-gateway/cold-start/MCP/SQL boundary cases |
 | Packed/distributed regression | `pnpm test:baseline` (wraps existing consumer/E2E journeys) | Clean installed CLI/scaffold, real HTTP/MCP/database, Node 22/24 CI matrix and image-hash evidence |
 | MVP contracts/integration | `pnpm test:mvp` | Current contracts/gateway + mandatory DB/isolation/failure-path suites; later tasks add source/build adversaries, controller recovery and effect ledgers |
 | Real provider qualification | `pnpm test:mvp:cloud` prerequisite gate; real suites not yet implemented | Fails on missing project/budget/credentials and on unimplemented qualification; M09–M17 must add IAM/storage/build/deploy/restore/zero-instance checks before it can pass |
