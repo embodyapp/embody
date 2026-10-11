@@ -1,6 +1,6 @@
 # Minimal hosted MVP status
 
-**Last updated: 2026-10-10. M01 is IN_REVIEW with fresh local evidence; combined CI and independent review remain pending. No cloud verification claimed.**
+**Last updated: 2026-10-11. M01 merged as PR #33 (historical acceptance record still IN_REVIEW). M02 contracts are IN_REVIEW with Node 22/24 evidence; independent scope/defaults review and CI pending. No cloud verification claimed.**
 
 Scope: [README](./README.md). Tasks and acceptance cases: [IMPLEMENTATION](./IMPLEMENTATION.md). Required evidence: [VERIFICATION](./VERIFICATION.md).
 
@@ -19,8 +19,8 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 
 | ID | Task | Depends on | State | Owner | Evidence / PR / blocker |
 |---|---|---|---|---|---|
-| M01 | Integrate/reconcile existing gateway work | — | IN_REVIEW | pi | [Integration evidence](./evidence/M01-integration.md); candidate `d295465`; Node 22/24 verify, Docker E2E and npm-11 consumer pass; CI/reviewer pending |
-| M02 | Supported profile and deployment contracts | M01 | NOT_STARTED | — | Request-only scope recorded; executable contracts pending |
+| M01 | Integrate/reconcile existing gateway work | — | IN_REVIEW | pi | #33 merged; combined CI passed; [independent review](./evidence/M01-independent-review-2026-10-11.md) accepted after fixes; fresh followup CI pending |
+| M02 | Supported profile and deployment contracts | M01 | IN_REVIEW | pi | [Contracts](./CONTRACTS.md), [evidence](./evidence/M02-2026-10-11.md); independent review accepted; 38 contract tests pass; Node 22/24 verify: 241 pass, 8 existing DB skips; candidate CI pending |
 | M03 | Trustworthy DB, package and cloud test gates | M01 | NOT_STARTED | — | Dedicated Postgres CI wiring/skip behavior requires correction |
 | M04 | Durable workspace catalog and credentials | M02, M03 | NOT_STARTED | — | Reuse P15-05/P15-08 work if available |
 | M05 | App-bound identity and tenant isolation | M04 | NOT_STARTED | — | Asymmetric tokens and actual provider IAM proof pending |
@@ -73,5 +73,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 - 2026-10-08 — pi — M01 — NOT_STARTED → IN_PROGRESS — `feat/mvp-m01-integration` — refreshed GitHub refs; #29–#32 remain open. Isolated integration worktree preserves original uncommitted files; no remote merge/push authorized by this task execution.
 
 - 2026-10-10 — pi — M01 — IN_PROGRESS → IN_REVIEW — `feat/mvp-m01-integration`, code candidate `d295465` — integrated #29/#30/#31/#32 locally; fixed auth-failure audit parity, unsafe update idempotency metadata and Compose init. Node 22/24 `pnpm verify`: 193 passed, 8 explicit Postgres skips each; Docker E2E passes on both; packed consumer passes with npm 11 on both; production audit clean. [Full evidence and limitations](./evidence/M01-integration.md). Combined CI/independent review pending; no remote push/merge. M03 DB gate remains open.
+
+- 2026-10-11 — pi — M02 — NOT_STARTED → IN_PROGRESS → IN_REVIEW — `feat/mvp-m02-contracts`, isolated `../embody-mvp-m02` on remote main `024df01` after fetch-all/pull — implemented strict v1 schemas, request-only profile, scoped permissions, bounded transitions/retries, fingerprint/repository contract and CAS/cancellation predicates. Node 22/24 `pnpm verify`: 225 passed, 8 existing optional DB skips each; contract suite: 32 passed, zero skips. [Evidence](./evidence/M02-2026-10-11.md). Independent scope/defaults review and CI pending; M01 merged via #33, historical tracker acceptance still requires reconciliation. Original checkout changes preserved.
 
 Append entries as: `date — owner — task — state transition — branch/PR — commands/result/evidence — review or blocker`.
