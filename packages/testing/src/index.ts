@@ -118,6 +118,11 @@ export interface TestHarness<TPlugins extends readonly EmbodyPlugin[] = readonly
   as(principal: Principal): TestHarness<TPlugins>;
   asAgent(actorId: string, overrides?: ActorOverrides): TestHarness<TPlugins>;
   asHuman(actorId: string, overrides?: ActorOverrides): TestHarness<TPlugins>;
+  /** An agent acting for a human subject, as the gateway attributes MCP calls. */
+  asDelegatedAgent(
+    subjectId: string,
+    overrides?: ActorOverrides & { readonly client?: string },
+  ): TestHarness<TPlugins>;
   /** Captures an expected hook veto without depending on a test framework. */
   veto(operation: () => Promise<unknown>): Promise<HookVetoError>;
   tickOutbox(): Promise<void>;
@@ -208,6 +213,20 @@ class Harness<TPlugins extends readonly EmbodyPlugin[]> implements TestHarness<T
   }
   public asHuman(actorId: string, overrides: ActorOverrides = {}): TestHarness<TPlugins> {
     return this.as(this.actorPrincipal("human", actorId, overrides));
+  }
+  /**
+   * An agent acting for `subjectId`, as the gateway attributes MCP calls made with a human
+   * credential. Agent-only guardrails apply; hooks can read `principal.delegation`.
+   */
+  public asDelegatedAgent(
+    subjectId: string,
+    overrides: ActorOverrides & { readonly client?: string } = {},
+  ): TestHarness<TPlugins> {
+    const { client, ...actor } = overrides;
+    return this.as({
+      ...this.actorPrincipal("agent", `${client ?? "mcp"}:${subjectId}`, actor),
+      delegation: { subjectId, subjectType: "human", ...(client === undefined ? {} : { client }) },
+    });
   }
   public async veto(operation: () => Promise<unknown>): Promise<HookVetoError> {
     try {

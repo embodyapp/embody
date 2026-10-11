@@ -9,6 +9,37 @@ export interface Principal {
   readonly roles: readonly string[];
   readonly scopes: readonly string[];
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /**
+   * Present when an agent acts on behalf of another subject, for example a model calling tools
+   * through an MCP client for the signed-in person. `actorType` is then `agent`.
+   */
+  readonly delegation?: Delegation;
+}
+
+/** The subject an agent principal acts for. */
+export interface Delegation {
+  /** The human or system the credential was issued to. At most 200 characters. */
+  readonly subjectId: string;
+  readonly subjectType: "human" | "system";
+  /** Verified client identifier (for example an OAuth client ID). At most 200 characters. */
+  readonly client?: string;
+}
+
+const DELEGATION_LIMIT = 200;
+
+/** Structural check for a delegation record; used by the kernel and token verifiers. */
+export function isValidDelegation(value: unknown): value is Delegation {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const { subjectId, subjectType, client, ...rest } = value as Record<string, unknown>;
+  return (
+    Object.keys(rest).length === 0 &&
+    typeof subjectId === "string" &&
+    subjectId.length > 0 &&
+    subjectId.length <= DELEGATION_LIMIT &&
+    (subjectType === "human" || subjectType === "system") &&
+    (client === undefined ||
+      (typeof client === "string" && client.length > 0 && client.length <= DELEGATION_LIMIT))
+  );
 }
 
 export interface EntityRecord<TData = Readonly<Record<string, unknown>>> {
@@ -68,6 +99,9 @@ export interface ExecutionAuditEvent {
   readonly durationMs: number;
   readonly outcome: "success" | "failure" | "cancelled";
   readonly errorCode?: string;
+  /** The delegating subject when the actor is an agent acting on someone's behalf. */
+  readonly subjectId?: string;
+  readonly client?: string;
 }
 
 export interface KernelServices {
@@ -115,11 +149,23 @@ export type ActionHandler<TInput extends z.ZodType, TOutput extends z.ZodType | 
   ctx: KernelContext,
 ) => Promise<ActionResult<TOutput>> | ActionResult<TOutput>;
 
+/** `read` (no side effects), `write` (creates or changes state) or `destructive`. */
+export type ActionEffect = "read" | "write" | "destructive";
+
 export interface ActionDefinition<
   TInput extends z.ZodType = z.ZodType,
   TOutput extends z.ZodType | undefined = z.ZodType | undefined,
 > {
+  /** Short human-readable name, at most 80 characters. */
+  readonly title?: string;
   readonly description?: string;
+  /**
+   * `read` (no side effects), `write` or `destructive`. Clients use it for approval prompts and
+   * read-only access. Undeclared actions are treated as `write`.
+   */
+  readonly effect?: ActionEffect;
+  /** True when repeating the call with the same input has no additional effect. */
+  readonly idempotent?: boolean;
   readonly input: TInput;
   readonly output?: TOutput;
   readonly handler: ActionHandler<TInput, TOutput>;
@@ -324,6 +370,9 @@ export interface PluginDefinitionHelpers<
     this: void,
     definition: {
       readonly description?: string;
+      readonly title?: string;
+      readonly effect?: ActionEffect;
+      readonly idempotent?: boolean;
       readonly input: TInput;
       readonly output: TOutput;
       readonly handler: (
@@ -333,6 +382,9 @@ export interface PluginDefinitionHelpers<
     },
   ): {
     readonly description?: string;
+    readonly title?: string;
+    readonly effect?: ActionEffect;
+    readonly idempotent?: boolean;
     readonly input: TInput;
     readonly output: TOutput;
     readonly handler: (
@@ -344,11 +396,17 @@ export interface PluginDefinitionHelpers<
     this: void,
     definition: {
       readonly description?: string;
+      readonly title?: string;
+      readonly effect?: ActionEffect;
+      readonly idempotent?: boolean;
       readonly input: TInput;
       readonly handler: (input: z.output<TInput>, ctx: TypedEntityContext<TEntities>) => unknown;
     },
   ): {
     readonly description?: string;
+    readonly title?: string;
+    readonly effect?: ActionEffect;
+    readonly idempotent?: boolean;
     readonly input: TInput;
     readonly handler: (input: z.output<TInput>, ctx: TypedEntityContext<TEntities>) => unknown;
   };

@@ -2,6 +2,7 @@ export { z } from "zod";
 export {
   definePlugin,
   defineWorkflow,
+  isValidDelegation,
   type ActionDefinition,
   type ActionHandler,
   type ActionInput,
@@ -9,6 +10,7 @@ export {
   type ActorType,
   type CheckedActionDefinition,
   type CheckedPluginDefinition,
+  type Delegation,
   type DomainEvent,
   type ExecutionAuditEvent,
   type ExecutionOptions,
@@ -67,9 +69,15 @@ export {
   type EntityTransaction,
 } from "./entities.js";
 export {
+  ACTION_TITLE_LIMIT,
+  APP_METADATA_LIMITS,
+  actionEffect,
   compileManifest,
   stableStringify,
+  type ActionEffect,
   type ActionManifest,
+  type AppMetadata,
+  type CompileManifestOptions,
   type ActionPresentationManifest,
   type AppManifest,
   type EntityManifest,
@@ -80,7 +88,9 @@ export {
 } from "./manifest.js";
 export {
   PROTOCOL_VERSION,
+  actionEffectSchema,
   appManifestSchema,
+  appMetadataSchema,
   errorEnvelopeSchema,
   eventDeliveryRequestSchema,
   eventEnvelopeSchema,

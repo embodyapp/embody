@@ -7,16 +7,35 @@
 import { z } from 'zod';
 
 // @public (undocumented)
+export const ACTION_TITLE_LIMIT = 80;
+
+// @public (undocumented)
 export interface ActionDefinition<TInput extends z.ZodType = z.ZodType, TOutput extends z.ZodType | undefined = z.ZodType | undefined> {
     // (undocumented)
     readonly description?: string;
+    readonly effect?: ActionEffect;
     // (undocumented)
     readonly handler: ActionHandler<TInput, TOutput>;
+    readonly idempotent?: boolean;
     // (undocumented)
     readonly input: TInput;
     // (undocumented)
     readonly output?: TOutput;
+    readonly title?: string;
 }
+
+// @public
+export type ActionEffect = "read" | "write" | "destructive";
+
+// @public
+export function actionEffect(action: Pick<ActionManifest, "effect">): ActionEffect;
+
+// @public (undocumented)
+export const actionEffectSchema: z.ZodEnum<{
+    read: "read";
+    write: "write";
+    destructive: "destructive";
+}>;
 
 // @public (undocumented)
 export type ActionHandler<TInput extends z.ZodType, TOutput extends z.ZodType | undefined> = (input: ActionInput<TInput>, ctx: KernelContext) => Promise<ActionResult<TOutput>> | ActionResult<TOutput>;
@@ -28,14 +47,17 @@ export type ActionInput<TInput extends z.ZodType> = z.ZodType extends TInput ? n
 export interface ActionManifest {
     // (undocumented)
     readonly description?: string;
+    readonly effect?: ActionEffect;
     // (undocumented)
     readonly generated: boolean;
+    readonly idempotent?: boolean;
     // (undocumented)
     readonly inputSchema: JsonSchema;
     // (undocumented)
     readonly outputSchema?: JsonSchema;
     // (undocumented)
     readonly presentation?: ActionPresentationManifest;
+    readonly title?: string;
 }
 
 // @public (undocumented)
@@ -51,9 +73,18 @@ export type ActionResult<TOutput extends z.ZodType | undefined> = TOutput extend
 export type ActorType = "agent" | "human" | "system";
 
 // @public (undocumented)
+export const APP_METADATA_LIMITS: {
+    readonly title: 80;
+    readonly description: 500;
+    readonly instructions: 2048;
+};
+
+// @public (undocumented)
 export interface AppManifest {
     // (undocumented)
     readonly actions: Readonly<Record<string, ActionManifest>>;
+    // (undocumented)
+    readonly app?: AppMetadata;
     // (undocumented)
     readonly entities: Readonly<Record<string, EntityManifest>>;
     // (undocumented)
@@ -74,6 +105,11 @@ export interface AppManifest {
 // @public (undocumented)
 export const appManifestSchema: z.ZodObject<{
     protocolVersion: z.ZodLiteral<1>;
+    app: z.ZodOptional<z.ZodObject<{
+        title: z.ZodOptional<z.ZodString>;
+        description: z.ZodOptional<z.ZodString>;
+        instructions: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
     plugins: z.ZodArray<z.ZodObject<{
         id: z.ZodString;
         version: z.ZodString;
@@ -91,7 +127,14 @@ export const appManifestSchema: z.ZodObject<{
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     actions: z.ZodRecord<z.ZodString, z.ZodObject<{
+        title: z.ZodOptional<z.ZodString>;
         description: z.ZodOptional<z.ZodString>;
+        effect: z.ZodOptional<z.ZodEnum<{
+            read: "read";
+            write: "write";
+            destructive: "destructive";
+        }>>;
+        idempotent: z.ZodOptional<z.ZodBoolean>;
         inputSchema: z.ZodRecord<z.ZodString, z.ZodUnknown>;
         outputSchema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         generated: z.ZodBoolean;
@@ -135,6 +178,20 @@ export const appManifestSchema: z.ZodObject<{
         integrity: z.ZodString;
     }, z.core.$strict>>>;
     eventSubscriptions: z.ZodArray<z.ZodString>;
+}, z.core.$strict>;
+
+// @public
+export interface AppMetadata {
+    readonly description?: string;
+    readonly instructions?: string;
+    readonly title?: string;
+}
+
+// @public (undocumented)
+export const appMetadataSchema: z.ZodObject<{
+    title: z.ZodOptional<z.ZodString>;
+    description: z.ZodOptional<z.ZodString>;
+    instructions: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 
 // @public (undocumented)
@@ -201,7 +258,13 @@ export interface CompiledWorkflow {
 export function compileEntity<TData extends Record<string, unknown>>(pluginId: string, entityType: string, definition: EntityDefinition<z.ZodObject>): CompiledEntity<TData>;
 
 // @public (undocumented)
-export function compileManifest(plugins: readonly EmbodyPlugin[]): AppManifest;
+export function compileManifest(plugins: readonly EmbodyPlugin[], options?: CompileManifestOptions): AppManifest;
+
+// @public (undocumented)
+export interface CompileManifestOptions {
+    // (undocumented)
+    readonly app?: AppMetadata;
+}
 
 // @public (undocumented)
 export function compileWorkflow(pluginId: string, name: string, definition: WorkflowDefinition): CompiledWorkflow;
@@ -231,6 +294,14 @@ export function defineWorkflow<const TInput extends z.ZodType>(input: TInput): <
 }) => typeof definition & {
     readonly input: TInput;
 };
+
+// @public
+export interface Delegation {
+    readonly client?: string;
+    readonly subjectId: string;
+    // (undocumented)
+    readonly subjectType: "human" | "system";
+}
 
 // @public (undocumented)
 export class DependencyError extends EmbodyError {
@@ -534,6 +605,8 @@ export interface ExecutionAuditEvent {
     // (undocumented)
     readonly actorId: string;
     // (undocumented)
+    readonly client?: string;
+    // (undocumented)
     readonly durationMs: number;
     // (undocumented)
     readonly errorCode?: string;
@@ -543,6 +616,7 @@ export interface ExecutionAuditEvent {
     readonly outcome: "success" | "failure" | "cancelled";
     // (undocumented)
     readonly requestId?: string;
+    readonly subjectId?: string;
     // (undocumented)
     readonly target: string;
     // (undocumented)
@@ -621,6 +695,9 @@ export class InternalError extends EmbodyError {
     constructor(message?: string, options?: ErrorOptions);
 }
 
+// @public
+export function isValidDelegation(value: unknown): value is Delegation;
+
 // @public (undocumented)
 export type JsonSchema = Readonly<Record<string, unknown>>;
 
@@ -686,6 +763,7 @@ export interface KernelContext {
 
 // @public (undocumented)
 export interface KernelOptions {
+    readonly app?: AppMetadata;
     // (undocumented)
     readonly components?: readonly KernelComponent[];
     // (undocumented)
@@ -738,11 +816,17 @@ export interface PluginDefinitionHelpers<TEntities extends Readonly<Record<strin
     // (undocumented)
     action<TInput extends z.ZodType, TOutput extends z.ZodType>(this: void, definition: {
         readonly description?: string;
+        readonly title?: string;
+        readonly effect?: ActionEffect;
+        readonly idempotent?: boolean;
         readonly input: TInput;
         readonly output: TOutput;
         readonly handler: (input: z.output<TInput>, ctx: TypedEntityContext<TEntities>) => Promise<z.output<TOutput>> | z.output<TOutput>;
     }): {
         readonly description?: string;
+        readonly title?: string;
+        readonly effect?: ActionEffect;
+        readonly idempotent?: boolean;
         readonly input: TInput;
         readonly output: TOutput;
         readonly handler: (input: z.output<TInput>, ctx: TypedEntityContext<TEntities>) => Promise<z.output<TOutput>> | z.output<TOutput>;
@@ -750,10 +834,16 @@ export interface PluginDefinitionHelpers<TEntities extends Readonly<Record<strin
     // (undocumented)
     action<TInput extends z.ZodType>(this: void, definition: {
         readonly description?: string;
+        readonly title?: string;
+        readonly effect?: ActionEffect;
+        readonly idempotent?: boolean;
         readonly input: TInput;
         readonly handler: (input: z.output<TInput>, ctx: TypedEntityContext<TEntities>) => unknown;
     }): {
         readonly description?: string;
+        readonly title?: string;
+        readonly effect?: ActionEffect;
+        readonly idempotent?: boolean;
         readonly input: TInput;
         readonly handler: (input: z.output<TInput>, ctx: TypedEntityContext<TEntities>) => unknown;
     };
@@ -791,6 +881,7 @@ export interface Principal {
     readonly actorId: string;
     // (undocumented)
     readonly actorType: ActorType;
+    readonly delegation?: Delegation;
     // (undocumented)
     readonly metadata?: Readonly<Record<string, unknown>>;
     // (undocumented)
@@ -816,6 +907,14 @@ export const principalClaimsSchema: z.ZodObject<{
     roles: z.ZodArray<z.ZodString>;
     scopes: z.ZodArray<z.ZodString>;
     metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    delegation: z.ZodOptional<z.ZodObject<{
+        subjectId: z.ZodString;
+        subjectType: z.ZodEnum<{
+            human: "human";
+            system: "system";
+        }>;
+        client: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
     iss: z.ZodString;
     aud: z.ZodString;
     sub: z.ZodString;
@@ -837,6 +936,14 @@ export const principalSchema: z.ZodObject<{
     roles: z.ZodArray<z.ZodString>;
     scopes: z.ZodArray<z.ZodString>;
     metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    delegation: z.ZodOptional<z.ZodObject<{
+        subjectId: z.ZodString;
+        subjectType: z.ZodEnum<{
+            human: "human";
+            system: "system";
+        }>;
+        client: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 
 // @public (undocumented)
@@ -873,6 +980,11 @@ export const registrationRequestSchema: z.ZodObject<{
     healthCheckUrl: z.ZodURL;
     manifest: z.ZodObject<{
         protocolVersion: z.ZodLiteral<1>;
+        app: z.ZodOptional<z.ZodObject<{
+            title: z.ZodOptional<z.ZodString>;
+            description: z.ZodOptional<z.ZodString>;
+            instructions: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
         plugins: z.ZodArray<z.ZodObject<{
             id: z.ZodString;
             version: z.ZodString;
@@ -890,7 +1002,14 @@ export const registrationRequestSchema: z.ZodObject<{
             }, z.core.$strict>>;
         }, z.core.$strict>>;
         actions: z.ZodRecord<z.ZodString, z.ZodObject<{
+            title: z.ZodOptional<z.ZodString>;
             description: z.ZodOptional<z.ZodString>;
+            effect: z.ZodOptional<z.ZodEnum<{
+                read: "read";
+                write: "write";
+                destructive: "destructive";
+            }>>;
+            idempotent: z.ZodOptional<z.ZodBoolean>;
             inputSchema: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             outputSchema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             generated: z.ZodBoolean;

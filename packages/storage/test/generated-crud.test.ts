@@ -76,6 +76,10 @@ describe("generated entity CRUD", () => {
       principal,
     )) as { data: { title: string } };
     expect(updated.data.title).toBe("B");
+    // An identical patch still runs hooks and publishes another event. It is not
+    // safe to advertise generated updates as idempotent for automatic replay.
+    expect(kernel.manifest.actions["kanban.card.update"]?.idempotent).toBeUndefined();
+    await kernel.execute("kanban.card.update", { id: created.id, data: { title: "B" } }, principal);
     await kernel.execute("kanban.card.delete", { id: created.id }, principal);
     await expect(
       kernel.execute("kanban.card.get", { id: created.id }, principal),
@@ -88,14 +92,19 @@ describe("generated entity CRUD", () => {
       "after",
       "beforeUpdate",
       "afterUpdate",
+      "beforeUpdate",
+      "afterUpdate",
       "beforeDelete",
       "afterDelete",
     ]);
     const events = await storage.transaction("org-a", (tx) => tx.outbox.list());
-    expect(events.map(({ eventName }) => eventName)).toEqual([
+    // Outbox listing breaks equal-millisecond timestamp ties by UUID, not execution order.
+    // Hook order is asserted above; here verify the exact event multiset, including duplicates.
+    expect(events.map(({ eventName }) => eventName).sort()).toEqual([
       "kanban.card.created",
-      "kanban.card.updated",
       "kanban.card.deleted",
+      "kanban.card.updated",
+      "kanban.card.updated",
     ]);
     await kernel.stop();
   });

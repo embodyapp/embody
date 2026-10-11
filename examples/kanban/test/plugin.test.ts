@@ -76,6 +76,21 @@ describe("Kanban reference plugin", () => {
     });
   });
 
+  it("applies the agent guardrail to a person's credential used through MCP", async () => {
+    // The gateway attributes MCP calls made with a human credential to a delegated agent.
+    const h = (await harness()).asDelegatedAgent("alice", { client: "claude" });
+    const created = await card(h);
+    await expect(
+      h.call("kanban.card.update", { id: created.id, data: { status: "done" } }),
+    ).rejects.toMatchObject({ code: "HOOK_VETO" });
+    expect(h.audit().at(-1)).toMatchObject({
+      actorId: "claude:alice",
+      subjectId: "alice",
+      client: "claude",
+      outcome: "failure",
+    });
+  });
+
   it("emits ready_for_review exactly once per transition", async () => {
     const h = await harness();
     const created = await card(h);

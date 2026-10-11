@@ -6,6 +6,10 @@ Welcome to the comprehensive documentation for Embody. Whether you are building 
 
 ---
 
+## Minimal hosted MVP
+
+The [minimal MVP plan](./mvp/README.md) covers user CLI deployment, centralized CLI/MCP control, and mandatory scale-to-zero for apps and gateway. Follow the [testable implementation tasks](./mvp/IMPLEMENTATION.md), [completion tracker](./mvp/STATUS.md), and [verification gates](./mvp/VERIFICATION.md) to execute it. Planning is not implementation completion.
+
 ## 🗺️ Documentation Sitemap
 
 ```

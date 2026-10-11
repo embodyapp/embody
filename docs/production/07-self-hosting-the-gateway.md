@@ -69,7 +69,7 @@ await gateway.listen({
 });
 ```
 
-`MemoryAuditLog` and the in-process registry are useful primitives and examples. A production design must export audit records to durable storage and define how expected applications re-register after restart. `GatewayRegistry.initial` can seed known registrations, but registration ownership and persistence remain operator concerns.
+`MemoryAuditLog` and the in-process registry are useful primitives and examples. `jsonLineAuditSink()` writes one JSON audit record per line to stdout for a log pipeline; any object implementing `AuditSink` can be passed as `audit`. JSON, streaming and MCP execution are all audited and rate-limited, and records include the org, surface (`http`, `stream` or `mcp`), outcome and error code. A production design must export audit records to durable storage and define how expected applications re-register after restart. `GatewayRegistry.initial` can seed known registrations, but registration ownership and persistence remain operator concerns.
 
 ---
 

@@ -13,6 +13,7 @@ import type {
   EventHandler,
   WorkflowStepContext,
 } from "./contracts.js";
+import { isValidDelegation } from "./contracts.js";
 import {
   ConflictError,
   DependencyError,
@@ -30,7 +31,7 @@ import {
   type CompiledEntity,
   type EntityTransaction,
 } from "./entities.js";
-import { compileManifest, type AppManifest } from "./manifest.js";
+import { compileManifest, type AppManifest, type AppMetadata } from "./manifest.js";
 import { formatTarget } from "./target.js";
 import { progressUpdateSchema } from "./protocol.js";
 import {
@@ -58,6 +59,8 @@ export interface KernelComponent {
 }
 export interface KernelOptions {
   readonly plugins: readonly EmbodyPlugin[];
+  /** Optional app title, description and agent instructions included in the manifest. */
+  readonly app?: AppMetadata;
   readonly storage: KernelStorage;
   readonly components?: readonly KernelComponent[];
   readonly principal?: Principal;
@@ -257,6 +260,14 @@ export class Kernel {
         target,
         orgId: execution.principal.orgId,
         actorId: execution.principal.actorId,
+        ...(execution.principal.delegation === undefined
+          ? {}
+          : {
+              subjectId: execution.principal.delegation.subjectId,
+              ...(execution.principal.delegation.client === undefined
+                ? {}
+                : { client: execution.principal.delegation.client }),
+            }),
         ...(execution.requestId === undefined ? {} : { requestId: execution.requestId }),
         ...(execution.traceparent === undefined ? {} : { traceparent: execution.traceparent }),
         durationMs: Date.now() - startedAt,
@@ -426,7 +437,12 @@ export class Kernel {
       this.phase("registries");
       this.registerDefinitions();
       this.phase("manifest");
-      this._manifest = freeze(compileManifest(this.sorted));
+      this._manifest = freeze(
+        compileManifest(
+          this.sorted,
+          this.options.app === undefined ? {} : { app: this.options.app },
+        ),
+      );
       this.phase("start");
       for (const component of this.options.components ?? []) {
         await component.start?.();
@@ -670,7 +686,9 @@ export class Kernel {
       !Array.isArray(principal.roles) ||
       !Array.isArray(principal.scopes) ||
       !principal.roles.every((role) => typeof role === "string") ||
-      !principal.scopes.every((scope) => typeof scope === "string")
+      !principal.scopes.every((scope) => typeof scope === "string") ||
+      (principal.delegation !== undefined &&
+        (principal.actorType !== "agent" || !isValidDelegation(principal.delegation)))
     )
       throw new ValidationError("Principal is invalid");
   }

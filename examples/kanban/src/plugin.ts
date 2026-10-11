@@ -40,7 +40,9 @@ export const kanbanPlugin = definePlugin(
   (define) => ({
     actions: {
       bulkMove: define.action({
+        title: "Move cards",
         description: "Move multiple cards to a new status atomically",
+        effect: "write",
         input: bulkMoveInput,
         handler: async ({ cardIds, newStatus }, context) => {
           const cards = await context.entities.card.updateMany(

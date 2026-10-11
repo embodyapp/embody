@@ -191,6 +191,14 @@ try {
   });
   assert.equal(veto.status, 422);
   assert.equal((await veto.json()).error.code, "HOOK_VETO");
+  // MCP clients receive the guardrail's own message, not a generic failure.
+  const mcpVeto = await mcp.callTool({
+    name: "kanban__kanban_card_update",
+    arguments: { id: card.id, data: { status: "done" } },
+  });
+  assert.equal(mcpVeto.isError, true);
+  assert.equal(mcpVeto._meta?.["embody/errorCode"], "HOOK_VETO");
+  assert.match(mcpVeto.content[0].text, /without a linked PR URL/);
   const unchanged = await executeOk("kanban", "kanban.card.get", { id: card.id });
   assert.equal(unchanged.data.status, "todo");
   const phantom = await compose(

@@ -102,11 +102,13 @@ Claude will call `ops_tasks_task_list` with `{ "filter": { "status": "in_progres
 ### 3. Observe Mechanical Safety Vetoes in Real-Time
 > *"Mark the task as 'done'."*
 
-If your app has a PR validation hook, Claude will attempt to call `ops_tasks_task_update` with `{ "status": "done" }`. Embody will reject the mutation with:
+If your app has a PR validation hook, Claude will attempt to call `ops_tasks_task_update` with `{ "status": "done" }`. Embody rejects the mutation and returns the hook's own message as an MCP tool error (`isError: true`, with `_meta["embody/errorCode"]` set to `HOOK_VETO`):
 
 ```text
-HookVetoError: Autonomous agents cannot mark a task 'done' without a linked PR URL.
+Agents cannot complete cards without a linked PR URL
 ```
+
+Validation failures list each invalid field on its own line, and rate-limited calls include a retry hint.
 
 Claude will read the error and respond intelligently:
 > *"I attempted to mark the task as done, but the system prevented the change because a verified Pull Request URL is required. Please provide the PR URL so I can attach it and complete the task."*

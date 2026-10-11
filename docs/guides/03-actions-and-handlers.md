@@ -65,6 +65,27 @@ export const deploymentPlugin = definePlugin(
 );
 ```
 
+### Effects and titles
+
+Declare what an action does so MCP clients can tell reads from changes. Clients can use this for approval prompts, for example allowing reads without asking:
+
+```typescript
+exportBoard: define.action({
+  title: "Export board",          // short name shown in clients, ≤ 80 characters
+  description: "Export a board as a shareable file",
+  effect: "read",                 // "read" | "write" | "destructive"
+  idempotent: true,               // optional: repeating the call has no extra effect
+  input: z.object({ boardId: z.string() }),
+  output: z.object({ url: z.url() }),
+  handler: async (input, context) => ({ url: await exportBoard(input.boardId, context) }),
+}),
+```
+
+- `read`: no side effects. `write`: creates or changes state. `destructive`: deletes or irreversibly changes state.
+- Actions without `effect` are treated as `write`, so they never appear read-only by accident.
+- An `idempotent` declaration is app-author metadata, not a durable retry guarantee. Include hooks, published events and external effects when evaluating it; never blindly replay an ambiguous mutation based only on this flag.
+- Generated CRUD actions are marked automatically: `get`/`list` are `read`, `create` and `update` are `write` (updates are not automatically marked idempotent because hooks and events run again), `delete` is `destructive`. Workflow `status` is `read`, `start`/`retry` are `write`, `cancel` is `destructive`.
+
 ---
 
 ## 🧭 The Action Execution Context (`KernelContext`)
