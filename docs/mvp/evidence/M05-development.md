@@ -92,8 +92,9 @@ base SHA/dirty flag, lockfile/schema hashes and actual image identities.
 
 [Independent local review](./M05-independent-review.md) accepted runtime code and, after
 false-green/parser hardening and actual PostgreSQL regression, qualification tooling.
-Review did **not** accept M05 DONE without live proof. Initial clean candidate CI passed
-all eight checks on Node22/24; the final probe-hardening candidate must rerun exact CI.
+Review did **not** accept M05 DONE without live proof. Final hardened implementation
+`fae5169` passed all eight Node22/24 checks in CI38154874184; see [candidate acceptance](./M05-candidate.md).
+The local baseline warning above describes historical diagnostics, not the final clean CI evidence.
 
 Before DONE: committed-candidate independent security/scope review, Node 22/24 CI and
 packed/E2E evidence; approved cloud project/budget and distinct provider identities;

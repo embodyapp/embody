@@ -38,7 +38,9 @@ SQL parser/classifier coverage. Earlier candidate `07d9684` passed all eight che
 [CI38150639785](https://github.com/embodyapp/embody/actions/runs/38150639785); downloaded and
 inspected Node22/24 mandatory156/zero-skip and clean packed/distributed reports, not just
 job summaries. Its synthetic checkout `0fa33fd4` has the exact same Git tree as that
-candidate. Probe hardening after that candidate requires a fresh exact-candidate CI run.
+candidate. Final hardened implementation `fae5169` also passed all eight checks in
+[CI38154874184](https://github.com/embodyapp/embody/actions/runs/38154874184); its synthetic
+`a8e938be` has the identical full Git tree. [Final candidate counts/artifacts](./M05-candidate.md).
 
 ## Explicit boundary
 
