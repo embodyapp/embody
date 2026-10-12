@@ -28,7 +28,10 @@ async function main() {
   const connection = `${project}:${region}:${prefix}-postgres`,
     gatewayEmail = `${prefix}-gateway@${project}.iam.gserviceaccount.com`;
   const projectUrl = `https://cloudresourcemanager.googleapis.com/v1/projects/${project}`;
-  const policy = await api(`${projectUrl}:getIamPolicy`, "POST", {});
+  const policy = await api(`${projectUrl}:getIamPolicy`, "POST", {
+    options: { requestedPolicyVersion: 3 },
+  });
+  policy.version = 3;
   const members = [gatewayEmail, ...data.apps.map((app) => app.runtimeEmail)].map(
     (email) => `serviceAccount:${email}`,
   );

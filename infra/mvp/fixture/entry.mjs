@@ -43,7 +43,7 @@ async function main() {
   }
   stage = `start-${mode}`;
   if (mode === "gateway") {
-    await import("../../../apps/gateway/dist/index.js");
+    await import("../../../apps/gateway/dist/src/index.js");
     return;
   }
   if (["kanban", "email"].includes(mode)) {
