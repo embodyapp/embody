@@ -185,8 +185,10 @@ export function createCloudRunAppProvisioner({
       migratorEmail: `${names.migrator}@${project}.iam.gserviceaccount.com`,
     };
   }
-  async function deploy(scope, { image, issuer, jwksUrl, secretVersion }) {
+  async function deploy(scope, { image, issuer, jwksUrl, secretVersion, sqlConnection }) {
     const { names, labels } = context(scope);
+    if (sqlConnection !== undefined && sqlConnection !== `${project}:${region}:${prefix}-postgres`)
+      throw new Error("SQL connector outside admitted fixture");
     // Immutable digest only, confined to the Terraform-owned fixture repository.
     if (
       !new RegExp(
@@ -269,6 +271,12 @@ export function createCloudRunAppProvisioner({
             ports: [{ containerPort: 8080 }],
             resources: { limits: { cpu: "1", memory: "512Mi" }, cpuIdle: true },
             env: [
+              ...(sqlConnection
+                ? [
+                    { name: "EMBODY_SQL_CONNECTION", value: sqlConnection },
+                    { name: "EMBODY_FIXTURE_MODE", value: scope.appId },
+                  ]
+                : []),
               { name: "NODE_ENV", value: "production" },
               { name: "EMBODY_HOST_PROFILE", value: "hosted" },
               { name: "EMBODY_WORKSPACE_ID", value: scope.workspaceId },
