@@ -235,8 +235,7 @@ async function main() {
             old?.revision ?? null,
           );
         } finally {
-          await kernel.stop();
-          await storage.close();
+          await kernel.stop(); // Kernel owns storage cleanup.
         }
       }
     } finally {
@@ -268,6 +267,7 @@ async function main() {
     platformDatabaseSecret: `${prefix}-platform-db`,
     signingSecret: `${prefix}-signer`,
     databaseRole: "embody_test_runtime",
+    ownDatabase: "embody_test_app",
     platformDatabase: "embody_test_platform_db",
     otherDatabase: "embody_test_other_db",
   };

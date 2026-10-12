@@ -149,6 +149,12 @@ main().catch((error) => {
       fixtureFailure: true,
       stage,
       errorType: error?.name ?? "unknown",
+      probeFailure:
+        /^(Runtime metadata|Probe is not running|Own fixture|Effective permission query|Runtime has prohibited|Own-secret|Non-gateway|Runtime probe requires|Runtime probe needs|All fixture workload|Fixture provenance)/.test(
+          error?.message ?? "",
+        )
+          ? error.message
+          : undefined,
       errorTags: ["timeout", "sasl", "ssl", "connect", "terminated", "password", "client"].filter(
         (tag) => String(error?.message).toLowerCase().includes(tag),
       ),

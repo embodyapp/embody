@@ -32,6 +32,9 @@ export async function operator() {
         JSON.stringify({
           operatorApiFailure: response.status,
           service: new URL(url).host,
+          ...(new URL(url).host === "run.googleapis.com"
+            ? { publicDeploymentError: error.error?.message }
+            : {}),
           fields: (error.error?.details ?? []).flatMap((detail) =>
             (detail.fieldViolations ?? []).map((value) => value.field),
           ),

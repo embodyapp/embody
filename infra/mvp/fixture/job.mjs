@@ -107,7 +107,7 @@ async function main() {
     },
   };
   let operation = await api(
-    current ? `${url}?updateMask=template` : `${base}/jobs?jobId=${name}`,
+    current ? url : `${base}/jobs?jobId=${name}`,
     current ? "PATCH" : "POST",
     {
       labels: { managed_by: "embody-m05-probe-fixture", fixture: prefix },
