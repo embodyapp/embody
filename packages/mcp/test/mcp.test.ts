@@ -168,12 +168,22 @@ describe("MCP surface", () => {
 
   it("propagates client cancellation to execution", async () => {
     let cancelled = false;
+    let markStarted = () => {};
+    let markCancelled = () => {};
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const observedCancellation = new Promise<void>((resolve) => {
+      markCancelled = resolve;
+    });
     const url = await fixture(async function* (_context, _entry, _input, signal) {
+      markStarted();
       if (!signal.aborted)
         await new Promise<void>((resolve) => {
           signal.addEventListener("abort", () => resolve(), { once: true });
         });
       cancelled = signal.aborted;
+      markCancelled();
       if (!signal.aborted) yield { type: "result", value: null };
     });
     const client = new Client({ name: "test", version: "1.0.0" });
@@ -185,9 +195,11 @@ describe("MCP surface", () => {
     const call = client.callTool({ name: "kanban__cards_send_batch", arguments: {} }, undefined, {
       signal: controller.signal,
     });
+    // Cancellation must occur after server execution starts, not race HTTP dispatch.
+    await started;
     controller.abort();
     await expect(call).rejects.toThrow();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await observedCancellation;
     expect(cancelled).toBe(true);
     await client.close();
   });

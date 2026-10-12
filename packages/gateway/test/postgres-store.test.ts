@@ -186,22 +186,26 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
       import assert from 'node:assert/strict';
       import { Client } from 'pg';
       import { createRuntimeSqlProbe } from '../../scripts/probe-m05-runtime.mjs';
+      import { createAppHost } from '../host/dist/index.js';
       const sql = createRuntimeSqlProbe(Client);
       const own = new URL(process.env.EMBODY_POSTGRES_URL);
       const role = decodeURIComponent(own.username);
       await sql(own.href, role, 'inspect');
+      const host = await createAppHost({appId:'proof',version:'1.0.0',plugins:[]}, {env:{NODE_ENV:'production',EMBODY_HOST_PROFILE:'hosted',EMBODY_WORKSPACE_ID:'ws_readonly01',DATABASE_URL:own.href,GATEWAY_JWT_ISSUER:'fixture',GATEWAY_JWKS_URL:'https://example.com/jwks'}});
+      await host.stop();
       const platform = new URL(own);
       platform.pathname = new URL(process.env.EMBODY_PLATFORM_URL).pathname;
       await assert.rejects(sql(platform.href, role, 'connect-only'), error => error.code === '42501' && error.stage === 'connect');
       const migration = new URL(process.env.EMBODY_POSTGRES_MIGRATION_URL);
       await assert.rejects(sql(migration.href, decodeURIComponent(migration.username), 'inspect'), /elevated or mismatched/);
-      console.log(JSON.stringify({ ownRole: 'restricted', platformConnect: 'denied', elevatedMigrator: 'rejected' }));
+      console.log(JSON.stringify({ ownRole: 'restricted', hostedStartup: 'verified', platformConnect: 'denied', elevatedMigrator: 'rejected' }));
     `,
       ],
       { cwd: import.meta.dirname + "/..", env: process.env },
     );
     expect(JSON.parse(probe.stdout)).toEqual({
       ownRole: "restricted",
+      hostedStartup: "verified",
       platformConnect: "denied",
       elevatedMigrator: "rejected",
     });

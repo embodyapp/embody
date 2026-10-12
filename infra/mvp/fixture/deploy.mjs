@@ -203,9 +203,12 @@ async function main() {
       for (let i = 0; i < data.apps.length; i++) {
         const app = data.apps[i];
         if (!(await store.snapshot(app.workspaceId))) await store.createWorkspace(app.workspaceId);
-        const storage = new PostgresStorage({
-          connectionString: data.dsns[i === 0 ? "runtime" : "other"].replace(":5432/", ":15432/"),
-        });
+        const storage = new PostgresStorage(
+          {
+            connectionString: data.dsns[i === 0 ? "runtime" : "other"].replace(":5432/", ":15432/"),
+          },
+          { schemaMode: "verify" },
+        );
         const kernel = new Kernel({ plugins: fixtureApp(app.appId).plugins, storage });
         await kernel.boot();
         try {

@@ -547,7 +547,10 @@ export async function createAppHost(
     throw new Error("Hosted authentication cannot be overridden");
   let storage = options.storage;
   if (storage === undefined && environment.DATABASE_URL)
-    storage = new PostgresStorage({ connectionString: environment.DATABASE_URL });
+    storage = new PostgresStorage(
+      { connectionString: environment.DATABASE_URL },
+      { schemaMode: environment.EMBODY_HOST_PROFILE === "hosted" ? "verify" : "migrate" },
+    );
   if (storage === undefined) {
     const filename =
       environment.DATABASE_FILE === ":memory:"
