@@ -44,6 +44,10 @@ variable "enable_postgres" {
   type    = bool
   default = false
 }
+variable "enable_network" {
+  type    = bool
+  default = false
+}
 
 locals {
   labels = { managed_by = "embody-m05-foundation", fixture = var.prefix }
@@ -141,6 +145,44 @@ resource "google_sql_database_instance" "postgres" {
     backup_configuration { enabled = false }
   }
   depends_on = [google_project_service.sql]
+}
+# Disposable direct-VPC egress for internal-only apps; NAT is a paid, bounded spike.
+resource "google_project_service" "compute" {
+  count              = var.enable_network ? 1 : 0
+  service            = "compute.googleapis.com"
+  disable_on_destroy = false
+}
+resource "google_compute_network" "fixture" {
+  count                   = var.enable_network ? 1 : 0
+  name                    = "${var.prefix}-network"
+  auto_create_subnetworks = false
+  depends_on              = [google_project_service.compute]
+}
+resource "google_compute_subnetwork" "fixture" {
+  count                    = var.enable_network ? 1 : 0
+  name                     = "${var.prefix}-subnet"
+  region                   = var.region
+  network                  = google_compute_network.fixture[0].id
+  ip_cidr_range            = "10.5.0.0/24"
+  private_ip_google_access = true
+}
+resource "google_compute_router" "fixture" {
+  count   = var.enable_network ? 1 : 0
+  name    = "${var.prefix}-router"
+  region  = var.region
+  network = google_compute_network.fixture[0].id
+}
+resource "google_compute_router_nat" "fixture" {
+  count                              = var.enable_network ? 1 : 0
+  name                               = "${var.prefix}-nat"
+  router                             = google_compute_router.fixture[0].name
+  region                             = var.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "LIST_OF_SUBNETWORKS"
+  subnetwork {
+    name                    = google_compute_subnetwork.fixture[0].id
+    source_ip_ranges_to_nat = ["ALL_IP_RANGES"]
+  }
 }
 output "foundation" {
   value = {

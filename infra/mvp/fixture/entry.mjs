@@ -12,10 +12,12 @@ import {
 } from "../../../scripts/probe-m05-runtime.mjs";
 const mode = process.argv[2] ?? process.env.EMBODY_FIXTURE_MODE;
 let proxy;
+let stage = "connection-validation";
 async function main() {
   const instance = process.env.EMBODY_SQL_CONNECTION;
   if (!/^[a-z][a-z0-9-]+:us-central1:embody-test-[a-z0-9-]+$/.test(instance ?? ""))
     throw new Error("Approved SQL connection required");
+  stage = "proxy-start";
   proxy = spawn(
     "/usr/local/bin/cloud-sql-proxy",
     ["--address=127.0.0.1", "--port=5432", instance],
@@ -39,6 +41,7 @@ async function main() {
     if (attempt === 29) throw new Error("SQL proxy unavailable");
     await delay(1000);
   }
+  stage = `start-${mode}`;
   if (mode === "gateway") {
     await import("../../../apps/gateway/dist/index.js");
     return;
@@ -86,8 +89,18 @@ async function main() {
   );
   proxy.kill();
 }
-main().catch(() => {
+main().catch((error) => {
   proxy?.kill();
-  console.error("M05 fixture failed; private diagnostics suppressed");
+  console.error(
+    JSON.stringify({
+      fixtureFailure: true,
+      stage,
+      errorType: error?.name ?? "unknown",
+      sqlCode:
+        typeof error?.code === "string" && /^[A-Z0-9]{5}$/.test(error.code)
+          ? error.code
+          : undefined,
+    }),
+  );
   process.exitCode = 1;
 });

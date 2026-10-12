@@ -257,10 +257,20 @@ export function createCloudRunAppProvisioner({
     }
     const body = {
       labels,
-      ingress: "INGRESS_TRAFFIC_ALL",
+      ingress: sqlConnection ? "INGRESS_TRAFFIC_INTERNAL_ONLY" : "INGRESS_TRAFFIC_ALL",
       invokerIamDisabled: false,
       defaultUriDisabled: false,
       template: {
+        ...(sqlConnection
+          ? {
+              vpcAccess: {
+                egress: "ALL_TRAFFIC",
+                networkInterfaces: [
+                  { network: `${prefix}-network`, subnetwork: `${prefix}-subnet` },
+                ],
+              },
+            }
+          : {}),
         serviceAccount: `${names.runtime}@${project}.iam.gserviceaccount.com`,
         scaling: { minInstanceCount: 0, maxInstanceCount: 1 },
         maxInstanceRequestConcurrency: 4,

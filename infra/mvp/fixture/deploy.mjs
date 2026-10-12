@@ -32,29 +32,41 @@ async function main() {
   const members = [gatewayEmail, ...data.apps.map((app) => app.runtimeEmail)].map(
     (email) => `serviceAccount:${email}`,
   );
-  const existing = policy.bindings?.find(
-    (binding) => binding.role === "roles/cloudsql.client" && !binding.condition,
-  );
-  if (existing) existing.members = [...new Set([...existing.members, ...members])];
-  else policy.bindings.push({ role: "roles/cloudsql.client", members });
+  policy.bindings = policy.bindings
+    .map((binding) =>
+      binding.role === "roles/cloudsql.client"
+        ? { ...binding, members: binding.members.filter((member) => !members.includes(member)) }
+        : binding,
+    )
+    .filter((binding) => binding.members.length);
+  policy.bindings.push({
+    role: "roles/cloudsql.client",
+    members,
+    condition: {
+      title: "m05-only-instance",
+      expression: `resource.name == 'projects/${project}/instances/${prefix}-postgres'`,
+    },
+  });
   await api(`${projectUrl}:setIamPolicy`, "POST", { policy });
   const issuer = "https://embody-cloud.m05.gateway";
   const env = (phase) => [
     { name: "NODE_ENV", value: "production" },
-    { name: "PORT", value: "8080" },
     { name: "GATEWAY_PROFILE", value: "hosted" },
     { name: "EMBODY_SQL_CONNECTION", value: connection },
     { name: "EMBODY_FIXTURE_MODE", value: "gateway" },
     { name: "GATEWAY_SERVICE_ACCOUNT_EMAIL", value: gatewayEmail },
     { name: "GATEWAY_JWT_ISSUER", value: issuer },
-    { name: "GATEWAY_JWT_KID", value: phase === "initial" ? "m05-key-1" : "m05-key-2" },
+    {
+      name: "GATEWAY_JWT_KID",
+      value: ["initial", "publish"].includes(phase) ? "m05-key-1" : "m05-key-2",
+    },
     {
       name: "GATEWAY_JWT_PUBLIC_JWKS",
       value: JSON.stringify({
         keys:
           phase === "initial"
             ? [data.publicKeys[0]]
-            : phase === "overlap"
+            : ["publish", "overlap"].includes(phase)
               ? data.publicKeys
               : [data.publicKeys[1]],
       }),
@@ -62,7 +74,14 @@ async function main() {
     {
       name: "GATEWAY_JWT_PRIVATE_KEY",
       valueSource: {
-        secretKeyRef: { secret: `${prefix}-signer`, version: phase === "initial" ? "1" : "2" },
+        secretKeyRef: {
+          secret: `${prefix}-signer`,
+          version: data.secretVersions[
+            ["initial", "publish"].includes(phase) ? "signer1" : "signer2"
+          ]
+            .split("/")
+            .at(-1),
+        },
       },
     },
     {
@@ -76,6 +95,15 @@ async function main() {
     },
   ];
   const phase = process.env.EMBODY_M05_PHASE ?? "initial";
+  if (!["initial", "publish", "overlap", "removed"].includes(phase))
+    throw new Error("Invalid phase");
+  if (phase === "overlap" && (!data.publishAt || Date.now() - Date.parse(data.publishAt) < 60000))
+    throw new Error("Public-key overlap must converge for60s before switching");
+  if (
+    phase === "removed" &&
+    (!data.switchedAt || Date.now() - Date.parse(data.switchedAt) < 300000)
+  )
+    throw new Error("Old signers must stop for300s before removal");
   const base = `https://run.googleapis.com/v2/projects/${project}/locations/${region}`;
   const gatewayName = `${prefix}-gateway`;
   let gateway;
@@ -91,6 +119,10 @@ async function main() {
     ingress: "INGRESS_TRAFFIC_ALL",
     invokerIamDisabled: false,
     template: {
+      vpcAccess: {
+        egress: "ALL_TRAFFIC",
+        networkInterfaces: [{ network: `${prefix}-network`, subnetwork: `${prefix}-subnet` }],
+      },
       serviceAccount: gatewayEmail,
       scaling: { minInstanceCount: 0, maxInstanceCount: 1 },
       maxInstanceRequestConcurrency: 4,
@@ -138,6 +170,9 @@ async function main() {
   });
   data.gateway = gateway.uri;
   data.phase = phase;
+  if (phase === "publish") data.publishAt = new Date().toISOString();
+  if (phase === "overlap") data.switchedAt = new Date().toISOString();
+  if (phase === "removed") data.removedAt = new Date().toISOString();
   data.image = image;
   data.candidateSha = candidateSha;
   const provisioner = createCloudRunAppProvisioner({

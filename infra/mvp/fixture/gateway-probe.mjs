@@ -110,62 +110,63 @@ export async function runGatewayProbe(config) {
     if ((await call(valid, config.otherAppOrigin)).status !== 401)
       throw new Error("Cross-app/workspace replay accepted");
     checks.push("cross-app-workspace-replay-rejected");
-    const store = new PostgresGatewayStore(process.env.GATEWAY_PLATFORM_DATABASE_URL);
-    const issued = newCredential({
-      workspaceId: config.workspaceId,
-      principal,
-      grants: [{ workspaceId: config.workspaceId, appId: "app_kanban0001", role: "app-caller" }],
-      expiresAt: new Date(Date.now() + 900000).toISOString(),
-    });
-    let record;
-    try {
-      record = await store.putCredential(issued.credential, null);
-      const gatewayUrl = process.env.EMBODY_GATEWAY_ORIGIN;
-      for (const route of ["execute", "execute/stream"]) {
-        const response = await fetch(
-          `${gatewayUrl}/w/${config.workspaceId}/api/${route}/kanban/kanban.ping`,
-          {
-            method: "POST",
-            redirect: "error",
-            signal: AbortSignal.timeout(30000),
-            headers: {
-              authorization: `Bearer ${issued.token}`,
-              "content-type": "application/json",
-            },
-            body: "{}",
+  }
+  const store = new PostgresGatewayStore(process.env.GATEWAY_PLATFORM_DATABASE_URL);
+  const issued = newCredential({
+    workspaceId: config.workspaceId,
+    principal,
+    grants: [{ workspaceId: config.workspaceId, appId: "app_kanban0001", role: "app-caller" }],
+    expiresAt: new Date(Date.now() + 900000).toISOString(),
+  });
+  let record;
+  try {
+    record = await store.putCredential(issued.credential, null);
+    const gatewayUrl = process.env.EMBODY_GATEWAY_ORIGIN;
+    for (const route of ["execute", "execute/stream"]) {
+      const response = await fetch(
+        `${gatewayUrl}/w/${config.workspaceId}/api/${route}/kanban/kanban.ping`,
+        {
+          method: "POST",
+          redirect: "error",
+          signal: AbortSignal.timeout(30000),
+          headers: {
+            authorization: `Bearer ${issued.token}`,
+            "content-type": "application/json",
           },
-        );
-        if (response.status !== 200) throw new Error("Gateway roundtrip failed");
-        await response.text();
-        checks.push(`${route}-roundtrip-accepted`);
-      }
-      const { Client } = await import(require.resolve("@modelcontextprotocol/sdk/client/index.js"));
-      const { StreamableHTTPClientTransport } = await import(
-        require.resolve("@modelcontextprotocol/sdk/client/streamableHttp.js")
+          body: "{}",
+        },
       );
-      const client = new Client({ name: "m05-live", version: "1" });
-      try {
-        await client.connect(
-          new StreamableHTTPClientTransport(new URL(`/w/${config.workspaceId}/mcp`, gatewayUrl), {
-            requestInit: { headers: { authorization: `Bearer ${issued.token}` } },
-          }),
-        );
-        const result = await client.callTool({ name: "kanban__kanban_ping", arguments: {} });
-        if (
-          result.isError ||
-          !JSON.stringify(result).includes('"agent"') ||
-          !JSON.stringify(result).includes('"delegation"')
-        )
-          throw new Error("Live MCP delegated actor missing");
-        checks.push("mcp-delegated-agent-roundtrip-accepted");
-      } finally {
-        await client.close();
-      }
-    } finally {
-      if (record) await store.putCredential({ ...record, revoked: true }, record.revision);
-      await store.close();
+      if (response.status !== 200) throw new Error("Gateway roundtrip failed");
+      await response.text();
+      checks.push(`${route}-roundtrip-accepted`);
     }
-  } else {
+    const { Client } = await import(require.resolve("@modelcontextprotocol/sdk/client/index.js"));
+    const { StreamableHTTPClientTransport } = await import(
+      require.resolve("@modelcontextprotocol/sdk/client/streamableHttp.js")
+    );
+    const client = new Client({ name: "m05-live", version: "1" });
+    try {
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(`/w/${config.workspaceId}/mcp`, gatewayUrl), {
+          requestInit: { headers: { authorization: `Bearer ${issued.token}` } },
+        }),
+      );
+      const result = await client.callTool({ name: "kanban__kanban_ping", arguments: {} });
+      if (
+        result.isError ||
+        !JSON.stringify(result).includes('"agent"') ||
+        !JSON.stringify(result).includes('"delegation"')
+      )
+        throw new Error("Live MCP delegated actor missing");
+      checks.push("mcp-delegated-agent-roundtrip-accepted");
+    } finally {
+      await client.close();
+    }
+  } finally {
+    if (record) await store.putCredential({ ...record, revoked: true }, record.revision);
+    await store.close();
+  }
+  if (["overlap", "removed"].includes(phase)) {
     const metadata = await fetch(
       "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
       { headers: { "Metadata-Flavor": "Google" }, signal: AbortSignal.timeout(5000) },
@@ -174,7 +175,7 @@ export async function runGatewayProbe(config) {
       throw new Error("Metadata token unavailable");
     const access = (await metadata.json()).access_token;
     const secret = await fetch(
-      `https://secretmanager.googleapis.com/v1/projects/${config.project}/secrets/${config.signingSecret}/versions/1:access`,
+      `https://secretmanager.googleapis.com/v1/projects/${config.project}/secrets/${config.signingSecret}/versions/${process.env.EMBODY_OLD_SIGNER_VERSION}:access`,
       { headers: { authorization: `Bearer ${access}` }, signal: AbortSignal.timeout(5000) },
     );
     if (!secret.ok) throw new Error("Old key authority unavailable");

@@ -26,7 +26,19 @@ export async function operator() {
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
-    if (!response.ok) throw new Error(`Operator API failed ${response.status}; body suppressed`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      console.error(
+        JSON.stringify({
+          operatorApiFailure: response.status,
+          service: new URL(url).host,
+          fields: (error.error?.details ?? []).flatMap((detail) =>
+            (detail.fieldViolations ?? []).map((value) => value.field),
+          ),
+        }),
+      );
+      throw new Error(`Operator API failed ${response.status}; body suppressed`);
+    }
     return response.status === 204 ? {} : response.json();
   };
   return { api, token };
@@ -125,6 +137,7 @@ async function main() {
           `CREATE ROLE ${role} LOGIN PASSWORD '${pwd}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS NOREPLICATION`,
         );
     }
+    await admin.query("REVOKE CONNECT ON DATABASE postgres, template1, template0 FROM PUBLIC");
     for (const [db, mig, runtime] of [
       ["embody_test_app", "migrator", "runtime"],
       ["embody_test_other_db", "other_mig", "other"],

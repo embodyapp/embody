@@ -1,6 +1,7 @@
 // Operator launches bounded jobs; probes themselves use ONLY attached workload metadata.
 import { setTimeout as delay } from "node:timers/promises";
 import { operator, loadPrivate } from "./bootstrap.mjs";
+import { fixtureConfigDigest } from "../../../scripts/probe-m05-runtime.mjs";
 async function main() {
   if (
     process.env.EMBODY_MVP_CLOUD_BUDGET_APPROVED !== "true" ||
@@ -23,18 +24,22 @@ async function main() {
     { name: "EMBODY_M05_CONFIG", value: JSON.stringify(config) },
     { name: "EMBODY_M05_PHASE", value: data.phase },
     { name: "EMBODY_GATEWAY_ORIGIN", value: data.gateway },
+    { name: "EMBODY_OLD_SIGNER_VERSION", value: data.secretVersions.signer1.split("/").at(-1) },
   ];
   if (mode === "gateway-probe")
     env.push(
       { name: "GATEWAY_JWT_ISSUER", value: "https://embody-cloud.m05.gateway" },
-      { name: "GATEWAY_JWT_KID", value: data.phase === "initial" ? "m05-key-1" : "m05-key-2" },
+      {
+        name: "GATEWAY_JWT_KID",
+        value: ["initial", "publish"].includes(data.phase) ? "m05-key-1" : "m05-key-2",
+      },
       {
         name: "GATEWAY_JWT_PUBLIC_JWKS",
         value: JSON.stringify({
           keys:
             data.phase === "initial"
               ? [data.publicKeys[0]]
-              : data.phase === "overlap"
+              : ["publish", "overlap"].includes(data.phase)
                 ? data.publicKeys
                 : [data.publicKeys[1]],
         }),
@@ -44,7 +49,11 @@ async function main() {
         valueSource: {
           secretKeyRef: {
             secret: `${prefix}-signer`,
-            version: data.phase === "initial" ? "1" : "2",
+            version: data.secretVersions[
+              ["initial", "publish"].includes(data.phase) ? "signer1" : "signer2"
+            ]
+              .split("/")
+              .at(-1),
           },
         },
       },
@@ -73,6 +82,10 @@ async function main() {
     parallelism: 1,
     template: {
       serviceAccount,
+      vpcAccess: {
+        egress: "ALL_TRAFFIC",
+        networkInterfaces: [{ network: `${prefix}-network`, subnetwork: `${prefix}-subnet` }],
+      },
       timeout: "300s",
       maxRetries: 0,
       containers: [
@@ -123,7 +136,16 @@ async function main() {
   const reports = (logs.entries ?? [])
     .filter((entry) => entry.jsonPayload?.gate?.startsWith("m05-"))
     .map((entry) => entry.jsonPayload);
-  if (execution.succeededCount !== 1 || !reports.some((report) => report.status === "passed"))
+  if (
+    execution.succeededCount !== 1 ||
+    !reports.some(
+      (report) =>
+        report.status === "passed" &&
+        report.candidateSha === data.candidateSha &&
+        report.fixtureConfigSha256 === fixtureConfigDigest(config) &&
+        (mode === "runtime-probe" || report.phase === data.phase),
+    )
+  )
     throw new Error("No successful execution/probe evidence");
   console.log(
     JSON.stringify({ execution: execution.name, image: data.image, serviceAccount, reports }),
