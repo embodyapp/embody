@@ -261,6 +261,7 @@ export function createCloudRunAppProvisioner({
       invokerIamDisabled: false,
       defaultUriDisabled: false,
       template: {
+        ...(sqlConnection ? { executionEnvironment: "EXECUTION_ENVIRONMENT_GEN2" } : {}),
         ...(sqlConnection
           ? {
               vpcAccess: {

@@ -652,7 +652,11 @@ export async function createAppHost(
     try {
       await host.stop();
     } finally {
-      await kernel.stop();
+      try {
+        await kernel.stop();
+      } finally {
+        if (options.storage === undefined) await storage.close();
+      }
     }
   };
   return {

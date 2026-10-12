@@ -122,6 +122,7 @@ async function main() {
     ingress: "INGRESS_TRAFFIC_ALL",
     invokerIamDisabled: false,
     template: {
+      executionEnvironment: "EXECUTION_ENVIRONMENT_GEN2",
       vpcAccess: {
         egress: "ALL_TRAFFIC",
         networkInterfaces: [{ network: `${prefix}-network`, subnetwork: `${prefix}-subnet` }],

@@ -134,6 +134,9 @@ main().catch((error) => {
       fixtureFailure: true,
       stage,
       errorType: error?.name ?? "unknown",
+      errorTags: ["timeout", "sasl", "ssl", "connect", "terminated", "password", "client"].filter(
+        (tag) => String(error?.message).toLowerCase().includes(tag),
+      ),
       errorCategory: [
         "Connection terminated unexpectedly",
         "permission denied for schema public",
