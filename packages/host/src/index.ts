@@ -652,11 +652,8 @@ export async function createAppHost(
     try {
       await host.stop();
     } finally {
-      try {
-        await kernel.stop();
-      } finally {
-        if (options.storage === undefined) await storage.close();
-      }
+      // Kernel owns storage cleanup, including adapters constructed by this factory.
+      await kernel.stop();
     }
   };
   return {

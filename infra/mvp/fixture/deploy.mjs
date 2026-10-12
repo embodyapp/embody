@@ -56,6 +56,7 @@ async function main() {
     { name: "NODE_ENV", value: "production" },
     { name: "GATEWAY_PROFILE", value: "hosted" },
     { name: "EMBODY_SQL_CONNECTION", value: connection },
+    { name: "EMBODY_SQL_SOCKET", value: "true" },
     { name: "EMBODY_FIXTURE_MODE", value: "gateway" },
     { name: "GATEWAY_SERVICE_ACCOUNT_EMAIL", value: gatewayEmail },
     { name: "GATEWAY_JWT_ISSUER", value: issuer },
@@ -131,9 +132,11 @@ async function main() {
       scaling: { minInstanceCount: 0, maxInstanceCount: 1 },
       maxInstanceRequestConcurrency: 4,
       timeout: "120s",
+      volumes: [{ name: "cloudsql", cloudSqlInstance: { instances: [connection] } }],
       containers: [
         {
           image,
+          volumeMounts: [{ name: "cloudsql", mountPath: "/cloudsql" }],
           resources: { limits: { cpu: "1", memory: "512Mi" }, cpuIdle: true },
           ports: [{ containerPort: 8080 }],
           env: env(phase),

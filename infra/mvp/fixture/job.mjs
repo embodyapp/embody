@@ -17,6 +17,7 @@ async function main() {
     serviceAccount = mode === "runtime-probe" ? config.runtime : config.gateway;
   const env = [
     { name: "EMBODY_SQL_CONNECTION", value: `${project}:${region}:${prefix}-postgres` },
+    { name: "EMBODY_SQL_SOCKET", value: "true" },
     { name: "EMBODY_MVP_CLOUD_PROJECT", value: project },
     { name: "EMBODY_MVP_CLOUD_RESOURCE_PREFIX", value: prefix },
     { name: "EMBODY_MVP_CLOUD_BUDGET_APPROVED", value: "true" },
@@ -88,9 +89,16 @@ async function main() {
       },
       timeout: "300s",
       maxRetries: 0,
+      volumes: [
+        {
+          name: "cloudsql",
+          cloudSqlInstance: { instances: [`${project}:${region}:${prefix}-postgres`] },
+        },
+      ],
       containers: [
         {
           image: data.image,
+          volumeMounts: [{ name: "cloudsql", mountPath: "/cloudsql" }],
           args: [mode],
           resources: { limits: { cpu: "1", memory: "512Mi" } },
           env,

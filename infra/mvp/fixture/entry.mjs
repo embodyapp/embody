@@ -17,35 +17,45 @@ async function main() {
   const instance = process.env.EMBODY_SQL_CONNECTION;
   if (!/^[a-z][a-z0-9-]+:us-central1:embody-test-[a-z0-9-]+$/.test(instance ?? ""))
     throw new Error("Approved SQL connection required");
-  stage = "proxy-start";
-  proxy = spawn(
-    "/usr/local/bin/cloud-sql-proxy",
-    ["--address=127.0.0.1", "--port=5432", instance],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
-  proxy.on("error", () => {});
-  const proxyDiagnostic = (chunk) => {
-    const status = /\b(401|403|404|429|500|503)\b/.exec(String(chunk))?.[1];
-    if (status) console.error(JSON.stringify({ proxyFailureStatus: Number(status) }));
+  const socketDsn = (value) => {
+    const url = new URL(value);
+    if (process.env.EMBODY_SQL_SOCKET === "true")
+      url.searchParams.set("host", `/cloudsql/${instance}`);
+    return url.href;
   };
-  proxy.stdout.on("data", proxyDiagnostic);
-  proxy.stderr.on("data", proxyDiagnostic);
-  for (let attempt = 0; attempt < 30; attempt++) {
-    const ready = await new Promise((resolve) => {
-      const socket = connect({ host: "127.0.0.1", port: 5432 });
-      socket.once("connect", () => {
-        socket.destroy();
-        resolve(true);
+  for (const name of ["DATABASE_URL", "GATEWAY_PLATFORM_DATABASE_URL"])
+    if (process.env[name]) process.env[name] = socketDsn(process.env[name]);
+  if (process.env.EMBODY_SQL_SOCKET !== "true") {
+    stage = "proxy-start";
+    proxy = spawn(
+      "/usr/local/bin/cloud-sql-proxy",
+      ["--address=127.0.0.1", "--port=5432", instance],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    proxy.on("error", () => {});
+    const proxyDiagnostic = (chunk) => {
+      const status = /\b(401|403|404|429|500|503)\b/.exec(String(chunk))?.[1];
+      if (status) console.error(JSON.stringify({ proxyFailureStatus: Number(status) }));
+    };
+    proxy.stdout.on("data", proxyDiagnostic);
+    proxy.stderr.on("data", proxyDiagnostic);
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const ready = await new Promise((resolve) => {
+        const socket = connect({ host: "127.0.0.1", port: 5432 });
+        socket.once("connect", () => {
+          socket.destroy();
+          resolve(true);
+        });
+        socket.once("error", () => resolve(false));
+        socket.setTimeout(1000, () => {
+          socket.destroy();
+          resolve(false);
+        });
       });
-      socket.once("error", () => resolve(false));
-      socket.setTimeout(1000, () => {
-        socket.destroy();
-        resolve(false);
-      });
-    });
-    if (ready) break;
-    if (attempt === 29) throw new Error("SQL proxy unavailable");
-    await delay(1000);
+      if (ready) break;
+      if (attempt === 29) throw new Error("SQL proxy unavailable");
+      await delay(1000);
+    }
   }
   // Direct VPC egress may become usable AFTER the local proxy starts listening.
   // Retry only bounded transport failures; SQL authentication/authorization errors fail closed.
@@ -93,7 +103,7 @@ async function main() {
       JSON.stringify({ fixture: mode, ready: true, sourceSha: process.env.EMBODY_SOURCE_SHA }),
     );
     process.once("SIGTERM", () => {
-      proxy.kill();
+      proxy?.kill();
       void runtime.stop();
     });
     return;
@@ -115,7 +125,10 @@ async function main() {
     const { Client } = createRequire(
       new URL("../../../packages/gateway/package.json", import.meta.url),
     )("pg");
-    report = await probeRuntimeIsolation(config, { sql: createRuntimeSqlProbe(Client) });
+    const sql = createRuntimeSqlProbe(Client);
+    report = await probeRuntimeIsolation(config, {
+      sql: (dsn, role, mode) => sql(socketDsn(dsn), role, mode),
+    });
   } else if (mode === "gateway-probe") {
     const { runGatewayProbe } = await import("./gateway-probe.mjs");
     report = await runGatewayProbe(config);
@@ -127,7 +140,7 @@ async function main() {
       timestamp: new Date().toISOString(),
     }),
   );
-  proxy.kill();
+  proxy?.kill();
 }
 main().catch((error) => {
   proxy?.kill();

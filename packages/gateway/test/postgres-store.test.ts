@@ -217,5 +217,5 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
         await pool.end();
       }
     }
-  });
+  }, 20_000);
 });

@@ -276,8 +276,14 @@ export function createCloudRunAppProvisioner({
         scaling: { minInstanceCount: 0, maxInstanceCount: 1 },
         maxInstanceRequestConcurrency: 4,
         timeout: "60s",
+        ...(sqlConnection
+          ? { volumes: [{ name: "cloudsql", cloudSqlInstance: { instances: [sqlConnection] } }] }
+          : {}),
         containers: [
           {
+            ...(sqlConnection
+              ? { volumeMounts: [{ name: "cloudsql", mountPath: "/cloudsql" }] }
+              : {}),
             image,
             ports: [{ containerPort: 8080 }],
             resources: { limits: { cpu: "1", memory: "512Mi" }, cpuIdle: true },
@@ -286,6 +292,7 @@ export function createCloudRunAppProvisioner({
                 ? [
                     { name: "EMBODY_SQL_CONNECTION", value: sqlConnection },
                     { name: "EMBODY_FIXTURE_MODE", value: scope.appId },
+                    { name: "EMBODY_SQL_SOCKET", value: "true" },
                   ]
                 : []),
               { name: "NODE_ENV", value: "production" },
