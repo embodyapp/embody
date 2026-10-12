@@ -21,9 +21,15 @@ async function main() {
   proxy = spawn(
     "/usr/local/bin/cloud-sql-proxy",
     ["--address=127.0.0.1", "--port=5432", instance],
-    { stdio: "ignore" },
+    { stdio: ["ignore", "pipe", "pipe"] },
   );
   proxy.on("error", () => {});
+  const proxyDiagnostic = (chunk) => {
+    const status = /\b(401|403|404|429|500|503)\b/.exec(String(chunk))?.[1];
+    if (status) console.error(JSON.stringify({ proxyFailureStatus: Number(status) }));
+  };
+  proxy.stdout.on("data", proxyDiagnostic);
+  proxy.stderr.on("data", proxyDiagnostic);
   for (let attempt = 0; attempt < 30; attempt++) {
     const ready = await new Promise((resolve) => {
       const socket = connect({ host: "127.0.0.1", port: 5432 });
@@ -96,6 +102,17 @@ main().catch((error) => {
       fixtureFailure: true,
       stage,
       errorType: error?.name ?? "unknown",
+      errorCategory: [
+        "Connection terminated unexpectedly",
+        "permission denied for schema public",
+        "PostgreSQL storage migrations must be applied by maintenance identity before hosted startup",
+      ].includes(error?.message)
+        ? error.message
+        : undefined,
+      systemCode:
+        typeof error?.code === "string" && /^[A-Z0-9_]{3,40}$/.test(error.code)
+          ? error.code
+          : undefined,
       sqlCode:
         typeof error?.code === "string" && /^[A-Z0-9]{5}$/.test(error.code)
           ? error.code

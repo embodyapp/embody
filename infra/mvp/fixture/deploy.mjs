@@ -47,7 +47,7 @@ async function main() {
     members,
     condition: {
       title: "m05-only-instance",
-      expression: `resource.name == 'projects/${project}/instances/${prefix}-postgres'`,
+      expression: `resource.name.endsWith('/instances/${prefix}-postgres')`,
     },
   });
   await api(`${projectUrl}:setIamPolicy`, "POST", { policy });
