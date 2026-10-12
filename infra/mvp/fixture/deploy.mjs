@@ -6,6 +6,7 @@ import { PostgresGatewayStore } from "../../../packages/gateway/dist/index.js";
 import { Kernel } from "../../../packages/core/dist/index.js";
 import { PostgresStorage } from "../../../packages/storage/dist/index.js";
 import { fixtureApp } from "./app.mjs";
+const { fetch, AbortSignal } = globalThis;
 let stage = "admission";
 async function main() {
   if (

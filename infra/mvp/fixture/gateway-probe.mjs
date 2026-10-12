@@ -10,6 +10,7 @@ import {
   newCredential,
 } from "../../../packages/gateway/dist/index.js";
 import { probePrivateInvocation } from "../../../scripts/probe-m05-invocation.mjs";
+import { fixtureConfigDigest } from "../../../scripts/probe-m05-runtime.mjs";
 const { fetch, AbortSignal } = globalThis;
 const require = createRequire(new URL("../../../packages/gateway/package.json", import.meta.url));
 const { SignJWT, importPKCS8 } = await import(require.resolve("jose"));
@@ -210,6 +211,7 @@ export async function runGatewayProbe(config) {
     );
     if (!secret.ok) throw new Error("Old key authority unavailable");
     const oldPem = Buffer.from((await secret.json()).payload.data, "base64").toString("utf8");
+    const oldKey = await importPKCS8(oldPem, "ES256");
     const old = await new SignJWT({
       ...principal,
       app: config.appAudience,
@@ -220,7 +222,7 @@ export async function runGatewayProbe(config) {
       .setAudience(config.appAudience)
       .setIssuedAt()
       .setExpirationTime("5m")
-      .sign(await importPKCS8(oldPem, "ES256"));
+      .sign(oldKey);
     if (phase === "watch-removal") {
       const scopes = [
         [config.appOrigin, config.workspaceId, config.appAudience],
