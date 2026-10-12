@@ -13,7 +13,10 @@ async function main() {
   const data = await loadPrivate(),
     { api } = await operator();
   const { project, region, prefix, config } = data;
-  const name = `${prefix}-${mode}`,
+  const phase = process.env.EMBODY_M05_JOB_PHASE ?? data.phase;
+  if (!["initial", "publish", "overlap", "removed", "watch-removal", "external"].includes(phase))
+    throw new Error("Invalid job phase");
+  const name = `${prefix}-${phase === "external" ? "external-probe" : phase === "watch-removal" ? "rotation-watch" : mode}`,
     serviceAccount = mode === "runtime-probe" ? config.runtime : config.gateway;
   const env = [
     { name: "EMBODY_SQL_CONNECTION", value: `${project}:${region}:${prefix}-postgres` },
@@ -23,7 +26,7 @@ async function main() {
     { name: "EMBODY_MVP_CLOUD_BUDGET_APPROVED", value: "true" },
     { name: "EMBODY_MVP_CLOUD_BUDGET_USD", value: "10" },
     { name: "EMBODY_M05_CONFIG", value: JSON.stringify(config) },
-    { name: "EMBODY_M05_PHASE", value: data.phase },
+    { name: "EMBODY_M05_PHASE", value: phase },
     { name: "EMBODY_GATEWAY_ORIGIN", value: data.gateway },
     { name: "EMBODY_OLD_SIGNER_VERSION", value: data.secretVersions.signer1.split("/").at(-1) },
   ];
@@ -83,11 +86,15 @@ async function main() {
     parallelism: 1,
     template: {
       serviceAccount,
-      vpcAccess: {
-        egress: "ALL_TRAFFIC",
-        networkInterfaces: [{ network: `${prefix}-network`, subnetwork: `${prefix}-subnet` }],
-      },
-      timeout: "300s",
+      ...(phase === "external"
+        ? {}
+        : {
+            vpcAccess: {
+              egress: "ALL_TRAFFIC",
+              networkInterfaces: [{ network: `${prefix}-network`, subnetwork: `${prefix}-subnet` }],
+            },
+          }),
+      timeout: phase === "watch-removal" ? "600s" : "300s",
       maxRetries: 0,
       volumes: [
         {
@@ -116,7 +123,7 @@ async function main() {
     },
   );
   async function wait(op) {
-    for (let attempt = 0; !op.done && attempt < 360; attempt++) {
+    for (let attempt = 0; !op.done && attempt < 660; attempt++) {
       await delay(1000);
       op = await api(`https://run.googleapis.com/v2/${op.name}`);
     }
@@ -151,7 +158,7 @@ async function main() {
         report.status === "passed" &&
         report.candidateSha === data.candidateSha &&
         report.fixtureConfigSha256 === fixtureConfigDigest(config) &&
-        (mode === "runtime-probe" || report.phase === data.phase),
+        (mode === "runtime-probe" || report.phase === phase),
     )
   )
     throw new Error("No successful execution/probe evidence");

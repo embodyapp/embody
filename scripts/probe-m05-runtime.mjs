@@ -204,8 +204,23 @@ export async function probeRuntimeIsolation(config, { fetch: fetcher = fetch, sq
       Object.keys(body).some((key) => key !== "permissions") ||
       (body.permissions !== undefined &&
         (!Array.isArray(body.permissions) || body.permissions.length !== 0))
-    )
+    ) {
+      console.error(
+        JSON.stringify({
+          iamPermissionFailure: true,
+          resource: new URL(url).pathname,
+          prohibitedPermissions: Array.isArray(body?.permissions)
+            ? body.permissions.filter((permission) => permissions.includes(permission))
+            : [],
+          responseShapeValid:
+            !!body &&
+            !Array.isArray(body) &&
+            typeof body === "object" &&
+            Object.keys(body).every((key) => key === "permissions"),
+        }),
+      );
       throw new Error("Runtime has prohibited permissions or invalid permission response");
+    }
   };
   const ownPolicy = await request(
     `https://secretmanager.googleapis.com/v1/projects/${config.project}/secrets/${config.ownDatabaseSecret}:testIamPermissions`,
@@ -275,7 +290,8 @@ export async function probeRuntimeIsolation(config, { fetch: fetcher = fetch, sq
         "run.services.update",
         "run.services.delete",
         "run.services.setIamPolicy",
-        "run.routes.invoke",
+        // Public gateway/JWKS ingress is intentional; app invocation must remain gateway-only.
+        ...(service === config.gatewayService ? [] : ["run.routes.invoke"]),
       ],
     );
   }

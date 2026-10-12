@@ -15,7 +15,8 @@ const require = createRequire(new URL("../../../packages/gateway/package.json", 
 const { SignJWT, importPKCS8 } = await import(require.resolve("jose"));
 export async function runGatewayProbe(config) {
   const phase = process.env.EMBODY_M05_PHASE ?? "initial";
-  if (!["initial", "overlap", "removed"].includes(phase)) throw new Error("Invalid rotation phase");
+  if (!["initial", "overlap", "removed", "watch-removal", "external"].includes(phase))
+    throw new Error("Invalid rotation phase");
   const signing = await hostedSigningIdentity({
     issuer: process.env.GATEWAY_JWT_ISSUER,
     kid: process.env.GATEWAY_JWT_KID,
@@ -52,6 +53,35 @@ export async function runGatewayProbe(config) {
       ...(response.status === 200 ? { body: await response.json() } : {}),
     };
   };
+  if (phase === "external") {
+    for (const [origin, workspaceId, audience] of [
+      [config.appOrigin, config.workspaceId, config.appAudience],
+      [config.otherAppOrigin, config.otherWorkspaceId, config.otherAppAudience],
+    ]) {
+      const jwt = await issueGatewayToken(
+        { ...principal, orgId: workspaceId, scopes: [`${audience}:*`] },
+        audience,
+        "m05-external",
+        signing,
+      );
+      if (
+        (await fetch(new URL("/health", origin), { redirect: "error" })).status !== 404 ||
+        (await call(jwt, origin)).status !== 404
+      )
+        throw new Error("External ingress not closed");
+    }
+    return {
+      gate: "m05-gateway-live",
+      status: "passed",
+      candidateSha: config.candidateSha,
+      fixtureConfigSha256: fixtureConfigDigest(config),
+      phase,
+      checks: [
+        "both-external-origins-denied-without-provider",
+        "both-external-origins-denied-with-gateway-provider-and-valid-principal",
+      ],
+    };
+  }
   // Warm actual services before five-second targeted health probes; no mocked provider.
   for (const origin of [config.appOrigin, config.otherAppOrigin]) {
     let ready = false;
@@ -166,7 +196,7 @@ export async function runGatewayProbe(config) {
     if (record) await store.putCredential({ ...record, revoked: true }, record.revision);
     await store.close();
   }
-  if (["overlap", "removed"].includes(phase)) {
+  if (["overlap", "removed", "watch-removal"].includes(phase)) {
     const metadata = await fetch(
       "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
       { headers: { "Metadata-Flavor": "Google" }, signal: AbortSignal.timeout(5000) },
@@ -191,6 +221,91 @@ export async function runGatewayProbe(config) {
       .setIssuedAt()
       .setExpirationTime("5m")
       .sign(await importPKCS8(oldPem, "ES256"));
+    if (phase === "watch-removal") {
+      const scopes = [
+        [config.appOrigin, config.workspaceId, config.appAudience],
+        [config.otherAppOrigin, config.otherWorkspaceId, config.otherAppAudience],
+      ];
+      const mintOld = (workspaceId, audience) =>
+        new SignJWT({
+          ...principal,
+          orgId: workspaceId,
+          scopes: [`${audience}:*`],
+          requestId: "m05-watch-old-key",
+        })
+          .setProtectedHeader({ alg: "ES256", kid: "m05-key-1" })
+          .setIssuer(signing.issuer)
+          .setAudience(audience)
+          .setIssuedAt()
+          .setExpirationTime("5m")
+          .sign(oldKey);
+      for (const [origin, workspaceId, audience] of scopes)
+        if ((await call(await mintOld(workspaceId, audience), origin)).status !== 200)
+          throw new Error("Old-key cache positive control failed");
+      const watchStart = Date.now();
+      let removedAt;
+      for (let attempt = 0; attempt < 150; attempt++) {
+        const jwks = await (
+          await fetch(`${process.env.EMBODY_GATEWAY_ORIGIN}/.well-known/jwks.json`, {
+            redirect: "error",
+            signal: AbortSignal.timeout(5000),
+          })
+        ).json();
+        if (!jwks.keys.some((key) => key.kid === "m05-key-1")) {
+          removedAt = Date.now();
+          break;
+        }
+        await delay(2000);
+      }
+      if (!removedAt) throw new Error("Authoritative key removal not observed");
+      let deniedAt;
+      for (let attempt = 0; attempt < 31; attempt++) {
+        const statuses = [];
+        for (const [origin, workspaceId, audience] of scopes)
+          statuses.push((await call(await mintOld(workspaceId, audience), origin)).status);
+        if (statuses.every((status) => status === 401)) {
+          deniedAt = Date.now();
+          break;
+        }
+        if (statuses.some((status) => ![200, 401].includes(status)))
+          throw new Error("Rotation watcher lost app positive control");
+        await delay(2000);
+      }
+      if (!deniedAt || deniedAt - removedAt > 60000)
+        throw new Error("Old-key revocation exceeded60s");
+      for (const [origin, workspaceId, audience] of scopes)
+        if (
+          (
+            await call(
+              await issueGatewayToken(
+                { ...principal, orgId: workspaceId, scopes: [`${audience}:*`] },
+                audience,
+                "m05-watch-new",
+                signing,
+              ),
+              origin,
+            )
+          ).status !== 200
+        )
+          throw new Error("New key unavailable after removal");
+      return {
+        gate: "m05-gateway-live",
+        status: "passed",
+        candidateSha: config.candidateSha,
+        fixtureConfigSha256: fixtureConfigDigest(config),
+        phase,
+        checks: [
+          ...checks,
+          "live-old-key-positive-before-removal",
+          "fresh-old-key-denied-within60s",
+          "new-key-positive-after-removal",
+        ],
+        watchStart: new Date(watchStart).toISOString(),
+        authoritativeRemovalObservedAt: new Date(removedAt).toISOString(),
+        oldKeyDeniedAt: new Date(deniedAt).toISOString(),
+        revocationMilliseconds: deniedAt - removedAt,
+      };
+    }
     const expected = phase === "overlap" ? 200 : 401;
     if ((await call(old)).status !== expected)
       throw new Error("Old signer rotation result incorrect");

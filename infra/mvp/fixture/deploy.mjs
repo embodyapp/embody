@@ -6,6 +6,7 @@ import { PostgresGatewayStore } from "../../../packages/gateway/dist/index.js";
 import { Kernel } from "../../../packages/core/dist/index.js";
 import { PostgresStorage } from "../../../packages/storage/dist/index.js";
 import { fixtureApp } from "./app.mjs";
+let stage = "admission";
 async function main() {
   if (
     process.env.EMBODY_MVP_CLOUD_PROJECT !== "embody-cloud" ||
@@ -145,6 +146,7 @@ async function main() {
     },
     traffic: [{ type: "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST", percent: 100 }],
   };
+  stage = "gateway-template";
   const operation = await api(
     gateway
       ? `${base}/services/${gatewayName}?updateMask=template,traffic`
@@ -175,6 +177,80 @@ async function main() {
       bindings: [{ role: "roles/run.invoker", members: ["allUsers"] }],
     },
   });
+  if (["overlap", "removed"].includes(phase)) {
+    // Two simultaneous serving revisions, both on the new signer, without stale revision tags.
+    const first = gateway.latestReadyRevision.split("/").at(-1);
+    const clone = await api(
+      `${base}/services/${gatewayName}?updateMask=template,traffic`,
+      "PATCH",
+      {
+        name: gateway.name,
+        etag: gateway.etag,
+        template: { ...gatewayBody.template, labels: { rotation_variant: "second" } },
+        traffic: [{ type: "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST", percent: 100 }],
+      },
+    );
+    let cloned = clone;
+    for (let attempt = 0; !cloned.done && attempt < 120; attempt++) {
+      await delay(1000);
+      cloned = await api(`https://run.googleapis.com/v2/${cloned.name}`);
+    }
+    if (!cloned.done || cloned.error) throw new Error("Second serving revision failed");
+    gateway = await api(`${base}/services/${gatewayName}`);
+    const second = gateway.latestReadyRevision.split("/").at(-1);
+    if (second === first) throw new Error("Distinct serving revisions required");
+    let split = await api(`${base}/services/${gatewayName}?updateMask=traffic`, "PATCH", {
+      name: gateway.name,
+      etag: gateway.etag,
+      traffic: [
+        {
+          type: "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+          revision: first,
+          percent: 50,
+          tag: "m05a",
+        },
+        {
+          type: "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+          revision: second,
+          percent: 50,
+          tag: "m05b",
+        },
+      ],
+    });
+    for (let attempt = 0; !split.done && attempt < 120; attempt++) {
+      await delay(1000);
+      split = await api(`https://run.googleapis.com/v2/${split.name}`);
+    }
+    if (!split.done || split.error) throw new Error("Serving revision convergence failed");
+    gateway = await api(`${base}/services/${gatewayName}`);
+    if (
+      gateway.trafficStatuses.length !== 2 ||
+      gateway.trafficStatuses.some(
+        (status) => status.percent !== 50 || ![first, second].includes(status.revision),
+      )
+    )
+      throw new Error("Traffic inventory not converged");
+    data.servingRevisions = [];
+    for (const traffic of gateway.trafficStatuses) {
+      const document = await (
+        await fetch(`${traffic.uri}/.well-known/jwks.json`, {
+          redirect: "error",
+          signal: AbortSignal.timeout(10000),
+        })
+      ).json();
+      if (
+        JSON.stringify(document.keys.map((key) => key.kid).sort()) !==
+        JSON.stringify(phase === "overlap" ? ["m05-key-1", "m05-key-2"] : ["m05-key-2"])
+      )
+        throw new Error("Serving revision JWKS divergence");
+      data.servingRevisions.push({
+        revision: traffic.revision,
+        percent: traffic.percent,
+        uri: traffic.uri,
+        publishedKids: document.keys.map((key) => key.kid),
+      });
+    }
+  }
   data.gateway = gateway.uri;
   data.phase = phase;
   if (phase === "publish") data.publishAt = new Date().toISOString();
@@ -192,6 +268,7 @@ async function main() {
   if (phase === "initial") {
     for (let i = 0; i < data.apps.length; i++) {
       const app = data.apps[i];
+      stage = `app-${i}-deploy`;
       const output = await provisioner.deploy(app, {
         image,
         issuer,
@@ -201,6 +278,7 @@ async function main() {
       });
       app.origin = output.origin;
     }
+    stage = "platform-registration";
     const platformDsn = data.dsns.platform.replace(":5432/", ":15432/");
     const store = new PostgresGatewayStore(platformDsn);
     try {
@@ -262,6 +340,7 @@ async function main() {
     appAudience: "kanban",
     otherAppAudience: "email",
     workspaceId: data.apps[0].workspaceId,
+    otherWorkspaceId: data.apps[1].workspaceId,
     ownDatabaseSecret: data.apps[0].databaseSecret,
     otherAppSecret: data.apps[1].databaseSecret,
     platformDatabaseSecret: `${prefix}-platform-db`,
@@ -280,13 +359,20 @@ async function main() {
       image,
       candidateSha,
       gatewayRevision: gateway.latestReadyRevision,
+      servingRevisions: data.servingRevisions ?? [],
       gatewayOrigin: gateway.uri,
       appOrigins: data.apps.map((app) => app.origin),
       issuer,
     }),
   );
 }
-main().catch(() => {
-  console.error("M05 deploy failed; private diagnostics suppressed");
+main().catch((error) => {
+  console.error(
+    JSON.stringify({
+      deployFailed: true,
+      stage,
+      ...(stage.startsWith("app-") ? { publicProviderError: error.message } : {}),
+    }),
+  );
   process.exitCode = 1;
 });
