@@ -69,6 +69,8 @@ async function main() {
             [
               "Connection terminated unexpectedly",
               "Connection terminated due to connection timeout",
+              "timeout expired",
+              "timeout exceeded when trying to connect",
             ].includes(error.message)
           )
         )
