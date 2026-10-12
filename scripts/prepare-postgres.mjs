@@ -29,9 +29,8 @@ await main("postgres-prepare", async () => {
     )
       throw new Error("Migration role must own the isolated test schema tables");
     for (const { tablename } of tables.rows) {
-      if (tablename === "embody_schema_migrations") continue;
       await pool.query(
-        `GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.${quote(tablename)} TO ${quote(decodeURIComponent(runtime.username))}`,
+        `GRANT ${tablename === "embody_schema_migrations" ? "SELECT" : "SELECT, INSERT, UPDATE, DELETE"} ON TABLE public.${quote(tablename)} TO ${quote(decodeURIComponent(runtime.username))}`,
       );
     }
     console.log("Test schema migrated by maintenance role; runtime DML privileges granted");
