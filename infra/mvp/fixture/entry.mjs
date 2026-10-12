@@ -47,6 +47,38 @@ async function main() {
     if (attempt === 29) throw new Error("SQL proxy unavailable");
     await delay(1000);
   }
+  // Direct VPC egress may become usable AFTER the local proxy starts listening.
+  // Retry only bounded transport failures; SQL authentication/authorization errors fail closed.
+  const dsn = process.env.DATABASE_URL ?? process.env.GATEWAY_PLATFORM_DATABASE_URL;
+  if (dsn) {
+    stage = "sql-readiness";
+    const { Client } = createRequire(
+      new URL("../../../packages/gateway/package.json", import.meta.url),
+    )("pg");
+    for (let attempt = 0; attempt < 15; attempt++) {
+      const client = new Client({ connectionString: dsn, connectionTimeoutMillis: 10000 });
+      try {
+        await client.connect();
+        await client.query("SELECT 1");
+        break;
+      } catch (error) {
+        if (
+          attempt === 14 ||
+          !(
+            ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ENETUNREACH"].includes(error.code) ||
+            [
+              "Connection terminated unexpectedly",
+              "Connection terminated due to connection timeout",
+            ].includes(error.message)
+          )
+        )
+          throw error;
+        await delay(2000);
+      } finally {
+        await client.end().catch(() => {});
+      }
+    }
+  }
   stage = `start-${mode}`;
   if (mode === "gateway") {
     await import("../../../apps/gateway/dist/src/index.js");
