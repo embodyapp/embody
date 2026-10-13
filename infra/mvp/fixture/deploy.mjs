@@ -139,6 +139,7 @@ async function main() {
     ingress: "INGRESS_TRAFFIC_ALL",
     invokerIamDisabled: false,
     template: {
+      labels: { rotation_variant: "first" },
       executionEnvironment: "EXECUTION_ENVIRONMENT_GEN2",
       vpcAccess: {
         egress: "ALL_TRAFFIC",

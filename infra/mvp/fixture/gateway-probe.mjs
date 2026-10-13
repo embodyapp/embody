@@ -117,13 +117,15 @@ export async function runGatewayProbe(config) {
     checks.push(...network.checks);
     const now = Math.floor(Date.now() / 1000);
     const jwt = async (claims = {}, header = { alg: "ES256", kid: process.env.GATEWAY_JWT_KID }) =>
-      new SignJWT({ ...principal, app: config.appAudience, requestId: "m05-adversary", ...claims })
+      new SignJWT({ ...principal, requestId: "m05-adversary", ...claims })
         .setProtectedHeader(header)
         .setIssuer(signing.issuer)
         .setAudience(claims.aud ?? config.appAudience)
         .setIssuedAt(claims.iat ?? now)
         .setExpirationTime(claims.exp ?? now + 300)
         .sign(signing.key);
+    if ((await call(await jwt())).status !== 200)
+      throw new Error("Valid adversary-template positive control rejected");
     const negative = [
       ["wrong-workspace", await jwt({ orgId: "ws_wrongtenant0001" })],
       ["wrong-app", await jwt({ aud: config.otherAppAudience, app: config.otherAppAudience })],
@@ -246,17 +248,11 @@ export async function runGatewayProbe(config) {
     if (!secret.ok) throw new Error("Old key authority unavailable");
     const oldPem = Buffer.from((await secret.json()).payload.data, "base64").toString("utf8");
     const oldKey = await importPKCS8(oldPem, "ES256");
-    const old = await new SignJWT({
-      ...principal,
-      app: config.appAudience,
-      requestId: "rotation-adversary",
-    })
-      .setProtectedHeader({ alg: "ES256", kid: "m05-key-1" })
-      .setIssuer(signing.issuer)
-      .setAudience(config.appAudience)
-      .setIssuedAt()
-      .setExpirationTime("5m")
-      .sign(oldKey);
+    const old = await issueGatewayToken(principal, config.appAudience, "rotation-adversary", {
+      ...signing,
+      key: oldKey,
+      kid: "m05-key-1",
+    });
     if (phase === "watch-removal") {
       const scopes = [
         [config.appOrigin, config.workspaceId, config.appAudience],
@@ -370,8 +366,7 @@ export async function runGatewayProbe(config) {
       };
     }
     const expected = phase === "overlap" ? 200 : 401;
-    if ((await call(old)).status !== expected)
-      throw new Error("Old signer rotation result incorrect");
+    if ((await call(old)).status !== expected) throw new Error("Old-key rotation result incorrect");
     checks.push(
       phase === "overlap"
         ? "old-and-new-keys-accepted"
