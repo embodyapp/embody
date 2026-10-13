@@ -1,0 +1,110 @@
+{
+  "execution": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-external-probe/executions/embody-test-m05-external-probe-lqj66",
+  "image": "us-central1-docker.pkg.dev/embody-cloud/embody-test-m05-images/fixture@sha256:09b29ab7b5c15adbf90ef7cc6377fdbd52c6965538d9936086a5af901f106f10",
+  "serviceAccount": "embody-test-m05-gateway@embody-cloud.iam.gserviceaccount.com",
+  "inventory": [
+    {
+      "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-gateway",
+      "uri": "https://embody-test-m05-gateway-vtnbajr3sq-uc.a.run.app",
+      "ingress": "INGRESS_TRAFFIC_ALL",
+      "revisions": [
+        {
+          "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-gateway/revisions/embody-test-m05-gateway-00039-bpx",
+          "image": "us-central1-docker.pkg.dev/embody-cloud/embody-test-m05-images/fixture@sha256:dc38bd42de9398b5ad2ccc230f7f8a9461c4887fd6bc2826f566691b4b6028f4",
+          "percent": 50,
+          "uri": "https://m05a---embody-test-m05-gateway-vtnbajr3sq-uc.a.run.app"
+        },
+        {
+          "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-gateway/revisions/embody-test-m05-gateway-00040-s7t",
+          "image": "us-central1-docker.pkg.dev/embody-cloud/embody-test-m05-images/fixture@sha256:dc38bd42de9398b5ad2ccc230f7f8a9461c4887fd6bc2826f566691b4b6028f4",
+          "percent": 50,
+          "uri": "https://m05b---embody-test-m05-gateway-vtnbajr3sq-uc.a.run.app"
+        }
+      ]
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-app-9e72f4f958d2",
+      "uri": "https://embody-test-m05-app-9e72f4f958d2-vtnbajr3sq-uc.a.run.app",
+      "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
+      "revisions": [
+        {
+          "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-app-9e72f4f958d2/revisions/embody-test-m05-app-9e72f4f958d2-00017-drm",
+          "image": "us-central1-docker.pkg.dev/embody-cloud/embody-test-m05-images/fixture@sha256:dc38bd42de9398b5ad2ccc230f7f8a9461c4887fd6bc2826f566691b4b6028f4",
+          "percent": 100
+        }
+      ]
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-app-49e66a4013de",
+      "uri": "https://embody-test-m05-app-49e66a4013de-vtnbajr3sq-uc.a.run.app",
+      "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
+      "revisions": [
+        {
+          "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-app-49e66a4013de/revisions/embody-test-m05-app-49e66a4013de-00013-5fk",
+          "image": "us-central1-docker.pkg.dev/embody-cloud/embody-test-m05-images/fixture@sha256:dc38bd42de9398b5ad2ccc230f7f8a9461c4887fd6bc2826f566691b4b6028f4",
+          "percent": 100
+        }
+      ]
+    }
+  ],
+  "finalInventory": [
+    {
+      "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-gateway",
+      "uri": "https://embody-test-m05-gateway-vtnbajr3sq-uc.a.run.app",
+      "ingress": "INGRESS_TRAFFIC_ALL",
+      "revisions": [
+        {
+          "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-gateway/revisions/embody-test-m05-gateway-00039-bpx",
+          "image": "us-central1-docker.pkg.dev/embody-cloud/embody-test-m05-images/fixture@sha256:dc38bd42de9398b5ad2ccc230f7f8a9461c4887fd6bc2826f566691b4b6028f4",
+          "percent": 50,
+          "uri": "https://m05a---embody-test-m05-gateway-vtnbajr3sq-uc.a.run.app"
+        },
+        {
+          "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-gateway/revisions/embody-test-m05-gateway-00040-s7t",
+          "image": "us-central1-docker.pkg.dev/embody-cloud/embody-test-m05-images/fixture@sha256:dc38bd42de9398b5ad2ccc230f7f8a9461c4887fd6bc2826f566691b4b6028f4",
+          "percent": 50,
+          "uri": "https://m05b---embody-test-m05-gateway-vtnbajr3sq-uc.a.run.app"
+        }
+      ]
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-app-9e72f4f958d2",
+      "uri": "https://embody-test-m05-app-9e72f4f958d2-vtnbajr3sq-uc.a.run.app",
+      "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
+      "revisions": [
+        {
+          "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-app-9e72f4f958d2/revisions/embody-test-m05-app-9e72f4f958d2-00017-drm",
+          "image": "us-central1-docker.pkg.dev/embody-cloud/embody-test-m05-images/fixture@sha256:dc38bd42de9398b5ad2ccc230f7f8a9461c4887fd6bc2826f566691b4b6028f4",
+          "percent": 100
+        }
+      ]
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-app-49e66a4013de",
+      "uri": "https://embody-test-m05-app-49e66a4013de-vtnbajr3sq-uc.a.run.app",
+      "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
+      "revisions": [
+        {
+          "name": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-app-49e66a4013de/revisions/embody-test-m05-app-49e66a4013de-00013-5fk",
+          "image": "us-central1-docker.pkg.dev/embody-cloud/embody-test-m05-images/fixture@sha256:dc38bd42de9398b5ad2ccc230f7f8a9461c4887fd6bc2826f566691b4b6028f4",
+          "percent": 100
+        }
+      ]
+    }
+  ],
+  "reports": [
+    {
+      "checks": [
+        "both-external-origins-denied-without-provider",
+        "both-external-origins-denied-with-gateway-provider-and-valid-principal"
+      ],
+      "status": "passed",
+      "gate": "m05-gateway-live",
+      "candidateSha": "b429a0a5ae05ce4239f4b0bee13f9f843d83e530",
+      "phase": "external",
+      "fixtureConfigSha256": "3f755302d4f7196d5bddd5817e2134f09321efb63e1d7bc9c6308e26c0495285",
+      "sourceSha": "b429a0a5ae05ce4239f4b0bee13f9f843d83e530",
+      "timestamp": "2026-10-13T11:38:53.485Z"
+    }
+  ]
+}

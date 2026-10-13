@@ -141,4 +141,21 @@ and refreshed short-lived token. Leave the backend bucket intact. Empty reposito
 no secret versions and no compute/database workloads aim to avoid fixed baseline costs;
 free allowances are billing-account-wide and actual billed usage may lag.
 
-Live IAM/SQL/ingress/rotation tests remain required by `docs/mvp/M05-PROVIDER-PROOF.md`.
+To preserve the reusable foundation, disable only the optional fixture with
+`enable_postgres=false` and `enable_network=false`, review/apply a new plan, then require a
+fresh no-change plan. Remove gateway/jobs, all fixture images, signer/platform secret
+versions and instance-scoped SQL IAM grants separately; app `remove` does not own those.
+Do not infer cleanup from a delete request: verify provider lists, secret-version states,
+IAM, image versions and private fixture-file absence while retaining private versioned GCS state.
+
+Direct VPC can block subnet/network deletion **1–2 hours after all Cloud Run resources
+have been deleted**. These free serverless internal address reservations are managed by
+Google and cannot be manually deleted ([provider documentation](https://cloud.google.com/run/docs/configuring/vpc-direct-vpc#delete-subnet)).
+Delete paid SQL/NAT/workloads first; bounded retry/reconciliation with refreshed tokens and
+new plans can finish network teardown after release. Do not retain paid fixtures for this
+wait, disable state locking, reuse a stale partially applied plan, or declare complete
+cleanup before the final lists and no-change plan agree.
+
+Live IAM/SQL/ingress/rotation tests required by `docs/mvp/M05-PROVIDER-PROOF.md` passed on
+frozen b429a0a; see `docs/mvp/evidence/M05-live-b429/README.md` for sanitized reports,
+independent review, provenance/cost qualifications and final cleanup status.

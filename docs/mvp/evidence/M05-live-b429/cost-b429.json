@@ -1,0 +1,345 @@
+{
+  "capturedAt": "2026-10-13T11:55:11.124Z",
+  "invoiceMeasured": false,
+  "qualification": "Conservative allocation-time/rate estimate, not a Cloud Billing invoice or spending cap. Source API lifetimes are measured; service/job envelope assumes full active CPU+1GiB for every elapsed second, including idle/provisioning, and includes 6h second-gateway allowance plus $1 artifact/state/network contingency. Delete resources immediately. Final invoice can lag and must be checked separately.",
+  "services": [
+    {
+      "name": "embody-test-m05-gateway",
+      "created": "2026-10-12T19:39:23.320780Z",
+      "elapsedSeconds": 58547.804
+    },
+    {
+      "name": "embody-test-m05-app-9e72f4f958d2",
+      "created": "2026-10-12T20:04:44.759595Z",
+      "elapsedSeconds": 57026.365
+    },
+    {
+      "name": "embody-test-m05-app-49e66a4013de",
+      "created": "2026-10-12T20:54:20.952176Z",
+      "elapsedSeconds": 54050.172
+    }
+  ],
+  "sql": {
+    "created": "2026-10-12T19:13:59.392Z",
+    "hours": 16.686592222222224,
+    "tier": "db-f1-micro",
+    "hddGiB": 10,
+    "estimatedUsd": 0.1957817841522667
+  },
+  "nat": {
+    "created": "2026-10-12T12:49:56.243-07:00",
+    "hours": 16.087466944444444,
+    "estimatedUpperUsd": 0.8043733472222221
+  },
+  "jobs": {
+    "count": 50,
+    "createToCompletionSeconds": 9617.434000000001,
+    "estimatedUpperUsd": 0.25486200100000006
+  },
+  "serviceEstimatedUpperUsd": 5.0674450365,
+  "contingencyUsd": 1,
+  "estimatedUpperTotalUsd": 7.322462168874489,
+  "approvedUsd": 10,
+  "executions": [
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-external-probe/executions/embody-test-m05-external-probe-lqj66",
+      "created": "2026-10-13T11:36:45.210310Z",
+      "completed": "2026-10-13T11:38:59.043841Z",
+      "elapsedSeconds": 133.833
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-diag/executions/embody-test-m05-gateway-diag-k4qlz",
+      "created": "2026-10-13T09:38:12.671298Z",
+      "completed": "2026-10-13T09:40:42.482466Z",
+      "elapsedSeconds": 149.811
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-rotation-watch/executions/embody-test-m05-rotation-watch-5vbzq",
+      "created": "2026-10-13T11:29:18.023815Z",
+      "completed": "2026-10-13T11:32:41.797171Z",
+      "elapsedSeconds": 203.774
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-rotation-watch/executions/embody-test-m05-rotation-watch-45km8",
+      "created": "2026-10-13T10:49:42.295014Z",
+      "completed": "2026-10-13T10:55:25.878460Z",
+      "elapsedSeconds": 343.583
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-rotation-watch/executions/embody-test-m05-rotation-watch-x5pgh",
+      "created": "2026-10-13T08:42:30.776154Z",
+      "completed": "2026-10-13T08:50:51.461527Z",
+      "elapsedSeconds": 500.685
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe-b/executions/embody-test-m05-runtime-probe-b-qx742",
+      "created": "2026-10-13T11:09:10.693297Z",
+      "completed": "2026-10-13T11:11:09.894809Z",
+      "elapsedSeconds": 119.201
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe-b/executions/embody-test-m05-runtime-probe-b-qvhcj",
+      "created": "2026-10-13T10:23:43.496452Z",
+      "completed": "2026-10-13T10:27:08.043994Z",
+      "elapsedSeconds": 204.547
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe-b/executions/embody-test-m05-runtime-probe-b-grjhg",
+      "created": "2026-10-13T09:05:22.500449Z",
+      "completed": "2026-10-13T09:09:32.313635Z",
+      "elapsedSeconds": 249.813
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe-b/executions/embody-test-m05-runtime-probe-b-6mpcm",
+      "created": "2026-10-13T08:23:26.134230Z",
+      "completed": "2026-10-13T08:27:38.532314Z",
+      "elapsedSeconds": 252.398
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-sql-diag2/executions/embody-test-m05-sql-diag2-6n5hs",
+      "created": "2026-10-13T07:03:01.145100Z",
+      "completed": "2026-10-13T07:07:01.434590Z",
+      "elapsedSeconds": 240.289
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-8d2pv",
+      "created": "2026-10-13T11:36:45.213448Z",
+      "completed": "2026-10-13T11:40:08.569277Z",
+      "elapsedSeconds": 203.356
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-4kxsl",
+      "created": "2026-10-13T11:24:56.372706Z",
+      "completed": "2026-10-13T11:27:59.008344Z",
+      "elapsedSeconds": 182.636
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-n4p54",
+      "created": "2026-10-13T11:20:38.060001Z",
+      "completed": "2026-10-13T11:23:56.389601Z",
+      "elapsedSeconds": 198.329
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-m5snx",
+      "created": "2026-10-13T11:13:28.834733Z",
+      "completed": "2026-10-13T11:16:28.362511Z",
+      "elapsedSeconds": 179.528
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-9g8qr",
+      "created": "2026-10-13T11:09:10.747919Z",
+      "completed": "2026-10-13T11:11:12.718725Z",
+      "elapsedSeconds": 121.971
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-6vxm6",
+      "created": "2026-10-13T10:44:11.788726Z",
+      "completed": "2026-10-13T10:47:13.122851Z",
+      "elapsedSeconds": 181.334
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-njm9k",
+      "created": "2026-10-13T10:35:54.496573Z",
+      "completed": "2026-10-13T10:39:42.869320Z",
+      "elapsedSeconds": 228.373
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-wgsmf",
+      "created": "2026-10-13T10:29:58.360354Z",
+      "completed": "2026-10-13T10:33:17.923703Z",
+      "elapsedSeconds": 199.563
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-gt8rr",
+      "created": "2026-10-13T10:23:42.064315Z",
+      "completed": "2026-10-13T10:27:04.023379Z",
+      "elapsedSeconds": 201.959
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-w5kpj",
+      "created": "2026-10-13T09:25:34.826827Z",
+      "completed": "2026-10-13T09:29:12.545830Z",
+      "elapsedSeconds": 217.719
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-47m4p",
+      "created": "2026-10-13T09:17:35.456778Z",
+      "completed": "2026-10-13T09:20:57.661143Z",
+      "elapsedSeconds": 202.205
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-wpkgk",
+      "created": "2026-10-13T09:05:23.461172Z",
+      "completed": "2026-10-13T09:09:36.143173Z",
+      "elapsedSeconds": 252.682
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-dpskk",
+      "created": "2026-10-13T08:39:25.084389Z",
+      "completed": "2026-10-13T08:42:18.664305Z",
+      "elapsedSeconds": 173.58
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-qbzb7",
+      "created": "2026-10-13T08:30:48.335636Z",
+      "completed": "2026-10-13T08:33:53.427925Z",
+      "elapsedSeconds": 185.092
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-5sn9j",
+      "created": "2026-10-13T08:23:25.609859Z",
+      "completed": "2026-10-13T08:27:36.330635Z",
+      "elapsedSeconds": 250.721
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-nwnh5",
+      "created": "2026-10-13T07:57:36.518015Z",
+      "completed": "2026-10-13T08:00:00.327442Z",
+      "elapsedSeconds": 143.809
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-jxhx4",
+      "created": "2026-10-13T07:50:35.205926Z",
+      "completed": "2026-10-13T07:53:19.037668Z",
+      "elapsedSeconds": 163.832
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-sqmqg",
+      "created": "2026-10-13T07:17:47.808317Z",
+      "completed": "2026-10-13T07:21:49.874930Z",
+      "elapsedSeconds": 242.066
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-9p99h",
+      "created": "2026-10-13T06:44:40.937419Z",
+      "completed": "2026-10-13T06:47:04.467567Z",
+      "elapsedSeconds": 143.53
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-gnbl2",
+      "created": "2026-10-13T06:28:53.032233Z",
+      "completed": "2026-10-13T06:31:18.335348Z",
+      "elapsedSeconds": 145.303
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe/executions/embody-test-m05-gateway-probe-6cn82",
+      "created": "2026-10-12T21:59:28.319877Z",
+      "completed": "2026-10-12T22:03:14.124188Z",
+      "elapsedSeconds": 225.805
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-77st6",
+      "created": "2026-10-13T11:09:09.741598Z",
+      "completed": "2026-10-13T11:11:24.083329Z",
+      "elapsedSeconds": 134.342
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-dhpkj",
+      "created": "2026-10-13T10:23:45.543020Z",
+      "completed": "2026-10-13T10:27:08.011072Z",
+      "elapsedSeconds": 202.468
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-hrkgj",
+      "created": "2026-10-13T09:11:44.286498Z",
+      "completed": "2026-10-13T09:14:34.705787Z",
+      "elapsedSeconds": 170.419
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-76xq5",
+      "created": "2026-10-13T09:05:21.933032Z",
+      "completed": "2026-10-13T09:09:36.230361Z",
+      "elapsedSeconds": 254.297
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-zg64w",
+      "created": "2026-10-13T08:23:27.430230Z",
+      "completed": "2026-10-13T08:27:38.632987Z",
+      "elapsedSeconds": 251.202
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-846hz",
+      "created": "2026-10-13T07:50:33.683924Z",
+      "completed": "2026-10-13T07:53:19.165595Z",
+      "elapsedSeconds": 165.482
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-cggrq",
+      "created": "2026-10-13T07:26:25.341412Z",
+      "completed": "2026-10-13T07:29:48.622187Z",
+      "elapsedSeconds": 203.281
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-6fb7p",
+      "created": "2026-10-13T07:17:47.830901Z",
+      "completed": "2026-10-13T07:21:49.723644Z",
+      "elapsedSeconds": 241.893
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-4wtmx",
+      "created": "2026-10-13T06:51:43.375332Z",
+      "completed": "2026-10-13T06:54:03.046260Z",
+      "elapsedSeconds": 139.671
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-hj7tx",
+      "created": "2026-10-13T06:44:42.367495Z",
+      "completed": "2026-10-13T06:47:11.023853Z",
+      "elapsedSeconds": 148.656
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-rrqwk",
+      "created": "2026-10-13T06:28:55.133136Z",
+      "completed": "2026-10-13T06:30:28.726061Z",
+      "elapsedSeconds": 93.593
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-5777c",
+      "created": "2026-10-13T06:11:02.786479Z",
+      "completed": "2026-10-13T06:14:20.593819Z",
+      "elapsedSeconds": 197.807
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-swvk4",
+      "created": "2026-10-12T21:54:35.396640Z",
+      "completed": "2026-10-12T21:56:39.736217Z",
+      "elapsedSeconds": 124.34
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-nmwks",
+      "created": "2026-10-12T21:34:15.180906Z",
+      "completed": "2026-10-12T21:36:55.146334Z",
+      "elapsedSeconds": 159.966
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-9t89c",
+      "created": "2026-10-12T21:28:49.725458Z",
+      "completed": "2026-10-12T21:29:54.218829Z",
+      "elapsedSeconds": 64.493
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-qwn9m",
+      "created": "2026-10-12T21:21:26.008158Z",
+      "completed": "2026-10-12T21:23:40.709036Z",
+      "elapsedSeconds": 134.701
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe/executions/embody-test-m05-runtime-probe-fjjbj",
+      "created": "2026-10-12T21:12:01.348227Z",
+      "completed": "2026-10-12T21:15:08.917371Z",
+      "elapsedSeconds": 187.569
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-sql-diag/executions/embody-test-m05-sql-diag-lkhld",
+      "created": "2026-10-12T20:31:27.072364Z",
+      "completed": "2026-10-12T20:34:26.692079Z",
+      "elapsedSeconds": 179.62
+    },
+    {
+      "name": "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-sql-diag/executions/embody-test-m05-sql-diag-g67tt",
+      "created": "2026-10-12T20:24:07.175369Z",
+      "completed": "2026-10-12T20:26:09.482299Z",
+      "elapsedSeconds": 122.307
+    }
+  ]
+}

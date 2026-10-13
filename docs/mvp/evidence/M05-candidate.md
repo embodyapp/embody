@@ -1,7 +1,8 @@
 # M05 local candidate acceptance — 2026-10-11
 
 Historical `fae5169` implementation acceptance snapshot, before owner cloud authorization.
-Current access/budget/foundation progress is in [the foundation spike](./M05-foundation.md).
+Current provider/runtime/SQL/rotation acceptance is in [the b429a0a live evidence](./M05-live-b429/README.md).
+The earlier [foundation spike](./M05-foundation.md) is also historical; neither substitutes for current-candidate proof.
 The counts and missing-access statements below describe this candidate's original disposition.
 
 ## Exact implementation and CI

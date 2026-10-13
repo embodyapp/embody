@@ -1,7 +1,9 @@
 # M05 provider proof procedure
 
-This is an **executable but not yet live-run** targeted qualification procedure. Local
-mocked probe tests establish fail-closed behavior, not Google Cloud IAM effectiveness.
+This targeted procedure has now been **live-run on frozen b429a0a**, including Cloud SQL,
+both attached runtime identities, gateway invocation, real multi-revision MCP/rotation and
+external ingress. [Sanitized acceptance/review evidence and qualifications](./evidence/M05-live-b429/README.md).
+Local mocked tests alone do not establish Google Cloud IAM effectiveness.
 The broader `pnpm test:mvp:cloud` gate remains deliberately blocked until M09–M17 exist.
 M05 cannot be marked DONE merely because these scripts or a role matrix exist.
 
@@ -14,8 +16,10 @@ M05 cannot be marked DONE merely because these scripts or a role matrix exist.
 - Gateway/platform/app/migration/build/deployer identities matching [the role matrix](./IDENTITY.md).
 
 Owner has now authorized `embody-cloud`, operator gcloud access, aim $0 and one-off
-maximum $10 USD. [Terraform/GCS foundation spike](./evidence/M05-foundation.md) is applied;
-actual hosted fixture and runtime qualification are still pending. Do not substitute
+maximum $10 USD. [Terraform/GCS foundation spike](./evidence/M05-foundation.md) is applied.
+Technical provider gates and independent review passed; paid fixtures are removed. Final
+subnet/network teardown awaits Google's documented1–2h Direct VPC reservation release.
+M05 remains IN_REVIEW until the final cleanup inventory is verified. Do not substitute
 operator credentials, ADC or service-account impersonation for app runtime metadata
 evidence. Budget attestations are not hard spending caps; no monthly launch budget approved.
 

@@ -1,0 +1,60 @@
+{
+  "capturedAt": "2026-10-13T13:13:35.936Z",
+  "status": "pending-provider-reservation-release",
+  "remaining": {
+    "services": [],
+    "jobs": [],
+    "sql": [],
+    "networks": ["embody-test-m05-network"],
+    "subnets": ["embody-test-m05-subnet"],
+    "routers": [],
+    "serverlessAddressReservations": [],
+    "privateDns": [],
+    "appSecrets": [],
+    "appIdentities": [],
+    "fixtureImagePackages": [],
+    "sqlConditionBindings": [],
+    "activeSecretVersions": []
+  },
+  "privateFixtureStatePresent": false,
+  "retainedFoundation": {
+    "secretContainers": [
+      "projects/930896908754/secrets/embody-test-m05-platform-db",
+      "projects/930896908754/secrets/embody-test-m05-signer"
+    ],
+    "serviceAccounts": [
+      "embody-test-m05-platform-mig@embody-cloud.iam.gserviceaccount.com",
+      "embody-test-m05-builder@embody-cloud.iam.gserviceaccount.com",
+      "embody-test-m05-deployer@embody-cloud.iam.gserviceaccount.com",
+      "embody-test-m05-gateway@embody-cloud.iam.gserviceaccount.com"
+    ],
+    "secretVersions": [
+      {
+        "name": "projects/930896908754/secrets/embody-test-m05-platform-db/versions/1",
+        "state": "DESTROYED"
+      },
+      {
+        "name": "projects/930896908754/secrets/embody-test-m05-signer/versions/2",
+        "state": "DESTROYED"
+      },
+      {
+        "name": "projects/930896908754/secrets/embody-test-m05-signer/versions/1",
+        "state": "DESTROYED"
+      }
+    ]
+  },
+  "backend": {
+    "bucket": "embody-cloud-tfstate-930896908754",
+    "uniformBucketLevelAccess": true,
+    "publicAccessPrevention": "enforced",
+    "versioned": true,
+    "publicIam": [],
+    "state": {
+      "name": "mvp/m05/foundation/default.tfstate",
+      "size": "36641",
+      "generation": "1791897098887080",
+      "updated": "2026-10-13T13:11:38.904Z"
+    }
+  },
+  "qualification": "Private versioned remote state and shared empty Terraform foundation intentionally retained; this reads metadata/IAM only, not secret payloads or Terraform state contents."
+}

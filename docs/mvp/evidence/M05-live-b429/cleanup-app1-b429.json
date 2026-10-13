@@ -1,0 +1,8 @@
+{
+  "runtime": "embody-test-m05-r-49e66a4013de",
+  "migrator": "embody-test-m05-m-49e66a4013de",
+  "service": "embody-test-m05-app-49e66a4013de",
+  "databaseSecret": "embody-test-m05-db-49e66a4013de",
+  "migrationSecret": "embody-test-m05-mig-49e66a4013de",
+  "removed": true
+}
