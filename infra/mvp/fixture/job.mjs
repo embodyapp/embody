@@ -33,6 +33,9 @@ async function main() {
       ? [
           "actual-runtime-metadata-identity",
           "own-secret-access-positive-control",
+          "platform-database-secret-denied",
+          "other-app-secret-denied",
+          "gateway-signing-secret-denied",
           "effective-permission-positive-control",
           "foreign-secret-version-policy-and-write-denied",
           "deployment-and-build-denied",
@@ -55,6 +58,32 @@ async function main() {
             "execute-roundtrip-accepted",
             "execute/stream-roundtrip-accepted",
             "mcp-delegated-agent-roundtrip-accepted",
+            ...(phase === "initial"
+              ? [
+                  "unauthenticated-provider-invocation-denied",
+                  "principal-token-without-provider-identity-denied",
+                  "principal-token-as-provider-identity-denied",
+                  "gateway-workload-invocation-positive-control",
+                  "other-app-gateway-invocation-positive-control",
+                  ...[
+                    "wrong-workspace",
+                    "wrong-app",
+                    "array-audience",
+                    "expired",
+                    "excessive-lifetime",
+                    "future-iat",
+                    "missing-kid",
+                    "forged-human-delegation",
+                    "forged-signature",
+                  ].map((label) => `${label}-rejected`),
+                  "cross-app-workspace-replay-rejected",
+                ]
+              : []),
+            ...(phase === "overlap"
+              ? ["old-and-new-keys-accepted"]
+              : phase === "removed"
+                ? ["fresh-retired-key-token-rejected-current-key-accepted"]
+                : []),
             ...(phase === "watch-removal"
               ? [
                   "live-old-key-positive-before-removal",
@@ -195,12 +224,17 @@ async function main() {
   const suffix = execution.name.split("/").at(-1);
   const logs = await api("https://logging.googleapis.com/v2/entries:list", "POST", {
     resourceNames: [`projects/${project}`],
-    filter: `resource.type="cloud_run_job" AND labels."run.googleapis.com/execution_name"="${suffix}"`,
-    orderBy: "timestamp asc",
+    filter: `resource.type="cloud_run_job" AND resource.labels.job_name="${name}" AND jsonPayload.gate:*`,
+    // Bind the returned log label exactly in code; the provider label filter returned no matches.
+    orderBy: "timestamp desc",
     pageSize: 100,
   });
   const reports = (logs.entries ?? [])
-    .filter((entry) => entry.jsonPayload?.gate?.startsWith("m05-"))
+    .filter(
+      (entry) =>
+        entry.labels?.["run.googleapis.com/execution_name"] === suffix &&
+        entry.jsonPayload?.gate?.startsWith("m05-"),
+    )
     .map((entry) => entry.jsonPayload);
   if (
     execution.succeededCount !== 1 ||
@@ -208,6 +242,12 @@ async function main() {
       (report) =>
         report.status === "passed" &&
         report.sourceSha === data.candidateSha &&
+        (mode === "runtime-probe"
+          ? report.runtimeIdentity === config.runtime
+          : phase === "external" ||
+            (Array.isArray(report.testedGatewayOrigins) &&
+              JSON.stringify([...new Set(report.testedGatewayOrigins)].sort()) ===
+                JSON.stringify([...new Set(gatewayOrigins)].sort()))) &&
         Array.isArray(report.checks) &&
         requiredChecks.every((check) => report.checks.includes(check)) &&
         report.candidateSha === data.candidateSha &&
@@ -228,7 +268,17 @@ async function main() {
     }),
   );
 }
-main().catch(() => {
-  console.error("M05 job failed; private diagnostics suppressed");
+main().catch((error) => {
+  console.error(
+    JSON.stringify({
+      jobFailed: true,
+      publicError:
+        /^(Serving |Probe phase|Invalid job phase|Job ownership|Job operation|No successful)/.test(
+          error.message,
+        )
+          ? error.message
+          : "private diagnostics suppressed",
+    }),
+  );
   process.exitCode = 1;
 });

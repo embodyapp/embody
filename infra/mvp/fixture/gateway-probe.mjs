@@ -150,6 +150,9 @@ export async function runGatewayProbe(config) {
     checks.push("cross-app-workspace-replay-rejected");
   }
   const store = new PostgresGatewayStore(process.env.GATEWAY_PLATFORM_DATABASE_URL);
+  const gatewayOrigins = JSON.parse(
+    process.env.EMBODY_GATEWAY_ORIGINS ?? JSON.stringify([process.env.EMBODY_GATEWAY_ORIGIN]),
+  );
   const issued = newCredential({
     workspaceId: config.workspaceId,
     principal,
@@ -159,9 +162,6 @@ export async function runGatewayProbe(config) {
   let record;
   try {
     record = await store.putCredential(issued.credential, null);
-    const gatewayOrigins = JSON.parse(
-      process.env.EMBODY_GATEWAY_ORIGINS ?? JSON.stringify([process.env.EMBODY_GATEWAY_ORIGIN]),
-    );
     const assertPing = (value, actorType) => {
       if (
         value?.ok !== true ||
@@ -333,6 +333,7 @@ export async function runGatewayProbe(config) {
           "fresh-old-key-denied-within60s",
           "new-key-positive-after-removal",
         ],
+        testedGatewayOrigins: gatewayOrigins,
         watchStart: new Date(watchStart).toISOString(),
         authoritativeRemovalObservedAt: new Date(removedAt).toISOString(),
         oldKeyDeniedAt: new Date(deniedAt).toISOString(),
@@ -359,6 +360,7 @@ export async function runGatewayProbe(config) {
       await import("../../../scripts/probe-m05-runtime.mjs")
     ).fixtureConfigDigest(config),
     appOrigins: [config.appOrigin, config.otherAppOrigin],
+    testedGatewayOrigins: gatewayOrigins,
     checks,
     timestamp: new Date().toISOString(),
     providerReady: Boolean(provider),
