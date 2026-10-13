@@ -1,6 +1,6 @@
 # Durable workspace catalog and credentials (M04)
 
-The hosted gateway uses `createWorkspaceGateway` and `PostgresGatewayStore`, not the heartbeat-based `GatewayRegistry`. The memory adapter exists for conformance tests. M04 implements catalog persistence and credential authorization. Subsequent [M05 identity](./IDENTITY.md) and [M06 stateless MCP/client](./MCP.md) evidence are tracked separately; catalog persistence alone does not prove either. M07 durable audit/quotas and M12 deployment transaction/enqueue controller remain open.
+The hosted gateway uses `createWorkspaceGateway` and `PostgresGatewayStore`, not the heartbeat-based `GatewayRegistry`. The memory adapter exists for conformance tests. M04 implements catalog persistence and credential authorization. Subsequent [M05 identity](./IDENTITY.md) and [M06 stateless MCP/client](./MCP.md) evidence are tracked separately; catalog persistence alone does not prove either. [M07 durable audit/quotas](./DISPATCH.md) have accepted real-store/Node22/24 CI and independent review evidence; M12 deployment transaction/enqueue controller remains open.
 
 ## Identity, routes and provisioning
 

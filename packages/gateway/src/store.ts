@@ -15,6 +15,7 @@ import {
   type ScopedGrant,
 } from "@embody/cloud-contracts";
 import { validateRegistration, type Registration, type GatewayRegistryOptions } from "./index.js";
+import { DispatchRateLimitedError, type AuditRecord, type DispatchAdmission } from "./dispatch.js";
 
 export interface Workspace {
   readonly id: string;
@@ -46,7 +47,7 @@ export interface WorkspaceSnapshot {
   readonly apps: readonly CatalogApp[];
 }
 /** Trusted control-plane interface. All mutations are CAS; null means create only. */
-export interface GatewayStore {
+export interface GatewayStore extends DispatchAdmission {
   createWorkspace(id: string): Promise<Workspace>;
   snapshot(workspaceId: string): Promise<WorkspaceSnapshot | null>;
   putApp(value: CatalogWrite, expectedRevision: number | null): Promise<CatalogApp>;
@@ -139,6 +140,34 @@ export class MemoryGatewayStore implements GatewayStore {
   private workspaces = new Map<string, Workspace>();
   private apps = new Map<string, CatalogApp>();
   private credentials = new Map<string, WorkspaceCredential>();
+  private admissions = new Map<
+    string,
+    { record: AuditRecord; expires: number; completed: boolean }
+  >();
+  private quotas = new Map<string, { count: number; reset: number }>();
+  public async admit(record: AuditRecord): Promise<void> {
+    const workspace = record.orgId!;
+    if (!this.workspaces.has(workspace)) throw new NotFoundError("Workspace not found");
+    const key = `${workspace}/${record.requestId}`;
+    if (this.admissions.has(key)) throw new ConflictError("Request already admitted");
+    const now = Date.now();
+    const prior = this.quotas.get(workspace);
+    const quota = prior && prior.reset > now ? prior : { count: 0, reset: now + 60_000 };
+    const active = [...this.admissions.values()].filter(
+      (a) => a.record.orgId === workspace && a.expires > now,
+    ).length;
+    if (quota.count >= 60 || active >= 20)
+      throw new DispatchRateLimitedError(Math.max(1, Math.ceil((quota.reset - now) / 1000)));
+    quota.count++;
+    this.quotas.set(workspace, quota);
+    this.admissions.set(key, { record: clone(record), expires: now + 60_000, completed: false });
+  }
+  public async complete(record: AuditRecord): Promise<void> {
+    const key = `${record.orgId}/${record.requestId}`;
+    const prior = this.admissions.get(key);
+    if (prior && !prior.completed)
+      this.admissions.set(key, { record: clone(record), expires: 0, completed: true });
+  }
   public constructor(private readonly policy: GatewayRegistryOptions = defaultPolicy) {}
   public async createWorkspace(workspaceId: string): Promise<Workspace> {
     id(workspaceId);
@@ -229,6 +258,17 @@ export class PostgresGatewayStore implements GatewayStore {
       query_timeout: 5000,
       statement_timeout: 5000,
     });
+    // pg emits connection errors on checked-out clients as well as its idle pool.
+    // Query promises still reject; prevent an uncaught EventEmitter error from
+    // crashing the gateway. Never expose driver text or use a stale fallback.
+    this.pool.on("error", () => undefined);
+    this.pool.on("connect", (client) => {
+      client.on("error", () => {
+        console.warn(
+          "Gateway store connection lost; authoritative requests reconnect or fail closed",
+        );
+      });
+    });
   }
   public async migrate(): Promise<void> {
     const client = await this.pool.connect();
@@ -242,7 +282,10 @@ export class PostgresGatewayStore implements GatewayStore {
       await client.query("SELECT pg_advisory_xact_lock(6240401)");
       await client.query(`CREATE TABLE IF NOT EXISTS embody_platform_workspaces (id text PRIMARY KEY, revision bigint NOT NULL CHECK (revision > 0));
         CREATE TABLE IF NOT EXISTS embody_platform_apps (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), id text NOT NULL, name text NOT NULL, document jsonb NOT NULL, PRIMARY KEY(workspace_id,id), UNIQUE(workspace_id,name));
-        CREATE TABLE IF NOT EXISTS embody_platform_credentials (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), id text NOT NULL, hash text NOT NULL, document jsonb NOT NULL, PRIMARY KEY(workspace_id,id), UNIQUE(workspace_id,hash));`);
+        CREATE TABLE IF NOT EXISTS embody_platform_credentials (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), id text NOT NULL, hash text NOT NULL, document jsonb NOT NULL, PRIMARY KEY(workspace_id,id), UNIQUE(workspace_id,hash));
+        CREATE TABLE IF NOT EXISTS embody_platform_quotas (workspace_id text PRIMARY KEY REFERENCES embody_platform_workspaces(id), used integer NOT NULL, reset_at timestamptz NOT NULL);
+        CREATE TABLE IF NOT EXISTS embody_platform_audit (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), request_id text NOT NULL, document jsonb NOT NULL, admitted_at timestamptz NOT NULL DEFAULT clock_timestamp(), lease_until timestamptz NOT NULL, completed boolean NOT NULL DEFAULT false, PRIMARY KEY(workspace_id,request_id));
+        CREATE INDEX IF NOT EXISTS embody_platform_audit_lease ON embody_platform_audit(workspace_id,lease_until) WHERE NOT completed;`);
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -349,6 +392,54 @@ export class PostgresGatewayStore implements GatewayStore {
           [workspaceId, hash],
         )
       ).rows[0]?.document ?? null
+    );
+  }
+  public async admit(record: AuditRecord): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // One serialization point per workspace: quota increment and audit intent commit together.
+      const workspace = await client.query(
+        "SELECT id FROM embody_platform_workspaces WHERE id=$1 FOR UPDATE",
+        [record.orgId],
+      );
+      if (!workspace.rowCount) throw new NotFoundError("Workspace not found");
+      await client.query(
+        `INSERT INTO embody_platform_quotas(workspace_id,used,reset_at) VALUES($1,0,clock_timestamp()+interval '60 seconds') ON CONFLICT(workspace_id) DO NOTHING`,
+        [record.orgId],
+      );
+      const quota = await client.query<{ used: number; retry: number }>(
+        `SELECT CASE WHEN reset_at <= clock_timestamp() THEN 0 ELSE used END AS used, GREATEST(1,ceil(extract(epoch FROM reset_at-clock_timestamp())))::int AS retry FROM embody_platform_quotas WHERE workspace_id=$1`,
+        [record.orgId],
+      );
+      const active = await client.query<{ count: string }>(
+        `SELECT count(*) FROM embody_platform_audit WHERE workspace_id=$1 AND NOT completed AND lease_until>clock_timestamp()`,
+        [record.orgId],
+      );
+      if (quota.rows[0]!.used >= 60 || Number(active.rows[0]!.count) >= 20)
+        throw new DispatchRateLimitedError(quota.rows[0]!.retry);
+      await client.query(
+        `UPDATE embody_platform_quotas SET used=CASE WHEN reset_at<=clock_timestamp() THEN 1 ELSE used+1 END, reset_at=CASE WHEN reset_at<=clock_timestamp() THEN clock_timestamp()+interval '60 seconds' ELSE reset_at END WHERE workspace_id=$1`,
+        [record.orgId],
+      );
+      await client.query(
+        `INSERT INTO embody_platform_audit(workspace_id,request_id,document,lease_until) VALUES($1,$2,$3,clock_timestamp()+interval '60 seconds')`,
+        [record.orgId, record.requestId, record],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if ((error as { code?: string }).code === "23505")
+        throw new ConflictError("Request already admitted");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  public async complete(record: AuditRecord): Promise<void> {
+    await this.pool.query(
+      `UPDATE embody_platform_audit SET document=$3,completed=true,lease_until=clock_timestamp() WHERE workspace_id=$1 AND request_id=$2 AND NOT completed`,
+      [record.orgId, record.requestId, record],
     );
   }
   public close(): Promise<void> {

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { request as httpRequest } from "node:http";
 import { signingIdentity } from "./signing-fixture.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -95,6 +96,350 @@ export function storeConformance(
       return { ...issued, credential, app };
     };
     const headers = (token: string) => ({ authorization: `Bearer ${token}` });
+    it("M07.d serializes concurrent workspace admission across replicas and preserves quota after replacement", async () => {
+      const other = reopen ? await reopen() : store;
+      if (other !== store) closers.push(() => other.close());
+      const record = (requestId: string) => ({
+        requestId,
+        orgId: workspace,
+        actorId: "alice",
+        appId: "kanban",
+        target: "kanban.ping",
+        outcome: "unknown" as const,
+        durationMs: 0,
+      });
+      const results = await Promise.allSettled(
+        Array.from({ length: 25 }, (_, i) =>
+          (i % 2 ? store : other).admit(record(`parallel-${i}`)),
+        ),
+      );
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(20);
+      for (let i = 0; i < results.length; i++)
+        if (results[i]!.status === "fulfilled")
+          await other.complete({ ...record(`parallel-${i}`), outcome: "success" });
+      for (let i = 0; i < 40; i++) {
+        await other.admit(record(`serial-${i}`));
+        await other.complete({ ...record(`serial-${i}`), outcome: "success" });
+      }
+      const replacement = reopen ? await reopen() : store;
+      if (replacement !== store) closers.push(() => replacement.close());
+      await expect(replacement.admit(record("over-budget"))).rejects.toThrow("Rate limited");
+      const second = `ws_${randomUUID().replaceAll("-", "")}`;
+      await store.createWorkspace(second);
+      await replacement.admit({ ...record("independent"), orgId: second });
+      await replacement.complete({ ...record("independent"), orgId: second, outcome: "success" });
+    });
+    it("M07.a includes stalled invocation-token acquisition in the action deadline", async () => {
+      const issued = await provision();
+      const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true })));
+      const server = createWorkspaceGateway({
+        store,
+        token: signingIdentity,
+        audit: new MemoryAuditLog(),
+        fetch: fetcher,
+        actionTimeoutMs: 20,
+        invocationToken: () => new Promise(() => undefined),
+      });
+      closers.push(() => server.close());
+      const response = await server.inject({
+        method: "POST",
+        url: `/w/${workspace}/api/execute/kanban/kanban.ping`,
+        headers: headers(issued.token),
+        payload: {},
+      });
+      expect(response.statusCode).toBe(503);
+      expect(response.body).toContain("deadline");
+      expect(fetcher).not.toHaveBeenCalled();
+    });
+    it("M07.d shutdown waits for durable completion of an interrupted HTTP call", async () => {
+      const issued = await provision();
+      let dispatched!: () => void;
+      const reached = new Promise<void>((resolve) => {
+        dispatched = resolve;
+      });
+      const server = createWorkspaceGateway({
+        store,
+        token: signingIdentity,
+        audit: new MemoryAuditLog(),
+        fetch: () => {
+          dispatched();
+          return new Promise(() => undefined);
+        },
+      });
+      closers.push(() => server.close());
+      const complete = vi.spyOn(store, "complete");
+      try {
+        const response = server.inject({
+          method: "POST",
+          url: `/w/${workspace}/api/execute/kanban/kanban.ping`,
+          headers: headers(issued.token),
+          payload: {},
+        });
+        await reached;
+        await server.close();
+        expect((await response).statusCode).toBe(503);
+        expect(complete).toHaveBeenCalledWith(expect.objectContaining({ outcome: "unknown" }));
+      } finally {
+        complete.mockRestore();
+      }
+    });
+    it("M07.a whole request deadline includes stalled authoritative authentication", async () => {
+      const issued = await provision();
+      const credential = store.credential.bind(store);
+      const stalled = vi.spyOn(store, "credential").mockImplementationOnce(async (...args) => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        return credential(...args);
+      });
+      const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true })));
+      const server = createWorkspaceGateway({
+        store,
+        token: signingIdentity,
+        audit: new MemoryAuditLog(),
+        fetch: fetcher,
+        requestTimeoutMs: 20,
+      });
+      closers.push(() => server.close());
+      try {
+        const response = await server.inject({
+          method: "POST",
+          url: `/w/${workspace}/api/execute/kanban/kanban.ping`,
+          headers: headers(issued.token),
+          payload: {},
+        });
+        expect(response.statusCode).toBe(503);
+        expect(response.body).toContain("Request deadline");
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        expect(fetcher).not.toHaveBeenCalled();
+      } finally {
+        stalled.mockRestore();
+      }
+    });
+    it("M07.d late admission after deadline drains an unknown completion without dispatch", async () => {
+      const issued = await provision();
+      const admit = store.admit.bind(store);
+      const delayed = vi.spyOn(store, "admit").mockImplementationOnce(async (record) => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        await admit(record);
+      });
+      const complete = vi.spyOn(store, "complete");
+      const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true })));
+      const server = createWorkspaceGateway({
+        store,
+        token: signingIdentity,
+        audit: new MemoryAuditLog(),
+        fetch: fetcher,
+        actionTimeoutMs: 20,
+      });
+      closers.push(() => server.close());
+      try {
+        const response = await server.inject({
+          method: "POST",
+          url: `/w/${workspace}/api/execute/kanban/kanban.ping`,
+          headers: headers(issued.token),
+          payload: {},
+        });
+        expect(response.statusCode).toBe(503);
+        await server.close();
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(complete).toHaveBeenCalledWith(expect.objectContaining({ outcome: "unknown" }));
+      } finally {
+        delayed.mockRestore();
+        complete.mockRestore();
+      }
+    });
+    it.each(["execute", "execute/stream"])(
+      "M07.a disconnect during %s preflight never reaches the host",
+      async (surface) => {
+        const issued = await provision();
+        let entered!: () => void;
+        const reached = new Promise<void>((resolve) => {
+          entered = resolve;
+        });
+        const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true })));
+        const complete = vi.spyOn(store, "complete");
+        const server = createWorkspaceGateway({
+          store,
+          token: signingIdentity,
+          audit: new MemoryAuditLog(),
+          fetch: fetcher,
+          invocationToken: () => {
+            entered();
+            return new Promise(() => undefined);
+          },
+        });
+        closers.push(() => server.close());
+        try {
+          const address = await server.listen({ host: "127.0.0.1", port: 0 });
+          const call = httpRequest(
+            new URL(`/w/${workspace}/api/${surface}/kanban/kanban.ping`, address),
+            {
+              method: "POST",
+              headers: { ...headers(issued.token), "content-type": "application/json" },
+            },
+          );
+          call.on("error", () => undefined);
+          call.end("{}");
+          await reached;
+          call.destroy();
+          await expect.poll(() => complete.mock.calls.length).toBe(1);
+          expect(fetcher).not.toHaveBeenCalled();
+          await server.close();
+        } finally {
+          complete.mockRestore();
+        }
+      },
+    );
+    it.each(["execute", "execute/stream"])(
+      "M07.d shutdown during %s token preflight never dispatches",
+      async (surface) => {
+        const issued = await provision();
+        let entered!: () => void;
+        const reached = new Promise<void>((resolve) => {
+          entered = resolve;
+        });
+        const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true })));
+        const complete = vi.spyOn(store, "complete");
+        const server = createWorkspaceGateway({
+          store,
+          token: signingIdentity,
+          audit: new MemoryAuditLog(),
+          fetch: fetcher,
+          invocationToken: () => {
+            entered();
+            return new Promise(() => undefined);
+          },
+        });
+        closers.push(() => server.close());
+        try {
+          const response = server.inject({
+            method: "POST",
+            url: `/w/${workspace}/api/${surface}/kanban/kanban.ping`,
+            headers: headers(issued.token),
+            payload: {},
+          });
+          await reached;
+          await server.close();
+          expect((await response).statusCode).toBe(503);
+          expect(fetcher).not.toHaveBeenCalled();
+          expect(complete).toHaveBeenCalledWith(expect.objectContaining({ outcome: "unknown" }));
+        } finally {
+          complete.mockRestore();
+        }
+      },
+    );
+    it("M07.d shutdown during admission drains a late committed unknown intent", async () => {
+      const issued = await provision();
+      let entered!: () => void;
+      let release!: () => void;
+      const reached = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const admit = store.admit.bind(store);
+      const delayed = vi.spyOn(store, "admit").mockImplementationOnce(async (record) => {
+        entered();
+        await barrier;
+        await admit(record);
+      });
+      const complete = vi.spyOn(store, "complete");
+      const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true })));
+      const server = createWorkspaceGateway({
+        store,
+        token: signingIdentity,
+        audit: new MemoryAuditLog(),
+        fetch: fetcher,
+      });
+      closers.push(() => server.close());
+      try {
+        const response = server.inject({
+          method: "POST",
+          url: `/w/${workspace}/api/execute/kanban/kanban.ping`,
+          headers: headers(issued.token),
+          payload: {},
+        });
+        await reached;
+        const closing = server.close();
+        expect((await response).statusCode).toBe(503);
+        release();
+        await closing;
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(complete).toHaveBeenCalledWith(expect.objectContaining({ outcome: "unknown" }));
+      } finally {
+        release();
+        delayed.mockRestore();
+        complete.mockRestore();
+      }
+    });
+    it("M07.d admission-store outage fails closed before any host call", async () => {
+      const issued = await provision();
+      const { server, fetcher } = gateway();
+      const fail = vi.spyOn(store, "admit").mockRejectedValueOnce(new Error("store unavailable"));
+      try {
+        const response = await server.inject({
+          method: "POST",
+          url: `/w/${workspace}/api/execute/kanban/kanban.ping`,
+          headers: headers(issued.token),
+          payload: {},
+        });
+        expect(response.statusCode).toBe(500);
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(response.body).not.toContain("store unavailable");
+      } finally {
+        fail.mockRestore();
+      }
+    });
+    it("M07.b commits one effect, loses response and never replays an annotated mutation", async () => {
+      const issued = await provision();
+      const app = (await store.snapshot(workspace))!.apps[0]!;
+      await store.putApp(
+        {
+          ...app,
+          registration: {
+            ...app.registration,
+            manifest: {
+              ...app.registration.manifest,
+              actions: {
+                "kanban.ping": {
+                  generated: false,
+                  inputSchema: {},
+                  effect: "write",
+                  idempotent: true,
+                },
+              },
+            },
+          },
+        },
+        app.revision,
+      );
+      const effects: string[] = [];
+      const server = createWorkspaceGateway({
+        store,
+        token: signingIdentity,
+        audit: new MemoryAuditLog(),
+        fetch: () => {
+          effects.push("committed");
+          return Promise.reject(new Error("response lost"));
+        },
+      });
+      closers.push(() => server.close());
+      const response = await server.inject({
+        method: "POST",
+        url: `/w/${workspace}/api/execute/kanban/kanban.ping`,
+        headers: headers(issued.token),
+        payload: {},
+      });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({
+        error: {
+          code: "UNAVAILABLE",
+          message: expect.stringContaining("outcome unknown"),
+          requestId: expect.any(String),
+        },
+      });
+      expect(effects).toEqual(["committed"]);
+    });
     it("creates and reads workspace, rejects duplicates, hides missing workspace", async () => {
       expect(await store.snapshot(workspace)).toEqual({
         workspace: { id: workspace, revision: 1 },
@@ -659,7 +1004,7 @@ export function storeConformance(
         .toMatchObject([
           {
             surface: "mcp",
-            outcome: "cancelled",
+            outcome: "unknown",
             appId: "kanban",
             target: "kanban.ping",
           },

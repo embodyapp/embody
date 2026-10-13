@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { signingIdentity, privateKeyPem, publicKeys } from "./signing-fixture.js";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
+import { createServer } from "node:http";
+import { commitDropProxy } from "./commit-drop-proxy.js";
 import { promisify } from "node:util";
 import { Pool } from "pg";
 import { describe, expect, it, vi } from "vitest";
@@ -17,6 +19,331 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
     () => Promise.resolve(new PostgresGatewayStore(url!)),
     () => Promise.resolve(new PostgresGatewayStore(url!)),
   );
+  it("M07.d committed audit intent survives process loss, completion is immutable and contains no payload", async () => {
+    const workspace = `ws_${randomUUID().replaceAll("-", "")}`;
+    const store = new PostgresGatewayStore(url!);
+    const pool = new Pool({ connectionString: url });
+    try {
+      await store.createWorkspace(workspace);
+      const record = {
+        requestId: randomUUID(),
+        orgId: workspace,
+        appId: "kanban",
+        target: "kanban.ping",
+        actorId: "alice",
+        surface: "http" as const,
+        outcome: "unknown" as const,
+        durationMs: 0,
+      };
+      await promisify(execFile)(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `import {PostgresGatewayStore} from './dist/index.js';const store=new PostgresGatewayStore(process.env.EMBODY_PLATFORM_URL);await store.admit(JSON.parse(process.env.TEST_ADMISSION));process.exit(0);`,
+        ],
+        {
+          cwd: import.meta.dirname + "/..",
+          env: { ...process.env, TEST_ADMISSION: JSON.stringify(record) },
+        },
+      );
+      await store.close();
+      const replacement = new PostgresGatewayStore(url!);
+      try {
+        const read = async () =>
+          (
+            await pool.query<{ document: typeof record }>(
+              "SELECT document FROM embody_platform_audit WHERE workspace_id=$1 AND request_id=$2",
+              [workspace, record.requestId],
+            )
+          ).rows[0]!.document;
+        expect(await read()).toEqual(record);
+        await replacement.complete({ ...record, outcome: "success", durationMs: 10 });
+        await replacement.complete({ ...record, outcome: "failure", durationMs: 20 });
+        expect(await read()).toMatchObject({ outcome: "success", durationMs: 10 });
+        expect(Object.keys(await read()).sort()).toEqual(Object.keys(record).sort());
+      } finally {
+        await replacement.close();
+      }
+    } finally {
+      await store.close();
+      await pool.end();
+    }
+  });
+  it("M07.d expired leases and quota rollover admit again without inventing success", async () => {
+    const workspace = `ws_${randomUUID().replaceAll("-", "")}`;
+    const store = new PostgresGatewayStore(url!);
+    const replica = new PostgresGatewayStore(url!);
+    const pool = new Pool({ connectionString: url });
+    try {
+      await store.createWorkspace(workspace);
+      for (let i = 0; i < 20; i++)
+        await store.admit({
+          requestId: `abandoned-${i}`,
+          orgId: workspace,
+          outcome: "unknown",
+          durationMs: 0,
+        });
+      await expect(
+        replica.admit({
+          requestId: "blocked",
+          orgId: workspace,
+          outcome: "unknown",
+          durationMs: 0,
+        }),
+      ).rejects.toThrow("Rate limited");
+      await pool.query(
+        "UPDATE embody_platform_audit SET lease_until=clock_timestamp()-interval '1 second' WHERE workspace_id=$1",
+        [workspace],
+      );
+      await pool.query(
+        "UPDATE embody_platform_quotas SET used=60,reset_at=clock_timestamp()-interval '1 second' WHERE workspace_id=$1",
+        [workspace],
+      );
+      await replica.admit({
+        requestId: "next-window",
+        orgId: workspace,
+        outcome: "unknown",
+        durationMs: 0,
+      });
+      expect(
+        (
+          await pool.query("SELECT used FROM embody_platform_quotas WHERE workspace_id=$1", [
+            workspace,
+          ])
+        ).rows,
+      ).toEqual([{ used: 1 }]);
+      const expired = await pool.query(
+        "SELECT document->>'outcome' AS outcome,completed FROM embody_platform_audit WHERE workspace_id=$1 AND request_id LIKE 'abandoned-%'",
+        [workspace],
+      );
+      expect(expired.rows).toHaveLength(20);
+      expect(expired.rows.every((row) => row.outcome === "unknown" && !row.completed)).toBe(true);
+    } finally {
+      await store.close();
+      await replica.close();
+      await pool.end();
+    }
+  });
+  it("M07.d lost COMMIT acknowledgement preserves one admission/unknown intent and never dispatches", async () => {
+    const workspace = `ws_${randomUUID().replaceAll("-", "")}`;
+    const seed = new PostgresGatewayStore(url!);
+    const proxy = await commitDropProxy(new URL(url!));
+    const store = new PostgresGatewayStore(proxy.url);
+    const pool = new Pool({ connectionString: url });
+    const issued = newCredential(credentialInput(workspace));
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true })));
+    const gateway = createWorkspaceGateway({ store, token: signingIdentity, fetch: fetcher });
+    try {
+      await seed.createWorkspace(workspace);
+      await seed.putApp(appRecord(workspace), null);
+      await seed.putCredential(issued.credential, null);
+      const result = await gateway.inject({
+        method: "POST",
+        url: `/w/${workspace}/api/execute/kanban/kanban.ping`,
+        headers: { authorization: `Bearer ${issued.token}` },
+        payload: {},
+      });
+      expect(result.statusCode).toBe(500);
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(proxy.dropped()).toBe(1);
+      expect(
+        (
+          await pool.query("SELECT used FROM embody_platform_quotas WHERE workspace_id=$1", [
+            workspace,
+          ])
+        ).rows,
+      ).toEqual([{ used: 1 }]);
+      expect(
+        (
+          await pool.query(
+            "SELECT document->>'outcome' AS outcome,completed FROM embody_platform_audit WHERE workspace_id=$1",
+            [workspace],
+          )
+        ).rows,
+      ).toEqual([{ outcome: "unknown", completed: false }]);
+    } finally {
+      await gateway.close();
+      await store.close();
+      await seed.close();
+      await pool.end();
+      await proxy.close();
+    }
+  });
+  it("M07.d actual completion-pool outage retains known host result and committed unknown intent", async () => {
+    const workspace = `ws_${randomUUID().replaceAll("-", "")}`;
+    const store = new PostgresGatewayStore(url!);
+    const pool = new Pool({ connectionString: url });
+    const issued = newCredential(credentialInput(workspace));
+    const gateway = createWorkspaceGateway({
+      store,
+      token: signingIdentity,
+      fetch: async () => {
+        await store.close();
+        return Response.json({ committed: true });
+      },
+    });
+    try {
+      await store.createWorkspace(workspace);
+      await store.putApp(appRecord(workspace), null);
+      await store.putCredential(issued.credential, null);
+      const result = await gateway.inject({
+        method: "POST",
+        url: `/w/${workspace}/api/execute/kanban/kanban.ping`,
+        headers: { authorization: `Bearer ${issued.token}` },
+        payload: {},
+      });
+      expect(result.statusCode).toBe(200);
+      expect(result.json()).toEqual({ committed: true });
+      expect(
+        (
+          await pool.query(
+            "SELECT document->>'outcome' AS outcome,document->>'requestId' AS request_id FROM embody_platform_audit WHERE workspace_id=$1",
+            [workspace],
+          )
+        ).rows,
+      ).toEqual([{ outcome: "unknown", request_id: result.headers["x-request-id"] }]);
+    } finally {
+      await gateway.close();
+      await store.close();
+      await pool.end();
+    }
+  });
+  it("M07.d SQL lock timeout rolls admission back and the pool remains usable", async () => {
+    const workspace = `ws_${randomUUID().replaceAll("-", "")}`;
+    const store = new PostgresGatewayStore(url!);
+    const pool = new Pool({ connectionString: url });
+    const lock = await pool.connect();
+    try {
+      await store.createWorkspace(workspace);
+      await lock.query("BEGIN");
+      await lock.query("SELECT id FROM embody_platform_workspaces WHERE id=$1 FOR UPDATE", [
+        workspace,
+      ]);
+      await expect(
+        store.admit({ requestId: "blocked", orgId: workspace, outcome: "unknown", durationMs: 0 }),
+      ).rejects.toThrow();
+      await lock.query("ROLLBACK");
+      expect(
+        (
+          await pool.query(
+            "SELECT count(*)::int AS count FROM embody_platform_audit WHERE workspace_id=$1",
+            [workspace],
+          )
+        ).rows,
+      ).toEqual([{ count: 0 }]);
+      await store.admit({
+        requestId: "healthy",
+        orgId: workspace,
+        outcome: "unknown",
+        durationMs: 0,
+      });
+      expect(
+        (
+          await pool.query("SELECT used FROM embody_platform_quotas WHERE workspace_id=$1", [
+            workspace,
+          ])
+        ).rows,
+      ).toEqual([{ used: 1 }]);
+    } finally {
+      await lock.query("ROLLBACK");
+      lock.release();
+      await store.close();
+      await pool.end();
+    }
+  }, 20_000);
+  it("M07.b real host commits a PostgreSQL effect then drops the response once", async () => {
+    const workspace = `ws_${randomUUID().replaceAll("-", "")}`;
+    const store = new PostgresGatewayStore(url!);
+    const appPool = new Pool({ connectionString: process.env["EMBODY_POSTGRES_URL"] });
+    const platform = new Pool({ connectionString: url });
+    const issued = newCredential(credentialInput(workspace));
+    let effects = 0;
+    const host = createServer((request, response) => {
+      const commit = async () => {
+        const client = await appPool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SELECT set_config('app.current_org',$1,true)", [workspace]);
+          await client.query(
+            "INSERT INTO embody_entities(id,org_id,entity_type,data,created_at,updated_at) VALUES($1,$2,'m07-effect',$3,clock_timestamp(),clock_timestamp())",
+            [randomUUID(), workspace, { requestId: request.headers["x-request-id"] }],
+          );
+          await client.query("COMMIT");
+          effects++;
+          response.destroy();
+        } catch {
+          await client.query("ROLLBACK");
+          response.statusCode = 500;
+          response.end();
+        } finally {
+          client.release();
+        }
+      };
+      void commit();
+    });
+    host.listen(0, "127.0.0.1");
+    await once(host, "listening");
+    const address = host.address();
+    if (!address || typeof address === "string") throw new Error("Missing effect host address");
+    const gateway = createWorkspaceGateway({
+      store,
+      token: signingIdentity,
+      fetch: (input, init) =>
+        fetch(
+          new URL(
+            new URL(
+              typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+            ).pathname,
+            `http://127.0.0.1:${address.port}`,
+          ),
+          init,
+        ),
+    });
+    try {
+      await store.createWorkspace(workspace);
+      await store.putApp(appRecord(workspace), null);
+      await store.putCredential(issued.credential, null);
+      const result = await gateway.inject({
+        method: "POST",
+        url: `/w/${workspace}/api/execute/kanban/kanban.ping`,
+        headers: { authorization: `Bearer ${issued.token}` },
+        payload: {},
+      });
+      expect(result.statusCode).toBe(503);
+      expect(result.body).toContain("outcome unknown");
+      expect(effects).toBe(1);
+      const client = await appPool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.current_org',$1,true)", [workspace]);
+        const ledger = await client.query(
+          "SELECT data FROM embody_entities WHERE org_id=$1 AND entity_type='m07-effect'",
+          [workspace],
+        );
+        expect(ledger.rows).toEqual([{ data: { requestId: result.headers["x-request-id"] } }]);
+        await client.query("ROLLBACK");
+      } finally {
+        client.release();
+      }
+      expect(
+        (
+          await platform.query(
+            "SELECT document->>'outcome' AS outcome FROM embody_platform_audit WHERE workspace_id=$1",
+            [workspace],
+          )
+        ).rows,
+      ).toEqual([{ outcome: "unknown" }]);
+    } finally {
+      await gateway.close();
+      await new Promise<void>((resolve, reject) =>
+        host.close((error) => (error ? reject(error) : resolve())),
+      );
+      await store.close();
+      await appPool.end();
+      await platform.end();
+    }
+  });
   it("data survives a separate Node process with a fresh connection pool", async () => {
     const store = new PostgresGatewayStore(url!);
     const workspace = `ws_${randomUUID().replaceAll("-", "")}`;
@@ -154,7 +481,7 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
           "SELECT tableowner=current_user AS owned FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'embody_platform_%'",
         )
       ).rows;
-      expect(tables).toHaveLength(3);
+      expect(tables).toHaveLength(5);
       expect(tables.every((row) => !row.owned)).toBe(true);
       await expect(store.migrate()).rejects.toThrow("maintenance authority");
       await expect(
