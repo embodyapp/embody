@@ -115,6 +115,8 @@ export function mcpResult(value: unknown): CallToolResult {
 }
 
 export interface McpHttpOptions<TContext> {
+  /** Stateless requests need no replica-local session; recommended behind load balancers. */
+  readonly sessionMode?: "stateful" | "stateless";
   /** Audit a rejected call without exposing entries omitted from the caller's catalog. */
   readonly rejectTool?: (context: TContext, name: string, scopedAppId?: string) => McpErrorDetails;
   readonly catalog: (context: TContext, scopedAppId?: string) => readonly McpCatalogEntry[];
@@ -141,7 +143,7 @@ interface Session<TContext> {
   context: TContext;
 }
 
-/** Stateful official-SDK Streamable HTTP adapter with identity and endpoint pinning. */
+/** Official-SDK Streamable HTTP adapter; stateful sessions pin identity and endpoint. */
 export class McpHttpHandler<TContext> {
   private readonly sessions = new Map<string, Session<TContext>>();
   public constructor(private readonly options: McpHttpOptions<TContext>) {}
@@ -149,6 +151,11 @@ export class McpHttpHandler<TContext> {
   public async handle(input: McpHttpRequest<TContext>): Promise<void> {
     const header = input.request.headers["mcp-session-id"];
     const sessionId = typeof header === "string" ? header : undefined;
+    const stateless = this.options.sessionMode === "stateless";
+    if (stateless && sessionId !== undefined) {
+      this.jsonError(input.response, 400, -32_000, "Stateless MCP does not accept session IDs");
+      return;
+    }
     if (sessionId !== undefined) {
       const session = this.sessions.get(sessionId);
       if (
@@ -164,11 +171,13 @@ export class McpHttpHandler<TContext> {
       return;
     }
     const message = input.body as { method?: unknown } | undefined;
-    if (input.request.method !== "POST" || message?.method !== "initialize") {
+    if (!stateless && (input.request.method !== "POST" || message?.method !== "initialize")) {
       this.jsonError(input.response, 400, -32_000, "MCP session ID is required");
       return;
     }
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: randomUUID });
+    const transport = new StreamableHTTPServerTransport(
+      stateless ? {} : { sessionIdGenerator: randomUUID },
+    );
     const server = new Server(
       { name: "embody", version: "0.0.0" },
       { capabilities: { tools: { listChanged: true } } },
@@ -231,7 +240,16 @@ export class McpHttpHandler<TContext> {
     };
     // SDK 1.x transport declarations are not exactOptionalPropertyTypes-compatible.
     await server.connect(transport as unknown as Transport);
-    await transport.handleRequest(input.request, input.response, input.body);
+    if (stateless)
+      input.response.once("close", () => {
+        void server.close();
+      });
+    try {
+      await transport.handleRequest(input.request, input.response, input.body);
+    } catch (error) {
+      if (stateless) await server.close();
+      throw error;
+    }
     if (transport.sessionId) this.sessions.set(transport.sessionId, session);
   }
 

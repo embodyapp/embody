@@ -657,6 +657,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       "mcp.actor 'token' is deprecated: MCP calls keep the credential's actor type, so agent-only guardrails do not apply to human credentials",
     );
   const mcp = new McpHttpHandler<Principal>({
+    sessionMode: "stateless",
     catalog: catalogFor,
     execute: remoteEvents,
     rejectTool: (principal, name, scopedAppId) => {

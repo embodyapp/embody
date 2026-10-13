@@ -260,21 +260,26 @@ async function main() {
   }
   await delay(5000);
   const suffix = execution.name.split("/").at(-1);
-  const logs = await api("https://logging.googleapis.com/v2/entries:list", "POST", {
-    resourceNames: [`projects/${project}`],
-    filter: `resource.type="cloud_run_job" AND resource.labels.job_name="${name}" AND jsonPayload.gate:*`,
-    // Bind the returned log label exactly in code; the provider label filter returned no matches.
-    orderBy: "timestamp desc",
-    pageSize: 100,
-  });
-  const reports = (logs.entries ?? [])
-    .filter(
-      (entry) =>
-        entry.labels?.["run.googleapis.com/execution_name"] === suffix &&
-        entry.logName.endsWith("run.googleapis.com%2Fstdout") &&
-        entry.jsonPayload?.gate?.startsWith("m05-"),
-    )
-    .map((entry) => entry.jsonPayload);
+  execution = await api(`https://run.googleapis.com/v2/${execution.name}`);
+  let reports = [];
+  for (let attempt = 0; attempt < 12 && reports.length === 0; attempt++) {
+    const logs = await api("https://logging.googleapis.com/v2/entries:list", "POST", {
+      resourceNames: [`projects/${project}`],
+      filter: `resource.type="cloud_run_job" AND resource.labels.job_name="${name}" AND jsonPayload.gate:*`,
+      // Bind the returned log label exactly in code; the provider label filter returned no matches.
+      orderBy: "timestamp desc",
+      pageSize: 100,
+    });
+    reports = (logs.entries ?? [])
+      .filter(
+        (entry) =>
+          entry.labels?.["run.googleapis.com/execution_name"] === suffix &&
+          entry.logName.endsWith("run.googleapis.com%2Fstdout") &&
+          entry.jsonPayload?.gate?.startsWith("m05-"),
+      )
+      .map((entry) => entry.jsonPayload);
+    if (reports.length === 0) await delay(5000);
+  }
   if (
     execution.succeededCount !== 1 ||
     !reports.some(
