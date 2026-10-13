@@ -201,7 +201,7 @@ describe("MCP surface", () => {
   });
 
   it.each([false, true])(
-    "propagates client cancellation to execution (stateless=%s)",
+    "aborts execution on stateful cancellation or stateless HTTP disconnect (stateless=%s)",
     async (stateless) => {
       let cancelled = false;
       let markStarted = () => {};
@@ -235,6 +235,9 @@ describe("MCP surface", () => {
       await started;
       controller.abort();
       await expect(call).rejects.toThrow();
+      // Stateless cancellation notifications may reach another replica; HTTP disconnect owns
+      // the execution lifecycle instead. Stateful mode retains notification cancellation.
+      if (stateless) await client.close();
       await observedCancellation;
       expect(cancelled).toBe(true);
       await client.close();

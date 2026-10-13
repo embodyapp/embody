@@ -146,6 +146,7 @@ interface Session<TContext> {
 /** Official-SDK Streamable HTTP adapter; stateful sessions pin identity and endpoint. */
 export class McpHttpHandler<TContext> {
   private readonly sessions = new Map<string, Session<TContext>>();
+  private readonly activeStateless = new Set<Server>();
   public constructor(private readonly options: McpHttpOptions<TContext>) {}
 
   public async handle(input: McpHttpRequest<TContext>): Promise<void> {
@@ -240,14 +241,20 @@ export class McpHttpHandler<TContext> {
     };
     // SDK 1.x transport declarations are not exactOptionalPropertyTypes-compatible.
     await server.connect(transport as unknown as Transport);
-    if (stateless)
+    if (stateless) {
+      this.activeStateless.add(server);
       input.response.once("close", () => {
+        this.activeStateless.delete(server);
         void server.close();
       });
+    }
     try {
       await transport.handleRequest(input.request, input.response, input.body);
     } catch (error) {
-      if (stateless) await server.close();
+      if (stateless) {
+        this.activeStateless.delete(server);
+        await server.close();
+      }
       throw error;
     }
     if (transport.sessionId) this.sessions.set(transport.sessionId, session);
@@ -256,6 +263,8 @@ export class McpHttpHandler<TContext> {
   public async close(): Promise<void> {
     await Promise.all([...this.sessions.values()].map((session) => session.server.close()));
     this.sessions.clear();
+    await Promise.all([...this.activeStateless].map((server) => server.close()));
+    this.activeStateless.clear();
   }
   private jsonError(response: ServerResponse, status: number, code: number, message: string): void {
     response.writeHead(status, { "content-type": "application/json" });
