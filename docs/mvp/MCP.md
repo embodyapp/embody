@@ -1,4 +1,4 @@
-# Hosted MCP contract (M06, in progress)
+# Hosted MCP contract (M06)
 
 The hosted workspace gateway uses request-local `@modelcontextprotocol/sdk` **1.32.1** servers and Streamable HTTP transports. No sticky routing, process-owned initialization state or MCP session ID is required. The standalone adapter's default remains stateful for compatibility.
 
@@ -24,7 +24,7 @@ Each request has a fresh SDK server. Do not depend on capabilities supplied to a
 
 Close/abort the **active HTTP transport** to cancel reliably. A cancellation notification sent as a separate request may reach another replica and cannot reliably cancel the original request. An SDK call-level AbortSignal alone must not be advertised as cross-replica cancellation; close the transport as well. Execution must cooperate with its AbortSignal; transport cleanup cannot forcibly terminate arbitrary customer code.
 
-Completed or disconnected request servers are disposed. Gateway shutdown closes MCP before Fastify drains connections, aborts request handlers and destroys active HTTP responses. Clients must treat premature EOF as an incomplete call; some SDK clients keep a pending call until their deadline or explicit client close even after an SSE stream ends. No success is inferred from stream closure. There is no resumable stream, affinity fallback or automatic mutation replay promise. After an ambiguous mutation failure, inspect the outcome rather than blindly retrying.
+Completed or disconnected request servers are disposed. Gateway shutdown closes MCP before Fastify drains connections, aborts request handlers and destroys active HTTP responses. Clients must treat premature EOF as an incomplete call; some SDK clients keep a pending call until their deadline or explicit client close even after an SSE stream ends. No success is inferred from stream closure. Local cancellation audit is covered, but handler close does not wait for durable audit delivery or arbitrary application cleanup; M07 must add the durable in-flight drain. There is no resumable stream, affinity fallback or automatic mutation replay promise. After an ambiguous mutation failure, inspect the outcome rather than blindly retrying.
 
 The SDK client may attempt GET to establish a listening stream; the 405 intentionally prevents an idle stream. Clients must tolerate that response without a reconnect loop, close active streams after completion, and avoid idle polling/keepalives. Local resource cleanup is not proof of provider zero-instance behavior; M17 requires metrics.
 
@@ -34,7 +34,7 @@ The SDK client may attempt GET to establish a listening stream; the 405 intentio
 | --- | --- | --- |
 | Official TypeScript SDK 1.32.1 | Automated local transport regression | `StreamableHTTPClientTransport` with bearer header in `requestInit`; replica replacement, progress, result and shutdown tests |
 | Embody CLI 0.1.0 (plain HTTP actions) | Local authenticated discovery/action smoke passed | Protected profiles or `EMBODY_TOKEN`; no MCP session needed |
-| Claude Code **2.1.296**, direct HTTP | Local real-product smoke passed; final candidate acceptance pending | Bearer header in private MCP config; initializes/lists/calls across replicas and replacement; live-client 120-second idle window with zero requests, active responses or sockets |
+| Claude Code **2.1.296**, direct HTTP | Qualified on frozen candidate `89aaac4`; see [acceptance evidence](./evidence/M06-2026-10-13.md) | Bearer header in private MCP config; initializes/lists/calls across replicas and replacement; live-client 120-second idle window with zero requests, active responses or sockets |
 | Other desktop/remote clients | Not qualified | No universal compatibility claim; token/405/idle/cancellation behavior varies |
 
 ### Claude Code 2.1.296 setup
