@@ -24,7 +24,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | M03 | Trustworthy DB, package and cloud test gates | M01 | DONE | pi | [#35](https://github.com/embodyapp/embody/pull/35), [commands](./TESTING.md), [evidence](./evidence/M03-2026-10-11.md); independent review accepted; CI `38133604952`: mandatory DB/MVP 91 pass/zero skips, 12 runner negatives pass, clean Node 22/24 packed/E2E pass |
 | M04 | Durable workspace catalog and credentials | M02, M03 | DONE | pi | [#36](https://github.com/embodyapp/embody/pull/36), [semantics](./WORKSPACES.md), [evidence](./evidence/M04-2026-10-11.md); independent review accepted; CI `38146111665`: mandatory130/zero skips (real store22), runner17, clean Node22/24 packed/E2E; no G1/provider qualification claim |
 | M05 | App-bound identity and tenant isolation | M04 | DONE | pi | [#37](https://github.com/embodyapp/embody/pull/37), [live evidence/review](./evidence/M05-live-b429/README.md), [CI38387594777](https://github.com/embodyapp/embody/actions/runs/38387594777) all9 checks; frozen b429a0a/image09b29: both runtime16, gateway19, publish/overlap/root+tag HTTP/SSE/MCP, single-client cross-revision MCP, removal2509ms/stable app instances, external404. SQL/NAT/workloads/app identities/secrets/images and private fixture state removed; private remote backend preserved. Final13:15 provider inventory all13 optional lists empty; fresh locked Terraform plan exit0, remote backend preserved. Final evidence b5a024b [CI38405399924](https://github.com/embodyapp/embody/actions/runs/38405399924) all9 green; final independent acceptance. Cost conservative estimate$7.80, invoice OPEN/not measured; max$10 authorized, not a cap. No M09/controller qualification |
-| M06 | Stateless MCP and supported client contract | M04, M05 | NOT_STARTED | — | M05 adds request-local gateway MCP,405 idle-stream prevention and HTTP-disconnect cancellation; broader supported-client/per-request capability/idle contract still requires acceptance; cross-replica cancellation notifications are not promised |
+| M06 | Stateless MCP and supported client contract | M04, M05 | IN_PROGRESS | pi | Branch `feat/mvp-m06-stateless-mcp`; extending M05 request-local transport with replacement/progress/output tests and hosted client contract. Real named/versioned client and quiescence acceptance remain open; cross-replica cancellation notifications are not promised |
 | M07 | Safe dispatch, quotas and durable audit | M04, M05, M06 | NOT_STARTED | — | Existing dispatch PR is only a foundation |
 | M08 | Request-only sleep-safe host/scaffold | M02, M03, M05 | NOT_STARTED | — | Outbox retention/unsupported-feature behavior must be implemented |
 | M09 | Cloud/database qualification and costs | M03, M05, M08 | NOT_STARTED | — | Provider database, region and budget decisions below |
@@ -38,7 +38,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | M17 | Real zero-instance and centralized-control proof | M03–M16 | NOT_STARTED | — | Requires actual cloud/client evidence |
 | M18 | Candidate review and controlled release | M01–M17 | NOT_STARTED | — | Owner release decision required |
 
-**Completed implementation tasks: 4 / 18.** Existing framework code is a foundation, not proof these hosted acceptance cases have passed. Update this count when task states change.
+**Completed implementation tasks: 5 / 18.** Existing framework code is a foundation, not proof these hosted acceptance cases have passed. Update this count when task states change.
 
 ## Decision ledger
 
@@ -67,6 +67,8 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | G5: invite-only release approved | M18 | NOT_EVALUATED | — |
 
 ## Activity log
+
+- 2026-10-13 — pi — M06 — NOT_STARTED → IN_PROGRESS — branch `feat/mvp-m06-stateless-mcp`, starting from `154de3e0781c792d144bcc418cbf956bb71e3e41`; M04/M05 accepted dependencies. Added replacement/progress/structured-output/shutdown regressions, fixed shutdown HTTP-response cleanup, included MCP in mandatory MVP suite, and documented [hosted contract](./MCP.md). [Initial local evidence](./evidence/M06-2026-10-13.md); real named/versioned client (MD07), plain CLI journey, full DB/MVP and candidate CI/review remain open. No cloud spend or completion claim.
 
 - 2026-10-08 — Planning: added focused scope, 18 implementation tasks with acceptance cases, verification matrix and completion tracker at the user's request. No code/infra implementation, tests, deployments or runtime completion claimed. Existing `.gitignore` modification left untouched.
 

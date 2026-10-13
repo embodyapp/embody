@@ -724,6 +724,9 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
   };
   for (const url of ["/mcp", "/mcp/:appId"])
     app.route({ method: ["GET", "POST", "DELETE"], url: route(url), handler: mcpRoute });
+  // Fastify onClose runs after outstanding connections drain. Request-owned MCP
+  // streams must close before that drain, otherwise shutdown can wait indefinitely.
+  app.addHook("preClose", async () => mcp.close());
   app.addHook("onClose", async () => mcp.close());
   app.post(route("/api/execute/stream/:appId/:target"), async (request, reply) => {
     const principal = await authenticateSurface(request, reply, "stream");

@@ -6,6 +6,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkspaceGateway,
+  MemoryAuditLog,
   newCredential,
   type GatewayStore,
   type CatalogWrite,
@@ -74,14 +75,18 @@ export function storeConformance(
           }),
         ),
       );
+      const audit = new MemoryAuditLog();
       const server = createWorkspaceGateway({
         store: backend,
+        audit,
         fetch: fetcher,
         token: signingIdentity,
         ...(clock ? { clock } : {}),
       });
-      closers.push(() => server.close());
-      return { server, fetcher };
+      let closing: Promise<void> | undefined;
+      const close = () => (closing ??= server.close());
+      closers.push(close);
+      return { server, fetcher, close, audit };
     };
     const provision = async (w = workspace, endpoint = "https://one.example.com") => {
       const app = await store.putApp(appRecord(w, endpoint), null);
@@ -484,6 +489,239 @@ export function storeConformance(
         expect(current.status).toBe(200);
         expect(await current.text()).not.toContain("kanban_ping");
       }
+    });
+    it("M06: one official client lists and calls across alternating gateways, replacement and grant changes", async () => {
+      const issued = await provision();
+      const otherStore = reopen ? await reopen() : store;
+      if (otherStore !== store) closers.push(() => otherStore.close());
+      const instances = [gateway(), gateway(otherStore)];
+      const configure = (instance: ReturnType<typeof gateway>) => {
+        instance.fetcher.mockImplementation(async (url) => {
+          await Promise.resolve();
+          const endpoint = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+          return new Response(`event: result\ndata: ${JSON.stringify({ endpoint })}\n\n`, {
+            headers: { "content-type": "text/event-stream" },
+          });
+        });
+      };
+      instances.forEach(configure);
+      const addresses = await Promise.all(
+        instances.map(({ server }) => server.listen({ port: 0, host: "127.0.0.1" })),
+      );
+      let next = 0;
+      const routed: Array<{ index: number; method: string }> = [];
+      const client = new Client({ name: "m06-replacement", version: "1" });
+      closers.push(() => client.close());
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`/w/${workspace}/mcp`, addresses[0]),
+        {
+          requestInit: { headers: headers(issued.token) },
+          fetch: (url, init) => {
+            const index = next++ % 2;
+            const message =
+              typeof init?.body === "string"
+                ? (JSON.parse(init.body) as { method: string })
+                : undefined;
+            if (message) routed.push({ index, method: message.method });
+            const path = new URL(String(url));
+            return fetch(new URL(path.pathname, addresses[index]), init);
+          },
+        },
+      );
+      await client.connect(transport as unknown as Transport);
+      expect(transport.sessionId).toBeUndefined();
+      for (let i = 0; i < 2; i++)
+        expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+          "kanban__kanban_ping",
+        ]);
+      expect(instances.map(({ fetcher }) => fetcher.mock.calls.length)).toEqual([0, 0]);
+      for (let i = 0; i < 4; i++) {
+        expect(await client.callTool({ name: "kanban__kanban_ping", arguments: {} })).toMatchObject(
+          {
+            structuredContent: { endpoint: "https://one.example.com/execute/stream" },
+          },
+        );
+      }
+      expect(instances.every(({ fetcher }) => fetcher.mock.calls.length > 0)).toBe(true);
+      const callRoutes = routed
+        .filter(({ method }) => method === "tools/call")
+        .map(({ index }) => index);
+      expect(callRoutes).toEqual([
+        callRoutes[0],
+        1 - callRoutes[0]!,
+        callRoutes[0],
+        1 - callRoutes[0]!,
+      ]);
+      expect(
+        new Set(routed.filter(({ method }) => method === "tools/list").map(({ index }) => index)),
+      ).toEqual(new Set([0, 1]));
+      await instances[0]!.close();
+      const replacement = gateway(otherStore);
+      configure(replacement);
+      instances[0] = replacement;
+      addresses[0] = await replacement.server.listen({ port: 0, host: "127.0.0.1" });
+      await store.putApp(
+        {
+          ...issued.app,
+          registration: {
+            ...issued.app.registration,
+            endpoint: "https://new.example.com",
+            healthCheckUrl: "https://new.example.com/health",
+          },
+        },
+        1,
+      );
+      expect((await client.listTools()).tools).toHaveLength(1);
+      expect(await client.callTool({ name: "kanban__kanban_ping", arguments: {} })).toMatchObject({
+        structuredContent: { endpoint: "https://new.example.com/execute/stream" },
+      });
+      await store.putCredential({ ...issued.credential, grants: [] }, 1);
+      const invocationCount = () =>
+        instances.reduce((count, instance) => count + instance.fetcher.mock.calls.length, 0);
+      const before = invocationCount();
+      for (let i = 0; i < 2; i++) {
+        expect((await client.listTools()).tools).toEqual([]);
+        expect(await client.callTool({ name: "kanban__kanban_ping", arguments: {} })).toMatchObject(
+          {
+            isError: true,
+            _meta: { "embody/errorCode": "FORBIDDEN" },
+          },
+        );
+      }
+      expect(invocationCount()).toBe(before);
+      await store.putCredential({ ...issued.credential, revoked: true }, 2);
+      await expect(client.listTools()).rejects.toThrow();
+      expect(new Set(routed.map(({ index }) => index))).toEqual(new Set([0, 1]));
+    });
+    it("M06: gateway shutdown aborts active MCP dispatch and closes the client response", async () => {
+      const issued = await provision();
+      const { server, fetcher, close, audit } = gateway();
+      let markStarted!: () => void;
+      let markAborted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      const aborted = new Promise<void>((resolve) => {
+        markAborted = resolve;
+      });
+      fetcher.mockImplementation(async (_url, init) => {
+        await Promise.resolve();
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            init?.signal?.addEventListener(
+              "abort",
+              () => {
+                markAborted();
+                controller.error(new Error("fixture aborted"));
+              },
+              { once: true },
+            );
+            controller.enqueue(
+              new TextEncoder().encode(
+                'event: progress\ndata: {"percent":10,"message":"started"}\n\n',
+              ),
+            );
+            markStarted();
+          },
+        });
+        return new Response(body, { headers: { "content-type": "text/event-stream" } });
+      });
+      const address = await server.listen({ port: 0, host: "127.0.0.1" });
+      const response = await fetch(new URL(`/w/${workspace}/mcp`, address), {
+        method: "POST",
+        headers: {
+          ...headers(issued.token),
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "mcp-protocol-version": "2025-11-25",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "kanban__kanban_ping",
+            arguments: {},
+            _meta: { progressToken: "shutdown" },
+          },
+        }),
+      });
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      expect((await reader.read()).done).toBe(false);
+      await started;
+      const closing = close();
+      await aborted;
+      await expect(reader.read()).rejects.toThrow();
+      await closing;
+      await expect
+        .poll(() => audit.records)
+        .toMatchObject([
+          {
+            surface: "mcp",
+            outcome: "cancelled",
+            appId: "kanban",
+            target: "kanban.ping",
+          },
+        ]);
+      expect(audit.records).toHaveLength(1);
+      expect(audit.records[0]?.errorCode).toBeUndefined();
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+    it("M06: MCP catalogs bind workspace and app scope on each request without waking hosts", async () => {
+      const issued = await provision();
+      const hidden = appRecord(workspace, "https://hidden.example.com");
+      await store.putApp(
+        {
+          ...hidden,
+          appId: "app_hidden0001",
+          registration: {
+            ...hidden.registration,
+            appId: "hidden",
+          },
+        },
+        null,
+      );
+      const other = `ws_${randomUUID().replaceAll("-", "")}`;
+      await store.createWorkspace(other);
+      await provision(other, "https://foreign.example.com");
+      const { server, fetcher } = gateway();
+      const address = await server.listen({ port: 0, host: "127.0.0.1" });
+      const list = async (path: string, token = issued.token) => {
+        const response = await fetch(new URL(path, address), {
+          method: "POST",
+          headers: {
+            ...headers(token),
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2025-11-25",
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+        });
+        return { status: response.status, body: await response.text() };
+      };
+      const global = await list(`/w/${workspace}/mcp`);
+      expect(global.status).toBe(200);
+      expect(global.body).toContain('"name":"kanban__kanban_ping"');
+      expect(global.body).not.toContain("hidden__");
+      const scoped = await list(`/w/${workspace}/mcp/kanban`);
+      expect(scoped.status).toBe(200);
+      expect(scoped.body).toContain('"name":"kanban_ping"');
+      expect(scoped.body).not.toContain("kanban__");
+      for (const app of ["hidden", "guessed"]) {
+        const denied = await list(`/w/${workspace}/mcp/${app}`);
+        expect(denied.status).toBe(200);
+        expect(denied.body).toContain('"tools":[]');
+      }
+      for (const path of [`/w/${other}/mcp`, "/w/ws_guessed000/mcp"]) {
+        const denied = await list(path);
+        expect(denied.status).toBe(401);
+        expect(denied.body).not.toContain("kanban");
+      }
+      expect((await list(`/w/${workspace}/mcp`, "wrong-token")).status).toBe(401);
+      await store.putCredential({ ...issued.credential, grants: [] }, 1);
+      expect((await list(`/w/${workspace}/mcp/kanban`)).body).toContain('"tools":[]');
+      expect(fetcher).not.toHaveBeenCalled();
     });
     it("unprefixed hosted routes and heartbeat registration are not usable", async () => {
       const issued = await provision();
