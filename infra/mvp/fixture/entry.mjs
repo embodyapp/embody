@@ -150,7 +150,7 @@ main().catch((error) => {
       stage,
       errorType: error?.name ?? "unknown",
       probeFailure:
-        /^(Runtime metadata|Probe is not running|Own fixture|Effective permission query|Runtime has prohibited|Own-secret|Non-gateway|Runtime probe requires|Runtime probe needs|All fixture workload|Fixture provenance)/.test(
+        /^(Runtime metadata|Probe is not running|Own fixture|Effective permission query|Runtime has prohibited|Own-secret|Non-gateway|Runtime probe requires|Runtime probe needs|All fixture workload|Fixture provenance|Live |Valid live|Gateway |Invalid rotation|Rotation watcher|Old[- ]key|New key|Authoritative key|External ingress|Metadata token|Old key authority)/.test(
           error?.message ?? "",
         )
           ? error.message

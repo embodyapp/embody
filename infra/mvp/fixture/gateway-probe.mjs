@@ -46,6 +46,7 @@ export async function runGatewayProbe(config) {
         "content-type": "application/json",
       },
       body: JSON.stringify({
+        protocolVersion: 1,
         target: `${origin === config.appOrigin ? config.appAudience : config.otherAppAudience}.ping`,
         input: {},
       }),
