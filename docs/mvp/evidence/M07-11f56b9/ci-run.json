@@ -1,0 +1,84 @@
+{
+  "runId": 38455216022,
+  "url": "https://github.com/embodyapp/embody/actions/runs/38455216022",
+  "headSha": "11f56b99061be30366ccb42b7fd5dc0a15aa9c95",
+  "status": "completed",
+  "conclusion": "success",
+  "ciMergeCommit": "590434445716e0f4f48b989066267f4dfbb5203d",
+  "candidateTree": "d15c27a6abdd0b85891d3a6ba77cf61311e11eed",
+  "ciMergeTree": "d15c27a6abdd0b85891d3a6ba77cf61311e11eed",
+  "jobs": [
+    {
+      "name": "terraform",
+      "conclusion": "success",
+      "status": "completed",
+      "url": "https://github.com/embodyapp/embody/actions/runs/38455216022/job/115496079785",
+      "startedAt": "2026-10-13T19:29:22Z",
+      "completedAt": "2026-10-13T19:29:32Z"
+    },
+    {
+      "name": "quality (24)",
+      "conclusion": "success",
+      "status": "completed",
+      "url": "https://github.com/embodyapp/embody/actions/runs/38455216022/job/115496080077",
+      "startedAt": "2026-10-13T19:29:22Z",
+      "completedAt": "2026-10-13T19:31:38Z"
+    },
+    {
+      "name": "e2e-artifacts-matrix (22)",
+      "conclusion": "success",
+      "status": "completed",
+      "url": "https://github.com/embodyapp/embody/actions/runs/38455216022/job/115496080083",
+      "startedAt": "2026-10-13T19:29:22Z",
+      "completedAt": "2026-10-13T19:32:04Z"
+    },
+    {
+      "name": "e2e-artifacts-matrix (24)",
+      "conclusion": "success",
+      "status": "completed",
+      "url": "https://github.com/embodyapp/embody/actions/runs/38455216022/job/115496080147",
+      "startedAt": "2026-10-13T19:29:22Z",
+      "completedAt": "2026-10-13T19:31:59Z"
+    },
+    {
+      "name": "quality (22)",
+      "conclusion": "success",
+      "status": "completed",
+      "url": "https://github.com/embodyapp/embody/actions/runs/38455216022/job/115496080155",
+      "startedAt": "2026-10-13T19:29:22Z",
+      "completedAt": "2026-10-13T19:31:59Z"
+    },
+    {
+      "name": "postgres-matrix (24)",
+      "conclusion": "success",
+      "status": "completed",
+      "url": "https://github.com/embodyapp/embody/actions/runs/38455216022/job/115496080183",
+      "startedAt": "2026-10-13T19:29:22Z",
+      "completedAt": "2026-10-13T19:31:12Z"
+    },
+    {
+      "name": "postgres-matrix (22)",
+      "conclusion": "success",
+      "status": "completed",
+      "url": "https://github.com/embodyapp/embody/actions/runs/38455216022/job/115496080186",
+      "startedAt": "2026-10-13T19:29:22Z",
+      "completedAt": "2026-10-13T19:31:09Z"
+    },
+    {
+      "name": "postgres",
+      "conclusion": "success",
+      "status": "completed",
+      "url": "https://github.com/embodyapp/embody/actions/runs/38455216022/job/115496952208",
+      "startedAt": "2026-10-13T19:31:15Z",
+      "completedAt": "2026-10-13T19:31:18Z"
+    },
+    {
+      "name": "e2e-artifacts",
+      "conclusion": "success",
+      "status": "completed",
+      "url": "https://github.com/embodyapp/embody/actions/runs/38455216022/job/115497349952",
+      "startedAt": "2026-10-13T19:32:07Z",
+      "completedAt": "2026-10-13T19:32:11Z"
+    }
+  ]
+}
