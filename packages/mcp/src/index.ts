@@ -153,6 +153,12 @@ export class McpHttpHandler<TContext> {
     const header = input.request.headers["mcp-session-id"];
     const sessionId = typeof header === "string" ? header : undefined;
     const stateless = this.options.sessionMode === "stateless";
+    if (stateless && (input.response.destroyed || input.request.socket.destroyed)) return;
+    if (stateless && input.request.method !== "POST") {
+      input.response.writeHead(405, { allow: "POST" });
+      input.response.end();
+      return;
+    }
     if (stateless && sessionId !== undefined) {
       this.jsonError(input.response, 400, -32_000, "Stateless MCP does not accept session IDs");
       return;
@@ -181,7 +187,7 @@ export class McpHttpHandler<TContext> {
     );
     const server = new Server(
       { name: "embody", version: "0.0.0" },
-      { capabilities: { tools: { listChanged: true } } },
+      { capabilities: { tools: { listChanged: !stateless } } },
     );
     const session: Session<TContext> = {
       server,
@@ -239,8 +245,6 @@ export class McpHttpHandler<TContext> {
     transport.onclose = () => {
       if (transport.sessionId) this.sessions.delete(transport.sessionId);
     };
-    // SDK 1.x transport declarations are not exactOptionalPropertyTypes-compatible.
-    await server.connect(transport as unknown as Transport);
     if (stateless) {
       this.activeStateless.add(server);
       input.response.once("close", () => {
@@ -249,6 +253,14 @@ export class McpHttpHandler<TContext> {
       });
     }
     try {
+      // Attach disconnect cleanup before any await; recheck after connection before dispatch.
+      // SDK 1.x transport declarations are not exactOptionalPropertyTypes-compatible.
+      await server.connect(transport as unknown as Transport);
+      if (stateless && (input.response.destroyed || input.request.socket.destroyed)) {
+        this.activeStateless.delete(server);
+        await server.close();
+        return;
+      }
       await transport.handleRequest(input.request, input.response, input.body);
     } catch (error) {
       if (stateless) {

@@ -36,7 +36,11 @@ async function body(request: IncomingMessage): Promise<unknown> {
   return value ? JSON.parse(value) : undefined;
 }
 
-async function fixture(execute?: McpHttpOptions<string>["execute"], stateless = false) {
+async function fixture(
+  execute?: McpHttpOptions<string>["execute"],
+  stateless = false,
+  disconnectBeforeDispatch = false,
+) {
   const catalog = createMcpCatalog([{ appId: "kanban", manifest }]);
   const handlers = Array.from(
     { length: stateless ? 2 : 1 },
@@ -57,13 +61,19 @@ async function fixture(execute?: McpHttpOptions<string>["execute"], stateless = 
   const server = createServer((request, response) => {
     void (async () => {
       const index = next++ % handlers.length;
+      const parsed = await body(request);
+      if (disconnectBeforeDispatch) response.destroy();
       await handlers[index]!.handle({
         request,
         response,
-        body: await body(request),
+        body: parsed,
         identity: String(request.headers.authorization),
         context: stateless ? `replica-${index}` : "principal",
       });
+      if (disconnectBeforeDispatch)
+        expect(
+          (handlers[index] as unknown as { activeStateless: Set<unknown> }).activeStateless.size,
+        ).toBe(0);
     })();
   });
   server.listen(0, "127.0.0.1");
@@ -115,6 +125,44 @@ describe("MCP error results", () => {
 });
 
 describe("MCP surface", () => {
+  it("does not open an idle stream for stateless GET or DELETE", async () => {
+    const url = await fixture(undefined, true);
+    for (const method of ["GET", "DELETE"]) {
+      const response = await fetch(url, { method, headers: { accept: "text/event-stream" } });
+      expect(response.status).toBe(405);
+      expect(response.headers.get("allow")).toBe("POST");
+      expect(await response.text()).toBe("");
+    }
+  });
+  it("does not dispatch or retain a server after a pre-dispatch disconnect", async () => {
+    let executions = 0;
+    const url = await fixture(
+      async function* () {
+        executions++;
+        await Promise.resolve();
+        yield { type: "result", value: null };
+      },
+      true,
+      true,
+    );
+    await expect(
+      fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "kanban__cards_send_batch", arguments: {} },
+        }),
+      }),
+    ).rejects.toThrow();
+    expect(executions).toBe(0);
+  });
+
   it("routes stateless official-client requests across independent replicas", async () => {
     const replicas = new Set<string>();
     const url = await fixture(async function* (context, _entry, input) {

@@ -109,7 +109,7 @@ async function main() {
                 ]
               : []),
             ...(phase === "overlap"
-              ? ["old-and-new-keys-accepted"]
+              ? ["old-and-new-keys-accepted", "mcp-single-client-crosses-both-serving-revisions"]
               : phase === "removed"
                 ? ["fresh-retired-key-token-rejected-current-key-accepted"]
                 : []),
@@ -137,6 +137,12 @@ async function main() {
     { name: "EMBODY_M05_PHASE", value: phase },
     { name: "EMBODY_GATEWAY_ORIGIN", value: data.gateway },
     { name: "EMBODY_GATEWAY_ORIGINS", value: JSON.stringify([...new Set(gatewayOrigins)]) },
+    {
+      name: "EMBODY_GATEWAY_REVISIONS",
+      value: JSON.stringify(
+        inventory[0].revisions.map((revision) => revision.name.split("/").at(-1)),
+      ),
+    },
     { name: "EMBODY_OLD_SIGNER_VERSION", value: data.secretVersions.signer1.split("/").at(-1) },
   ];
   if (mode === "gateway-probe")

@@ -155,13 +155,30 @@ export async function runGatewayProbe(config) {
   const gatewayOrigins = JSON.parse(
     process.env.EMBODY_GATEWAY_ORIGINS ?? JSON.stringify([process.env.EMBODY_GATEWAY_ORIGIN]),
   );
+  const crossRevisionMcp = [];
   const issued = newCredential({
     workspaceId: config.workspaceId,
     principal,
     grants: [{ workspaceId: config.workspaceId, appId: "app_kanban0001", role: "app-caller" }],
     expiresAt: new Date(Date.now() + 900000).toISOString(),
   });
-  let record;
+  let record,
+    credentialRevoked = false;
+  const revokeCredential = async () => {
+    if (!record) return true;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const current = await store.credential(config.workspaceId, record.hash);
+      if (!current || current.revoked) return true;
+      try {
+        await store.putCredential({ ...current, revoked: true }, current.revision);
+        break;
+      } catch {
+        if (attempt === 2) return false;
+      }
+    }
+    const revoked = await store.credential(config.workspaceId, record.hash);
+    return !revoked || revoked.revoked;
+  };
   try {
     record = await store.putCredential(issued.credential, null);
     const assertPing = (value, actorType) => {
@@ -214,25 +231,62 @@ export async function runGatewayProbe(config) {
         require.resolve("@modelcontextprotocol/sdk/client/streamableHttp.js")
       );
       const client = new Client({ name: "m05-live", version: "1" });
+      const callRevisions = new Set();
+      const crossRevision = phase === "overlap" && gatewayUrl === gatewayOrigins[0];
       try {
         await client.connect(
           new StreamableHTTPClientTransport(new URL(`/w/${config.workspaceId}/mcp`, gatewayUrl), {
             requestInit: { headers: { authorization: `Bearer ${issued.token}` } },
+            fetch: async (url, init) => {
+              const response = await fetch(url, init);
+              if (typeof init?.body === "string" && JSON.parse(init.body).method === "tools/call") {
+                const revision = response.headers.get("x-embody-gateway-revision");
+                if (!revision) throw new Error("Gateway serving revision header missing");
+                callRevisions.add(revision);
+              }
+              return response;
+            },
           }),
         );
-        const result = await client.callTool({ name: "kanban__kanban_ping", arguments: {} });
-        if (result.isError || result.content?.[0]?.type !== "text")
-          throw new Error("Live MCP delegated actor missing");
-        assertPing(JSON.parse(result.content[0].text), "agent");
+        let callCount = 0;
+        for (; callCount < (crossRevision ? 24 : 1); callCount++) {
+          const result = await client.callTool({ name: "kanban__kanban_ping", arguments: {} });
+          if (result.isError || result.content?.[0]?.type !== "text")
+            throw new Error("Live MCP delegated actor missing");
+          assertPing(JSON.parse(result.content[0].text), "agent");
+          if (crossRevision && callCount >= 7 && callRevisions.size === 2) {
+            callCount++;
+            break;
+          }
+        }
+        if (crossRevision) {
+          const expected = JSON.parse(process.env.EMBODY_GATEWAY_REVISIONS);
+          if (
+            expected.length !== 2 ||
+            JSON.stringify([...callRevisions].sort()) !== JSON.stringify(expected.sort())
+          )
+            throw new Error("Gateway MCP did not cross both serving revisions in one client");
+          crossRevisionMcp.push({
+            origin: gatewayUrl,
+            callCount,
+            revisions: [...callRevisions].sort(),
+          });
+          checks.push("mcp-single-client-crosses-both-serving-revisions");
+        }
         checks.push("mcp-delegated-agent-roundtrip-accepted");
       } finally {
         await client.close();
       }
     }
   } finally {
-    if (record) await store.putCredential({ ...record, revoked: true }, record.revision);
+    try {
+      credentialRevoked = await revokeCredential();
+    } catch {
+      console.error(JSON.stringify({ credentialRevocationFailed: true }));
+    }
     await store.close();
   }
+  if (!credentialRevoked) throw new Error("Gateway fixture credential revocation failed");
   if (["overlap", "removed", "watch-removal"].includes(phase)) {
     const metadata = await fetch(
       "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
@@ -387,6 +441,8 @@ export async function runGatewayProbe(config) {
     testedGatewayOrigins: gatewayOrigins,
     checks,
     timestamp: new Date().toISOString(),
+    crossRevisionMcp,
+    credentialRevoked,
     providerReady: Boolean(provider),
   };
 }

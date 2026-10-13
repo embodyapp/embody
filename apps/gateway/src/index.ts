@@ -97,6 +97,12 @@ const app = store
     })
   : referenceGateway();
 if (store) app.addHook("onClose", () => store.close());
+if (process.env["EMBODY_M05_REVISION_PROBE"] === "true") {
+  app.addHook("onRequest", (_request, reply, done) => {
+    reply.raw.setHeader("x-embody-gateway-revision", required("K_REVISION"));
+    done();
+  });
+}
 // No auto-migration or credential bootstrap as runtime; provision separately with maintenance authority.
 const port = Number(process.env["PORT"] ?? 4000);
 const address = await app.listen({ port, host: process.env["HOST"] ?? "0.0.0.0" });

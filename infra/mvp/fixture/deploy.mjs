@@ -58,6 +58,7 @@ async function main() {
   const env = (phase) => [
     { name: "NODE_ENV", value: "production" },
     { name: "GATEWAY_PROFILE", value: "hosted" },
+    { name: "EMBODY_M05_REVISION_PROBE", value: "true" },
     { name: "EMBODY_SQL_CONNECTION", value: connection },
     { name: "EMBODY_SQL_SOCKET", value: "true" },
     { name: "EMBODY_FIXTURE_MODE", value: "gateway" },
