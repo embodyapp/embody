@@ -1,4 +1,13 @@
 import { execFileSync } from "node:child_process";
+export function assertImageSource(image, sha) {
+  const labels = JSON.parse(
+    execFileSync("docker", ["image", "inspect", image, "--format", "{{json .Config.Labels}}"], {
+      encoding: "utf8",
+    }),
+  );
+  if (labels?.["org.opencontainers.image.revision"] !== sha)
+    throw new Error("Image source label does not match candidate");
+}
 export function immutableLeaf(image) {
   const manifest = JSON.parse(
     execFileSync("docker", ["buildx", "imagetools", "inspect", image, "--raw"], {

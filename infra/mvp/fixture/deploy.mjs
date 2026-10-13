@@ -6,7 +6,7 @@ import { PostgresGatewayStore } from "../../../packages/gateway/dist/index.js";
 import { Kernel } from "../../../packages/core/dist/index.js";
 import { PostgresStorage } from "../../../packages/storage/dist/index.js";
 import { fixtureApp } from "./app.mjs";
-import { immutableLeaf, servingInventory } from "./inventory.mjs";
+import { assertImageSource, immutableLeaf, servingInventory } from "./inventory.mjs";
 const { fetch, AbortSignal } = globalThis;
 let stage = "admission";
 async function main() {
@@ -115,6 +115,7 @@ async function main() {
     delete data.removedAt;
     delete data.servingRevisions;
   }
+  assertImageSource(image, candidateSha);
   data.leafImage = immutableLeaf(image);
   if (phase === "overlap" && (!data.publishAt || Date.now() - Date.parse(data.publishAt) < 60000))
     throw new Error("Public-key overlap must converge for60s before switching");

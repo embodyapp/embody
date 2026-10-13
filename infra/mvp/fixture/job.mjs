@@ -13,7 +13,29 @@ async function main() {
   if (!["runtime-probe", "gateway-probe"].includes(mode)) throw new Error("Unknown probe");
   const data = await loadPrivate(),
     { api } = await operator();
-  const { project, region, prefix, config } = data;
+  const { project, region, prefix } = data;
+  const runtimeB = mode === "runtime-probe" && process.env.EMBODY_M05_RUNTIME_APP === "other";
+  const config = runtimeB
+    ? {
+        ...data.config,
+        runtime: data.config.otherRuntime,
+        otherRuntime: data.config.runtime,
+        migrator: data.apps[1].migratorEmail,
+        workspaceId: data.config.otherWorkspaceId,
+        otherWorkspaceId: data.config.workspaceId,
+        ownService: data.config.otherService,
+        otherService: data.config.ownService,
+        ownDatabaseSecret: data.config.otherAppSecret,
+        otherAppSecret: data.config.ownDatabaseSecret,
+        ownDatabase: data.config.otherDatabase,
+        otherDatabase: data.config.ownDatabase,
+        databaseRole: "embody_test_other",
+        appOrigin: data.config.otherAppOrigin,
+        otherAppOrigin: data.config.appOrigin,
+        appAudience: data.config.otherAppAudience,
+        otherAppAudience: data.config.appAudience,
+      }
+    : data.config;
   const phase = process.env.EMBODY_M05_JOB_PHASE ?? data.phase;
   if (!["initial", "publish", "overlap", "removed", "watch-removal", "external"].includes(phase))
     throw new Error("Invalid job phase");
@@ -24,6 +46,13 @@ async function main() {
   )
     throw new Error("Probe phase does not match deployment phase");
   const inventory = await servingInventory(api, data);
+  const originFor = (name) =>
+    inventory.find((service) => service.name.split("/").at(-1) === name)?.uri;
+  if (
+    config.appOrigin !== originFor(config.ownService) ||
+    config.otherAppOrigin !== originFor(config.otherService)
+  )
+    throw new Error("Serving origins differ from probe configuration");
   const gatewayOrigins = [
     data.gateway,
     ...inventory[0].revisions.map((revision) => revision.uri).filter(Boolean),
@@ -92,7 +121,7 @@ async function main() {
                 ]
               : []),
           ];
-  const name = `${prefix}-${phase === "external" ? "external-probe" : phase === "watch-removal" ? "rotation-watch" : mode}`,
+  const name = `${prefix}-${phase === "external" ? "external-probe" : phase === "watch-removal" ? "rotation-watch" : runtimeB ? "runtime-probe-b" : mode}`,
     serviceAccount = mode === "runtime-probe" ? config.runtime : config.gateway;
   const env = [
     { name: "EMBODY_SQL_CONNECTION", value: `${project}:${region}:${prefix}-postgres` },
@@ -211,6 +240,15 @@ async function main() {
     return op.response;
   }
   await wait(operation);
+  const deployedJob = (await api(url)).template.template;
+  if (
+    deployedJob.serviceAccount !== serviceAccount ||
+    deployedJob.containers[0].image !== data.image ||
+    (phase === "external"
+      ? !!deployedJob.vpcAccess
+      : deployedJob.vpcAccess?.egress !== "ALL_TRAFFIC")
+  )
+    throw new Error("Job workload or network does not match approved probe");
   operation = await api(`${url}:run`, "POST", {});
   let execution;
   try {
@@ -233,6 +271,7 @@ async function main() {
     .filter(
       (entry) =>
         entry.labels?.["run.googleapis.com/execution_name"] === suffix &&
+        entry.logName.endsWith("run.googleapis.com%2Fstdout") &&
         entry.jsonPayload?.gate?.startsWith("m05-"),
     )
     .map((entry) => entry.jsonPayload);
@@ -257,6 +296,8 @@ async function main() {
   )
     throw new Error("No successful execution/probe evidence");
   const finalInventory = await servingInventory(api, data);
+  if (phase !== "watch-removal" && JSON.stringify(finalInventory) !== JSON.stringify(inventory))
+    throw new Error("Serving inventory changed during probe");
   console.log(
     JSON.stringify({
       execution: execution.name,

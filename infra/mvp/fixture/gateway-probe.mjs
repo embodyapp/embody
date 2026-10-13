@@ -168,9 +168,12 @@ export async function runGatewayProbe(config) {
         value.appId !== config.appAudience ||
         value.orgId !== config.workspaceId ||
         value.actorType !== actorType ||
+        value.actorId !==
+          (actorType === "agent" ? `mcp:${principal.actorId}` : principal.actorId) ||
         (actorType === "agent" &&
           (value.delegation?.subjectId !== principal.actorId ||
-            value.delegation?.subjectType !== principal.actorType))
+            value.delegation?.subjectType !== principal.actorType ||
+            value.delegation?.client !== undefined))
       )
         throw new Error("Gateway attribution roundtrip failed");
     };
@@ -272,11 +275,19 @@ export async function runGatewayProbe(config) {
           .setIssuedAt()
           .setExpirationTime("5m")
           .sign(oldKey);
-      for (const [origin, workspaceId, audience] of scopes)
-        if ((await call(await mintOld(workspaceId, audience), origin)).status !== 200)
+      const respondingInstances = [];
+      for (const [origin, workspaceId, audience] of scopes) {
+        const result = await call(await mintOld(workspaceId, audience), origin);
+        if (result.status !== 200 || typeof result.body?.instanceNonce !== "string")
           throw new Error("Old-key cache positive control failed");
+        respondingInstances.push({
+          origin,
+          instanceNonce: result.body.instanceNonce,
+          revision: result.body.revision,
+        });
+      }
       const watchStart = Date.now();
-      let removedAt;
+      let lastOldPublicationAt, removedAt;
       for (let attempt = 0; attempt < 150; attempt++) {
         const jwks = await (
           await fetch(`${process.env.EMBODY_GATEWAY_ORIGIN}/.well-known/jwks.json`, {
@@ -285,9 +296,22 @@ export async function runGatewayProbe(config) {
           })
         ).json();
         if (!jwks.keys.some((key) => key.kid === "m05-key-1")) {
+          if (!lastOldPublicationAt)
+            throw new Error("Old key publication was never observed before removal");
           removedAt = Date.now();
           break;
         }
+        lastOldPublicationAt = Date.now();
+        if (attempt === 0)
+          console.log(
+            JSON.stringify({
+              rotationWatchReady: true,
+              candidateSha: config.candidateSha,
+              fixtureConfigSha256: fixtureConfigDigest(config),
+              respondingInstances,
+              authoritativeOldKeyObservedAt: new Date(lastOldPublicationAt).toISOString(),
+            }),
+          );
         await delay(2000);
       }
       if (!removedAt) throw new Error("Authoritative key removal not observed");
@@ -304,23 +328,26 @@ export async function runGatewayProbe(config) {
           throw new Error("Rotation watcher lost app positive control");
         await delay(2000);
       }
-      if (!deniedAt || deniedAt - removedAt > 60000)
+      if (!deniedAt || deniedAt - lastOldPublicationAt > 60000)
         throw new Error("Old-key revocation exceeded60s");
-      for (const [origin, workspaceId, audience] of scopes)
+      for (const [origin, workspaceId, audience] of scopes) {
+        const result = await call(
+          await issueGatewayToken(
+            { ...principal, orgId: workspaceId, scopes: [`${audience}:*`] },
+            audience,
+            "m05-watch-new",
+            signing,
+          ),
+          origin,
+        );
+        const before = respondingInstances.find((instance) => instance.origin === origin);
         if (
-          (
-            await call(
-              await issueGatewayToken(
-                { ...principal, orgId: workspaceId, scopes: [`${audience}:*`] },
-                audience,
-                "m05-watch-new",
-                signing,
-              ),
-              origin,
-            )
-          ).status !== 200
+          result.status !== 200 ||
+          result.body.instanceNonce !== before.instanceNonce ||
+          result.body.revision !== before.revision
         )
-          throw new Error("New key unavailable after removal");
+          throw new Error("New key unavailable or observed app instance changed after removal");
+      }
       return {
         gate: "m05-gateway-live",
         status: "passed",
@@ -335,9 +362,11 @@ export async function runGatewayProbe(config) {
         ],
         testedGatewayOrigins: gatewayOrigins,
         watchStart: new Date(watchStart).toISOString(),
+        respondingInstances,
+        authoritativeOldKeyLastObservedAt: new Date(lastOldPublicationAt).toISOString(),
         authoritativeRemovalObservedAt: new Date(removedAt).toISOString(),
         oldKeyDeniedAt: new Date(deniedAt).toISOString(),
-        revocationMilliseconds: deniedAt - removedAt,
+        revocationMilliseconds: deniedAt - lastOldPublicationAt,
       };
     }
     const expected = phase === "overlap" ? 200 : 401;
