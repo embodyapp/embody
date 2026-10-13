@@ -1,12 +1,12 @@
 {
-  "capturedAt": "2026-10-13T13:13:35.936Z",
-  "status": "pending-provider-reservation-release",
+  "capturedAt": "2026-10-13T13:15:45.484Z",
+  "status": "complete",
   "remaining": {
     "services": [],
     "jobs": [],
     "sql": [],
-    "networks": ["embody-test-m05-network"],
-    "subnets": ["embody-test-m05-subnet"],
+    "networks": [],
+    "subnets": [],
     "routers": [],
     "serverlessAddressReservations": [],
     "privateDns": [],
@@ -51,9 +51,9 @@
     "publicIam": [],
     "state": {
       "name": "mvp/m05/foundation/default.tfstate",
-      "size": "36641",
-      "generation": "1791897098887080",
-      "updated": "2026-10-13T13:11:38.904Z"
+      "size": "29888",
+      "generation": "1791897279700515",
+      "updated": "2026-10-13T13:14:39.724Z"
     }
   },
   "qualification": "Private versioned remote state and shared empty Terraform foundation intentionally retained; this reads metadata/IAM only, not secret payloads or Terraform state contents."

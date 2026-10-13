@@ -341,5 +341,11 @@
       "completed": "2026-10-12T20:26:09.482299Z",
       "elapsedSeconds": 122.307
     }
-  ]
+  ],
+  "postCaptureTeardownAllowanceUsd": 0.47,
+  "finalEstimatedEnvelopeUsd": 7.8,
+  "paidResourceAbsenceVerifiedAt": "2026-10-13T13:15:45.484Z",
+  "postCaptureConservativeSeconds": 4834.36,
+  "postCaptureAssumption": "For budgeting, assume all three services each at full1CPU+1GiB, SQL and NAT remained billed continuously from cost capture through final empty inventory (even though paid resources actually deleted much earlier). Six-hour extra gateway and $1 historical/artifact/network/state contingency already included. Invoice remains OPEN; this is not a guaranteed spending cap.",
+  "postCaptureRateUsdPerSecond": 0.00009664802222222223
 }

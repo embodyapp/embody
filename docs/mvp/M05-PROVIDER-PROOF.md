@@ -17,9 +17,10 @@ M05 cannot be marked DONE merely because these scripts or a role matrix exist.
 
 Owner has now authorized `embody-cloud`, operator gcloud access, aim $0 and one-off
 maximum $10 USD. [Terraform/GCS foundation spike](./evidence/M05-foundation.md) is applied.
-Technical provider gates and independent review passed; paid fixtures are removed. Final
-subnet/network teardown awaits Google's documented1–2h Direct VPC reservation release.
-M05 remains IN_REVIEW until the final cleanup inventory is verified. Do not substitute
+Technical provider gates and independent review passed. All optional resources and private
+fixture state are removed; final provider inventory and a fresh locked Terraform no-change
+plan verify cleanup after Google's documented1–2h Direct VPC reservation release.
+Final acceptance records/CI and the task state are linked in the live evidence above. Do not substitute
 operator credentials, ADC or service-account impersonation for app runtime metadata
 evidence. Budget attestations are not hard spending caps; no monthly launch budget approved.
 
