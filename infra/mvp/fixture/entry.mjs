@@ -57,6 +57,14 @@ async function main() {
       await delay(1000);
     }
   }
+  if (
+    ["runtime-probe", "gateway-probe"].includes(mode) &&
+    process.env.EMBODY_M05_PHASE !== "external"
+  ) {
+    stage = "job-egress-warmup";
+    // Live connection-test measured 52s startup; Direct VPC jobs need bounded egress warmup.
+    await delay(60000);
+  }
   // Direct VPC egress may become usable AFTER the local proxy starts listening.
   // Retry only bounded transport failures; SQL authentication/authorization errors fail closed.
   const dsn = process.env.DATABASE_URL ?? process.env.GATEWAY_PLATFORM_DATABASE_URL;

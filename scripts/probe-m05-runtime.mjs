@@ -409,12 +409,7 @@ export function createRuntimeSqlProbe(Client) {
       connectionTimeoutMillis: 20000,
       query_timeout: 5000,
     });
-    console.log(
-      JSON.stringify({
-        runtimeSqlTransport: mode,
-        managedSocket: String(client.connectionParameters?.host ?? "").startsWith("/cloudsql/"),
-      }),
-    );
+
     try {
       try {
         await client.connect();

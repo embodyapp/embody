@@ -67,7 +67,10 @@ async function main() {
     serviceAccount = mode === "runtime-probe" ? config.runtime : config.gateway;
   const env = [
     { name: "EMBODY_SQL_CONNECTION", value: `${project}:${region}:${prefix}-postgres` },
-    { name: "EMBODY_SQL_SOCKET", value: "true" },
+    {
+      name: "EMBODY_SQL_SOCKET",
+      value: process.env.EMBODY_M05_JOB_SQL_TRANSPORT === "proxy" ? "false" : "true",
+    },
     { name: "EMBODY_MVP_CLOUD_PROJECT", value: project },
     { name: "EMBODY_MVP_CLOUD_RESOURCE_PREFIX", value: prefix },
     { name: "EMBODY_MVP_CLOUD_BUDGET_APPROVED", value: "true" },
