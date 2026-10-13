@@ -1,0 +1,415 @@
+{
+  "candidateSha": "b429a0a5ae05ce4239f4b0bee13f9f843d83e530",
+  "image": "us-central1-docker.pkg.dev/embody-cloud/embody-test-m05-images/fixture@sha256:09b29ab7b5c15adbf90ef7cc6377fdbd52c6965538d9936086a5af901f106f10",
+  "leafImage": "us-central1-docker.pkg.dev/embody-cloud/embody-test-m05-images/fixture@sha256:dc38bd42de9398b5ad2ccc230f7f8a9461c4887fd6bc2826f566691b4b6028f4",
+  "capturedAt": "2026-10-13T11:48:58.528Z",
+  "services": [
+    {
+      "name": "embody-test-m05-gateway",
+      "uri": "https://embody-test-m05-gateway-vtnbajr3sq-uc.a.run.app",
+      "ingress": "INGRESS_TRAFFIC_ALL",
+      "serviceAccount": "embody-test-m05-gateway@embody-cloud.iam.gserviceaccount.com",
+      "scaling": {
+        "minInstanceCount": 1,
+        "maxInstanceCount": 1
+      },
+      "vpcAccess": {
+        "egress": "ALL_TRAFFIC",
+        "networkInterfaces": [
+          {
+            "network": "embody-test-m05-network",
+            "subnetwork": "embody-test-m05-subnet"
+          }
+        ]
+      },
+      "cloudSql": [
+        {
+          "name": "cloudsql",
+          "cloudSqlInstance": {
+            "instances": ["embody-cloud:us-central1:embody-test-m05-postgres"]
+          }
+        }
+      ],
+      "latestReady": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-gateway/revisions/embody-test-m05-gateway-00040-s7t",
+      "traffic": [
+        {
+          "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+          "revision": "embody-test-m05-gateway-00039-bpx",
+          "percent": 50,
+          "tag": "m05a",
+          "uri": "https://m05a---embody-test-m05-gateway-vtnbajr3sq-uc.a.run.app"
+        },
+        {
+          "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+          "revision": "embody-test-m05-gateway-00040-s7t",
+          "percent": 50,
+          "tag": "m05b",
+          "uri": "https://m05b---embody-test-m05-gateway-vtnbajr3sq-uc.a.run.app"
+        }
+      ],
+      "iam": [
+        {
+          "role": "roles/run.invoker",
+          "members": ["allUsers"]
+        }
+      ]
+    },
+    {
+      "name": "embody-test-m05-app-9e72f4f958d2",
+      "uri": "https://embody-test-m05-app-9e72f4f958d2-vtnbajr3sq-uc.a.run.app",
+      "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
+      "serviceAccount": "embody-test-m05-r-9e72f4f958d2@embody-cloud.iam.gserviceaccount.com",
+      "scaling": {
+        "maxInstanceCount": 1
+      },
+      "vpcAccess": {
+        "egress": "ALL_TRAFFIC",
+        "networkInterfaces": [
+          {
+            "network": "embody-test-m05-network",
+            "subnetwork": "embody-test-m05-subnet"
+          }
+        ]
+      },
+      "cloudSql": [
+        {
+          "name": "cloudsql",
+          "cloudSqlInstance": {
+            "instances": ["embody-cloud:us-central1:embody-test-m05-postgres"]
+          }
+        }
+      ],
+      "latestReady": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-app-9e72f4f958d2/revisions/embody-test-m05-app-9e72f4f958d2-00017-drm",
+      "traffic": [
+        {
+          "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST",
+          "revision": "embody-test-m05-app-9e72f4f958d2-00017-drm",
+          "percent": 100
+        }
+      ],
+      "iam": [
+        {
+          "role": "roles/run.invoker",
+          "members": ["serviceAccount:embody-test-m05-gateway@embody-cloud.iam.gserviceaccount.com"]
+        }
+      ]
+    },
+    {
+      "name": "embody-test-m05-app-49e66a4013de",
+      "uri": "https://embody-test-m05-app-49e66a4013de-vtnbajr3sq-uc.a.run.app",
+      "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
+      "serviceAccount": "embody-test-m05-r-49e66a4013de@embody-cloud.iam.gserviceaccount.com",
+      "scaling": {
+        "maxInstanceCount": 1
+      },
+      "vpcAccess": {
+        "egress": "ALL_TRAFFIC",
+        "networkInterfaces": [
+          {
+            "network": "embody-test-m05-network",
+            "subnetwork": "embody-test-m05-subnet"
+          }
+        ]
+      },
+      "cloudSql": [
+        {
+          "name": "cloudsql",
+          "cloudSqlInstance": {
+            "instances": ["embody-cloud:us-central1:embody-test-m05-postgres"]
+          }
+        }
+      ],
+      "latestReady": "projects/embody-cloud/locations/us-central1/services/embody-test-m05-app-49e66a4013de/revisions/embody-test-m05-app-49e66a4013de-00013-5fk",
+      "traffic": [
+        {
+          "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST",
+          "revision": "embody-test-m05-app-49e66a4013de-00013-5fk",
+          "percent": 100
+        }
+      ],
+      "iam": [
+        {
+          "role": "roles/run.invoker",
+          "members": ["serviceAccount:embody-test-m05-gateway@embody-cloud.iam.gserviceaccount.com"]
+        }
+      ]
+    }
+  ],
+  "sql": {
+    "name": "embody-test-m05-postgres",
+    "state": "RUNNABLE",
+    "createTime": "2026-10-12T19:13:59.392Z",
+    "databaseVersion": "POSTGRES_16",
+    "tier": "db-f1-micro",
+    "ipConfiguration": {
+      "authorizedNetworks": [],
+      "sslMode": "ENCRYPTED_ONLY",
+      "ipv4Enabled": true,
+      "requireSsl": false,
+      "enablePrivatePathForGoogleCloudServices": false,
+      "serverCaMode": "GOOGLE_MANAGED_INTERNAL_CA",
+      "serverCertificateRotationMode": "SERVER_CERTIFICATE_ROTATION_MODE_UNSPECIFIED"
+    },
+    "roles": [
+      {
+        "rolname": "embody_test_migrator",
+        "rolsuper": false,
+        "rolcreaterole": false,
+        "rolcreatedb": false,
+        "rolreplication": false,
+        "rolbypassrls": false
+      },
+      {
+        "rolname": "embody_test_other",
+        "rolsuper": false,
+        "rolcreaterole": false,
+        "rolcreatedb": false,
+        "rolreplication": false,
+        "rolbypassrls": false
+      },
+      {
+        "rolname": "embody_test_other_mig",
+        "rolsuper": false,
+        "rolcreaterole": false,
+        "rolcreatedb": false,
+        "rolreplication": false,
+        "rolbypassrls": false
+      },
+      {
+        "rolname": "embody_test_platform",
+        "rolsuper": false,
+        "rolcreaterole": false,
+        "rolcreatedb": false,
+        "rolreplication": false,
+        "rolbypassrls": false
+      },
+      {
+        "rolname": "embody_test_platform_mig",
+        "rolsuper": false,
+        "rolcreaterole": false,
+        "rolcreatedb": false,
+        "rolreplication": false,
+        "rolbypassrls": false
+      },
+      {
+        "rolname": "embody_test_runtime",
+        "rolsuper": false,
+        "rolcreaterole": false,
+        "rolcreatedb": false,
+        "rolreplication": false,
+        "rolbypassrls": false
+      }
+    ],
+    "connect": [
+      {
+        "rolname": "embody_test_other",
+        "datname": "cloudsqladmin",
+        "can_connect": true
+      },
+      {
+        "rolname": "embody_test_other",
+        "datname": "embody_test_app",
+        "can_connect": false
+      },
+      {
+        "rolname": "embody_test_other",
+        "datname": "embody_test_other_db",
+        "can_connect": true
+      },
+      {
+        "rolname": "embody_test_other",
+        "datname": "embody_test_platform_db",
+        "can_connect": false
+      },
+      {
+        "rolname": "embody_test_other",
+        "datname": "postgres",
+        "can_connect": false
+      },
+      {
+        "rolname": "embody_test_other",
+        "datname": "template0",
+        "can_connect": true
+      },
+      {
+        "rolname": "embody_test_other",
+        "datname": "template1",
+        "can_connect": false
+      },
+      {
+        "rolname": "embody_test_platform",
+        "datname": "cloudsqladmin",
+        "can_connect": true
+      },
+      {
+        "rolname": "embody_test_platform",
+        "datname": "embody_test_app",
+        "can_connect": false
+      },
+      {
+        "rolname": "embody_test_platform",
+        "datname": "embody_test_other_db",
+        "can_connect": false
+      },
+      {
+        "rolname": "embody_test_platform",
+        "datname": "embody_test_platform_db",
+        "can_connect": true
+      },
+      {
+        "rolname": "embody_test_platform",
+        "datname": "postgres",
+        "can_connect": false
+      },
+      {
+        "rolname": "embody_test_platform",
+        "datname": "template0",
+        "can_connect": true
+      },
+      {
+        "rolname": "embody_test_platform",
+        "datname": "template1",
+        "can_connect": false
+      },
+      {
+        "rolname": "embody_test_runtime",
+        "datname": "cloudsqladmin",
+        "can_connect": true
+      },
+      {
+        "rolname": "embody_test_runtime",
+        "datname": "embody_test_app",
+        "can_connect": true
+      },
+      {
+        "rolname": "embody_test_runtime",
+        "datname": "embody_test_other_db",
+        "can_connect": false
+      },
+      {
+        "rolname": "embody_test_runtime",
+        "datname": "embody_test_platform_db",
+        "can_connect": false
+      },
+      {
+        "rolname": "embody_test_runtime",
+        "datname": "postgres",
+        "can_connect": false
+      },
+      {
+        "rolname": "embody_test_runtime",
+        "datname": "template0",
+        "can_connect": true
+      },
+      {
+        "rolname": "embody_test_runtime",
+        "datname": "template1",
+        "can_connect": false
+      }
+    ],
+    "sqlDenials": [
+      {
+        "role": "embody_test_runtime",
+        "database": "postgres",
+        "code": "42501",
+        "severity": "FATAL"
+      },
+      {
+        "role": "embody_test_runtime",
+        "database": "template1",
+        "code": "42501",
+        "severity": "FATAL"
+      },
+      {
+        "role": "embody_test_other",
+        "database": "postgres",
+        "code": "42501",
+        "severity": "FATAL"
+      },
+      {
+        "role": "embody_test_other",
+        "database": "template1",
+        "code": "42501",
+        "severity": "FATAL"
+      },
+      {
+        "role": "embody_test_platform",
+        "database": "embody_test_app",
+        "code": "42501",
+        "severity": "FATAL"
+      },
+      {
+        "role": "embody_test_platform",
+        "database": "embody_test_other_db",
+        "code": "42501",
+        "severity": "FATAL"
+      }
+    ],
+    "credentialCounts": {
+      "not_revoked": "0",
+      "revoked": "21"
+    }
+  },
+  "fixtureProjectIam": [
+    {
+      "role": "roles/cloudsql.client",
+      "members": [
+        "serviceAccount:embody-test-m05-gateway@embody-cloud.iam.gserviceaccount.com",
+        "serviceAccount:embody-test-m05-r-49e66a4013de@embody-cloud.iam.gserviceaccount.com",
+        "serviceAccount:embody-test-m05-r-9e72f4f958d2@embody-cloud.iam.gserviceaccount.com"
+      ],
+      "condition": {
+        "expression": "resource.name.endsWith('/instances/embody-test-m05-postgres')",
+        "title": "m05-only-instance"
+      }
+    }
+  ],
+  "secrets": [
+    {
+      "name": "embody-test-m05-signer",
+      "versions": [
+        {
+          "name": "projects/930896908754/secrets/embody-test-m05-signer/versions/2",
+          "state": "ENABLED",
+          "created": "2026-10-12T19:26:02.967286Z"
+        },
+        {
+          "name": "projects/930896908754/secrets/embody-test-m05-signer/versions/1",
+          "state": "ENABLED",
+          "created": "2026-10-12T19:26:01.856573Z"
+        }
+      ]
+    },
+    {
+      "name": "embody-test-m05-platform-db",
+      "versions": [
+        {
+          "name": "projects/930896908754/secrets/embody-test-m05-platform-db/versions/1",
+          "state": "ENABLED",
+          "created": "2026-10-12T19:26:03.676173Z"
+        }
+      ]
+    },
+    {
+      "name": "embody-test-m05-db-9e72f4f958d2",
+      "versions": [
+        {
+          "name": "projects/930896908754/secrets/embody-test-m05-db-9e72f4f958d2/versions/1",
+          "state": "ENABLED",
+          "created": "2026-10-12T19:26:04.338522Z"
+        }
+      ]
+    },
+    {
+      "name": "embody-test-m05-db-49e66a4013de",
+      "versions": [
+        {
+          "name": "projects/930896908754/secrets/embody-test-m05-db-49e66a4013de/versions/1",
+          "state": "ENABLED",
+          "created": "2026-10-12T19:26:05.106722Z"
+        }
+      ]
+    }
+  ],
+  "notes": "SQL role/catalog and maintenance CONNECT diagnostics use operator network transport with actual restricted database login roles; workload IAM and core isolation acceptance comes from attached Cloud Run probe executions, not operator impersonation."
+}

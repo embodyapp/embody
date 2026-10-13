@@ -115,6 +115,8 @@ export function mcpResult(value: unknown): CallToolResult {
 }
 
 export interface McpHttpOptions<TContext> {
+  /** Stateless requests need no replica-local session; recommended behind load balancers. */
+  readonly sessionMode?: "stateful" | "stateless";
   /** Audit a rejected call without exposing entries omitted from the caller's catalog. */
   readonly rejectTool?: (context: TContext, name: string, scopedAppId?: string) => McpErrorDetails;
   readonly catalog: (context: TContext, scopedAppId?: string) => readonly McpCatalogEntry[];
@@ -141,14 +143,26 @@ interface Session<TContext> {
   context: TContext;
 }
 
-/** Stateful official-SDK Streamable HTTP adapter with identity and endpoint pinning. */
+/** Official-SDK Streamable HTTP adapter; stateful sessions pin identity and endpoint. */
 export class McpHttpHandler<TContext> {
   private readonly sessions = new Map<string, Session<TContext>>();
+  private readonly activeStateless = new Set<Server>();
   public constructor(private readonly options: McpHttpOptions<TContext>) {}
 
   public async handle(input: McpHttpRequest<TContext>): Promise<void> {
     const header = input.request.headers["mcp-session-id"];
     const sessionId = typeof header === "string" ? header : undefined;
+    const stateless = this.options.sessionMode === "stateless";
+    if (stateless && (input.response.destroyed || input.request.socket.destroyed)) return;
+    if (stateless && input.request.method !== "POST") {
+      input.response.writeHead(405, { allow: "POST" });
+      input.response.end();
+      return;
+    }
+    if (stateless && sessionId !== undefined) {
+      this.jsonError(input.response, 400, -32_000, "Stateless MCP does not accept session IDs");
+      return;
+    }
     if (sessionId !== undefined) {
       const session = this.sessions.get(sessionId);
       if (
@@ -164,14 +178,16 @@ export class McpHttpHandler<TContext> {
       return;
     }
     const message = input.body as { method?: unknown } | undefined;
-    if (input.request.method !== "POST" || message?.method !== "initialize") {
+    if (!stateless && (input.request.method !== "POST" || message?.method !== "initialize")) {
       this.jsonError(input.response, 400, -32_000, "MCP session ID is required");
       return;
     }
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: randomUUID });
+    const transport = new StreamableHTTPServerTransport(
+      stateless ? {} : { sessionIdGenerator: randomUUID },
+    );
     const server = new Server(
       { name: "embody", version: "0.0.0" },
-      { capabilities: { tools: { listChanged: true } } },
+      { capabilities: { tools: { listChanged: !stateless } } },
     );
     const session: Session<TContext> = {
       server,
@@ -229,15 +245,38 @@ export class McpHttpHandler<TContext> {
     transport.onclose = () => {
       if (transport.sessionId) this.sessions.delete(transport.sessionId);
     };
-    // SDK 1.x transport declarations are not exactOptionalPropertyTypes-compatible.
-    await server.connect(transport as unknown as Transport);
-    await transport.handleRequest(input.request, input.response, input.body);
+    if (stateless) {
+      this.activeStateless.add(server);
+      input.response.once("close", () => {
+        this.activeStateless.delete(server);
+        void server.close();
+      });
+    }
+    try {
+      // Attach disconnect cleanup before any await; recheck after connection before dispatch.
+      // SDK 1.x transport declarations are not exactOptionalPropertyTypes-compatible.
+      await server.connect(transport as unknown as Transport);
+      if (stateless && (input.response.destroyed || input.request.socket.destroyed)) {
+        this.activeStateless.delete(server);
+        await server.close();
+        return;
+      }
+      await transport.handleRequest(input.request, input.response, input.body);
+    } catch (error) {
+      if (stateless) {
+        this.activeStateless.delete(server);
+        await server.close();
+      }
+      throw error;
+    }
     if (transport.sessionId) this.sessions.set(transport.sessionId, session);
   }
 
   public async close(): Promise<void> {
     await Promise.all([...this.sessions.values()].map((session) => session.server.close()));
     this.sessions.clear();
+    await Promise.all([...this.activeStateless].map((server) => server.close()));
+    this.activeStateless.clear();
   }
   private jsonError(response: ServerResponse, status: number, code: number, message: string): void {
     response.writeHead(status, { "content-type": "application/json" });

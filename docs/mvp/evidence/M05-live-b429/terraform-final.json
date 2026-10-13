@@ -1,0 +1,25 @@
+{
+  "capturedAt": "2026-10-13T13:15:45.484Z",
+  "terraformVersion": "1.16.5",
+  "project": "embody-cloud",
+  "region": "us-central1",
+  "resourcePrefix": "embody-test-m05",
+  "enablePostgres": false,
+  "enableNetwork": false,
+  "finalDetailedExitCode": 0,
+  "meaning": "Fresh refreshed plan: no changes; lock enabled; same retained private remote backend. Optional resources removed, shared empty foundation retained.",
+  "backend": {
+    "bucket": "embody-cloud-tfstate-930896908754",
+    "uniformBucketLevelAccess": true,
+    "publicAccessPrevention": "enforced",
+    "versioned": true,
+    "publicIam": [],
+    "state": {
+      "name": "mvp/m05/foundation/default.tfstate",
+      "size": "29888",
+      "generation": "1791897279700515",
+      "updated": "2026-10-13T13:14:39.724Z"
+    }
+  },
+  "operatorAttested": true
+}

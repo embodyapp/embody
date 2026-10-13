@@ -1,0 +1,19 @@
+{
+  "at": "2026-10-13T12:00:25.336Z",
+  "removed": [
+    "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-external-probe",
+    "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-diag",
+    "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-rotation-watch",
+    "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe-b",
+    "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-sql-diag2",
+    "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-gateway-probe",
+    "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-runtime-probe",
+    "projects/embody-cloud/locations/us-central1/jobs/embody-test-m05-sql-diag",
+    "projects/embody-cloud/locations/us-central1/services/embody-test-m05-gateway",
+    "projects/930896908754/secrets/embody-test-m05-signer/versions/2",
+    "projects/930896908754/secrets/embody-test-m05-platform-db/versions/1"
+  ],
+  "fixtureSqlClientBindingsRemoved": true,
+  "unrelatedIamPreserved": true,
+  "foundationSecretContainersPreserved": true
+}

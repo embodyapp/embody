@@ -17,3 +17,12 @@ firebase.json
 .try
 
 .artifacts/
+
+# Terraform: remote GCS state only; never commit caches, local state, plans or operator vars.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log

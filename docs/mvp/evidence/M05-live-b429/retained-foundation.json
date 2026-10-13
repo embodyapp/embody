@@ -1,0 +1,15 @@
+{
+  "capturedAt": "2026-10-13T13:24:03.436Z",
+  "repository": {
+    "name": "projects/embody-cloud/locations/us-central1/repositories/embody-test-m05-images",
+    "format": "DOCKER",
+    "packageCount": 0
+  },
+  "queue": {
+    "name": "projects/embody-cloud/locations/us-central1/queues/embody-test-m05-deployments",
+    "state": "RUNNING",
+    "taskCount": 0
+  },
+  "fixtureProjectBindings": [],
+  "qualification": "Shared empty repository/queue/APIs/foundation identities and Terraform-managed secret accessor/artifact writer IAM retained intentionally; no active payloads/workloads/tasks/images. Remote GCS state retained separately."
+}

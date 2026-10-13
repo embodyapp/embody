@@ -9,3 +9,12 @@ node_modules
 **/coverage
 **/.embody
 apps/landing
+.artifacts
+.claude
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/*.tfvars
+**/*.tfvars.json
+**/temp

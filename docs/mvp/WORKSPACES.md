@@ -53,7 +53,7 @@ try {
 } finally { await store.close(); }
 ```
 
-Runtime startup: `GATEWAY_PROFILE=hosted`, `GATEWAY_PLATFORM_DATABASE_URL` (platform runtime URL), `GATEWAY_JWT_SECRET`, optional `GATEWAY_JWT_ISSUER`, `PORT`/`HOST`. Hosted startup never migrates or creates a bootstrap key. Unknown profiles fail. `reference` remains the default only for existing reference E2E compatibility; production deployment must explicitly choose hosted. Hosted public errors are always sanitized, even if a caller requests development error rendering. The current HS256 host-token path is still M01 infrastructure and does **not** complete M05.
+Runtime startup: `GATEWAY_PROFILE=hosted`, `GATEWAY_PLATFORM_DATABASE_URL` (platform runtime URL), required `GATEWAY_JWT_ISSUER`, `GATEWAY_JWT_KID`, `GATEWAY_JWT_PRIVATE_KEY` (gateway-only ES256 PKCS#8 PEM), `GATEWAY_JWT_PUBLIC_JWKS` (public rotation keys), and `PORT`/`HOST`. Hosted startup never migrates or creates a bootstrap key. Unknown profiles fail. `reference` remains the default only for existing reference E2E compatibility; production deployment must explicitly choose hosted. Hosted public errors are always sanitized, even if a caller requests development error rendering. M05 adds asymmetric host-token verification and mandatory delegated MCP attribution; [configuration/rotation bounds](./IDENTITY.md). Provider IAM/private invocation qualification remains open.
 
 ## Atomicity, discovery, freshness and failures
 

@@ -648,10 +648,27 @@ class PostgresTransaction implements StorageTransaction {
 export class PostgresStorage implements StorageConnection {
   public readonly dialect = "postgres" as const;
   private readonly pool: Pool;
-  public constructor(config: PoolConfig) {
+  public constructor(
+    config: PoolConfig,
+    private readonly options: { schemaMode?: "migrate" | "verify" } = {},
+  ) {
     this.pool = new Pool(config);
   }
   public async ensureSchema(): Promise<void> {
+    if (this.options.schemaMode === "verify") {
+      const result = await this.pool.query<{ version: number }>(
+        "SELECT version FROM public.embody_schema_migrations ORDER BY version",
+      );
+      const expected = STORAGE_MIGRATIONS.map((migration) => migration.version);
+      if (
+        result.rows.length !== expected.length ||
+        result.rows.some((row, index) => row.version !== expected[index])
+      )
+        throw new Error(
+          "PostgreSQL storage migrations must be applied by maintenance identity before hosted startup",
+        );
+      return;
+    }
     await this.pool.query(
       "CREATE TABLE IF NOT EXISTS embody_schema_migrations (version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL)",
     );

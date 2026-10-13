@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { signingIdentity } from "./signing-fixture.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -76,10 +77,7 @@ export function storeConformance(
       const server = createWorkspaceGateway({
         store: backend,
         fetch: fetcher,
-        token: {
-          issuer: "m04-test",
-          key: new TextEncoder().encode("test-key-at-least-thirty-two-bytes"),
-        },
+        token: signingIdentity,
         ...(clock ? { clock } : {}),
       });
       closers.push(() => server.close());
@@ -439,7 +437,7 @@ export function storeConformance(
       await expect(client.listTools()).rejects.toThrow();
       expect(fetcher).not.toHaveBeenCalled();
     });
-    it("MCP sessions cannot be reused by another credential or after grant revision changes", async () => {
+    it("stateless MCP rejects session reuse and rechecks every credential grant revision", async () => {
       const issued = await provision();
       const { server } = gateway();
       const address = await server.listen({ port: 0, host: "127.0.0.1" });
@@ -449,6 +447,10 @@ export function storeConformance(
       });
       await client.connect(transport as unknown as Transport);
       closers.push(() => client.close());
+      expect(transport.sessionId).toBeUndefined();
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain(
+        "kanban__kanban_ping",
+      );
       const other = newCredential({
         ...credentialInput(workspace),
         grants: [{ workspaceId: workspace, appId: "app_kanban0001", role: "deployer" }],
@@ -463,12 +465,24 @@ export function storeConformance(
             ...headers(token),
             "content-type": "application/json",
             accept: "application/json, text/event-stream",
-            "mcp-session-id": transport.sessionId!,
+            "mcp-session-id": "legacy-session",
           },
           body: JSON.stringify({ jsonrpc: "2.0", id: 10, method: "tools/list", params: {} }),
         });
-        expect(response.status).toBe(404);
+        expect(response.status).toBe(400);
         expect(await response.text()).not.toContain("kanban_ping");
+        const current = await fetch(new URL(`/w/${workspace}/mcp`, address), {
+          method: "POST",
+          headers: {
+            ...headers(token),
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2025-06-18",
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 11, method: "tools/list", params: {} }),
+        });
+        expect(current.status).toBe(200);
+        expect(await current.text()).not.toContain("kanban_ping");
       }
     });
     it("unprefixed hosted routes and heartbeat registration are not usable", async () => {

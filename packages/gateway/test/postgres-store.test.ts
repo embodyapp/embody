@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { signingIdentity, privateKeyPem, publicKeys } from "./signing-fixture.js";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { promisify } from "node:util";
@@ -57,7 +58,11 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
           ...process.env,
           GATEWAY_PROFILE: "hosted",
           GATEWAY_PLATFORM_DATABASE_URL: url!,
-          GATEWAY_JWT_SECRET: "public-test-key-at-least-thirty-two-bytes",
+          GATEWAY_SERVICE_ACCOUNT_EMAIL: "gateway@fixture-project.iam.gserviceaccount.com",
+          GATEWAY_JWT_ISSUER: "test",
+          GATEWAY_JWT_KID: "test-key",
+          GATEWAY_JWT_PRIVATE_KEY: privateKeyPem,
+          GATEWAY_JWT_PUBLIC_JWKS: JSON.stringify({ keys: publicKeys }),
           PORT: "0",
           HOST: "127.0.0.1",
         },
@@ -106,10 +111,7 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
       store,
       fetch: fetcher,
       environment: "development",
-      token: {
-        issuer: "test",
-        key: new TextEncoder().encode("public-test-key-at-least-thirty-two-bytes"),
-      },
+      token: signingIdentity,
     });
     try {
       await store.createWorkspace(workspace);
@@ -173,6 +175,40 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
     one.pathname = platform.pathname;
     const two = new URL(platform);
     two.pathname = app.pathname;
+    // Exercise the production probe's SQL inspection/parser and CONNECT-stage classifier,
+    // not only an injected tagged error. No metadata/cloud request is made by this child.
+    const probe = await promisify(execFile)(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import assert from 'node:assert/strict';
+      import { Client } from 'pg';
+      import { createRuntimeSqlProbe } from '../../scripts/probe-m05-runtime.mjs';
+      import { createAppHost } from '../host/dist/index.js';
+      const sql = createRuntimeSqlProbe(Client);
+      const own = new URL(process.env.EMBODY_POSTGRES_URL);
+      const role = decodeURIComponent(own.username);
+      await sql(own.href, role, 'inspect');
+      const host = await createAppHost({appId:'proof',version:'1.0.0',plugins:[]}, {env:{NODE_ENV:'production',EMBODY_HOST_PROFILE:'hosted',EMBODY_WORKSPACE_ID:'ws_readonly01',DATABASE_URL:own.href,GATEWAY_JWT_ISSUER:'fixture',GATEWAY_JWKS_URL:'https://example.com/jwks'}});
+      await host.stop();
+      const platform = new URL(own);
+      platform.pathname = new URL(process.env.EMBODY_PLATFORM_URL).pathname;
+      await assert.rejects(sql(platform.href, role, 'connect-only'), error => error.code === '42501' && error.stage === 'connect');
+      const migration = new URL(process.env.EMBODY_POSTGRES_MIGRATION_URL);
+      await assert.rejects(sql(migration.href, decodeURIComponent(migration.username), 'inspect'), /elevated or mismatched/);
+      console.log(JSON.stringify({ ownRole: 'restricted', hostedStartup: 'verified', platformConnect: 'denied', elevatedMigrator: 'rejected' }));
+    `,
+      ],
+      { cwd: import.meta.dirname + "/..", env: process.env },
+    );
+    expect(JSON.parse(probe.stdout)).toEqual({
+      ownRole: "restricted",
+      hostedStartup: "verified",
+      platformConnect: "denied",
+      elevatedMigrator: "rejected",
+    });
     for (const connectionString of [one.href, two.href]) {
       const pool = new Pool({ connectionString });
       try {
@@ -181,5 +217,5 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
         await pool.end();
       }
     }
-  });
+  }, 20_000);
 });

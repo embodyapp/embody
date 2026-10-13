@@ -42,6 +42,7 @@
     "jose": "^6.2.10"
   },
   "devDependencies": {
+    "@embody/auth": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@types/node": "^22.20.1",
     "vitest": "^4.1.11"

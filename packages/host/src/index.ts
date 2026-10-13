@@ -399,6 +399,12 @@ const appEnvironmentSchema = z.object({
   GATEWAY_REGISTRATION_SECRET: z.string().min(16).optional(),
   GATEWAY_JWT_ISSUER: z.string().min(1).optional(),
   GATEWAY_JWT_SECRET: z.string().min(32).optional(),
+  EMBODY_HOST_PROFILE: z.enum(["reference", "hosted"]).default("reference"),
+  EMBODY_WORKSPACE_ID: z
+    .string()
+    .regex(/^ws_[a-z0-9]{8,64}$/)
+    .optional(),
+  GATEWAY_JWKS_URL: z.url().optional(),
   EMBODY_EVENT_SECRET: z.string().min(16).optional(),
   EMBODY_EVENT_DESTINATIONS: z.string().min(2).optional(),
   TRUST_INSECURE_HTTP: z.enum(["true", "false"]).default("false"),
@@ -433,6 +439,23 @@ export function parseAppEnvironment(input: NodeJS.ProcessEnv = process.env): App
   const env = parsed.data;
   if (env.EMBODY_EVENT_DESTINATIONS && !env.EMBODY_EVENT_SECRET)
     throw new Error("EMBODY_EVENT_DESTINATIONS requires EMBODY_EVENT_SECRET");
+  if (env.EMBODY_HOST_PROFILE === "hosted") {
+    if (
+      env.NODE_ENV !== "production" ||
+      !env.EMBODY_WORKSPACE_ID ||
+      !env.GATEWAY_JWT_ISSUER ||
+      !env.GATEWAY_JWKS_URL ||
+      env.GATEWAY_JWT_SECRET ||
+      input["GATEWAY_JWT_PRIVATE_KEY"] ||
+      input["GATEWAY_PLATFORM_DATABASE_URL"]
+    )
+      throw new Error(
+        "Hosted apps require production, workspace, issuer and public JWKS; no signing secret",
+      );
+    if (!env.GATEWAY_JWKS_URL.startsWith("https:")) throw new Error("Hosted JWKS requires HTTPS");
+    if (env.EMBODY_EVENT_SECRET || env.EMBODY_EVENT_DESTINATIONS)
+      throw new Error("Hosted apps do not expose legacy shared-secret event ingress");
+  }
   if (env.NODE_ENV === "production") {
     const secrets = [
       env.GATEWAY_REGISTRATION_SECRET,
@@ -442,12 +465,18 @@ export function parseAppEnvironment(input: NodeJS.ProcessEnv = process.env): App
     if (secrets.some((value) => /^(change-?me|secret|password|development|default)/i.test(value)))
       throw new Error("Production rejects default or development secrets");
     if (!env.DATABASE_URL) throw new Error("Production requires DATABASE_URL (PostgreSQL)");
-    if (!env.GATEWAY_URL || !env.PUBLIC_URL || !env.GATEWAY_REGISTRATION_SECRET)
+    if (
+      env.EMBODY_HOST_PROFILE === "reference" &&
+      (!env.GATEWAY_URL || !env.PUBLIC_URL || !env.GATEWAY_REGISTRATION_SECRET)
+    )
       throw new Error(
         "Production requires GATEWAY_URL, PUBLIC_URL, and GATEWAY_REGISTRATION_SECRET",
       );
-    if (!env.GATEWAY_JWT_ISSUER || !env.GATEWAY_JWT_SECRET)
-      throw new Error("Production requires GATEWAY_JWT_ISSUER and GATEWAY_JWT_SECRET");
+    if (
+      !env.GATEWAY_JWT_ISSUER ||
+      (env.EMBODY_HOST_PROFILE === "reference" && !env.GATEWAY_JWT_SECRET)
+    )
+      throw new Error("Production requires gateway JWT configuration");
     if (
       env.TRUST_INSECURE_HTTP !== "true" &&
       [env.GATEWAY_URL, env.PUBLIC_URL].some((value) => value?.startsWith("http:"))
@@ -514,9 +543,14 @@ export async function createAppHost(
   options: AppHostRuntimeOptions = {},
 ): Promise<AppHostRuntime> {
   const environment = parseAppEnvironment(options.env);
+  if (environment.EMBODY_HOST_PROFILE === "hosted" && options.verifier)
+    throw new Error("Hosted authentication cannot be overridden");
   let storage = options.storage;
   if (storage === undefined && environment.DATABASE_URL)
-    storage = new PostgresStorage({ connectionString: environment.DATABASE_URL });
+    storage = new PostgresStorage(
+      { connectionString: environment.DATABASE_URL },
+      { schemaMode: environment.EMBODY_HOST_PROFILE === "hosted" ? "verify" : "migrate" },
+    );
   if (storage === undefined) {
     const filename =
       environment.DATABASE_FILE === ":memory:"
@@ -533,6 +567,15 @@ export async function createAppHost(
   });
   await kernel.boot();
   let verifier = options.verifier;
+  if (environment.EMBODY_HOST_PROFILE === "hosted") {
+    verifier = gatewayJwtVerifier({
+      issuer: environment.GATEWAY_JWT_ISSUER!,
+      audience: definition.appId,
+      workspaceId: environment.EMBODY_WORKSPACE_ID!,
+      jwksUrl: environment.GATEWAY_JWKS_URL!,
+      algorithms: ["ES256"],
+    });
+  }
   if (verifier === undefined && environment.NODE_ENV === "development") {
     verifier = localDevVerifier({
       enabled: true,
@@ -609,6 +652,7 @@ export async function createAppHost(
     try {
       await host.stop();
     } finally {
+      // Kernel owns storage cleanup, including adapters constructed by this factory.
       await kernel.stop();
     }
   };

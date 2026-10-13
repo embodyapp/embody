@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { drain } from "./drain.js";
 import {
   ForbiddenError,
   NonRetryableWorkflowError,
@@ -44,10 +45,7 @@ export class WorkflowWorker {
     this.stopping = true;
     if (this.timer !== undefined) clearInterval(this.timer);
     this.timer = undefined;
-    await Promise.race([
-      Promise.allSettled([...this.active]),
-      new Promise<void>((resolve) => setTimeout(resolve, deadlineMs)),
-    ]);
+    await drain(this.active, deadlineMs);
   }
   public async tick(): Promise<void> {
     if (this.stopping) return;
