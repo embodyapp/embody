@@ -2,6 +2,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { operator, loadPrivate } from "./bootstrap.mjs";
 import { fixtureConfigDigest } from "../../../scripts/probe-m05-runtime.mjs";
+import { servingInventory } from "./inventory.mjs";
 async function main() {
   if (
     process.env.EMBODY_MVP_CLOUD_BUDGET_APPROVED !== "true" ||
@@ -16,6 +17,52 @@ async function main() {
   const phase = process.env.EMBODY_M05_JOB_PHASE ?? data.phase;
   if (!["initial", "publish", "overlap", "removed", "watch-removal", "external"].includes(phase))
     throw new Error("Invalid job phase");
+  if (
+    (phase === "external" && data.phase !== "removed") ||
+    (phase === "watch-removal" && data.phase !== "overlap") ||
+    (!["external", "watch-removal"].includes(phase) && phase !== data.phase)
+  )
+    throw new Error("Probe phase does not match deployment phase");
+  const inventory = await servingInventory(api, data);
+  const gatewayOrigins = [
+    data.gateway,
+    ...inventory[0].revisions.map((revision) => revision.uri).filter(Boolean),
+  ];
+  const requiredChecks =
+    mode === "runtime-probe"
+      ? [
+          "actual-runtime-metadata-identity",
+          "own-secret-access-positive-control",
+          "effective-permission-positive-control",
+          "foreign-secret-version-policy-and-write-denied",
+          "deployment-and-build-denied",
+          "service-scoped-deployment-and-iam-denied",
+          "builder-artifact-write-denied",
+          "workload-impersonation-signing-and-actas-denied",
+          "gateway-impersonation-denied",
+          "non-gateway-authenticated-own-and-other-app-invocation-denied",
+          "own-database-least-privilege-positive-control",
+          "platform-database-connect-denied",
+          "other-database-connect-denied",
+        ]
+      : phase === "external"
+        ? [
+            "both-external-origins-denied-without-provider",
+            "both-external-origins-denied-with-gateway-provider-and-valid-principal",
+          ]
+        : [
+            "valid-current-principal-accepted",
+            "execute-roundtrip-accepted",
+            "execute/stream-roundtrip-accepted",
+            "mcp-delegated-agent-roundtrip-accepted",
+            ...(phase === "watch-removal"
+              ? [
+                  "live-old-key-positive-before-removal",
+                  "fresh-old-key-denied-within60s",
+                  "new-key-positive-after-removal",
+                ]
+              : []),
+          ];
   const name = `${prefix}-${phase === "external" ? "external-probe" : phase === "watch-removal" ? "rotation-watch" : mode}`,
     serviceAccount = mode === "runtime-probe" ? config.runtime : config.gateway;
   const env = [
@@ -28,6 +75,7 @@ async function main() {
     { name: "EMBODY_M05_CONFIG", value: JSON.stringify(config) },
     { name: "EMBODY_M05_PHASE", value: phase },
     { name: "EMBODY_GATEWAY_ORIGIN", value: data.gateway },
+    { name: "EMBODY_GATEWAY_ORIGINS", value: JSON.stringify([...new Set(gatewayOrigins)]) },
     { name: "EMBODY_OLD_SIGNER_VERSION", value: data.secretVersions.signer1.split("/").at(-1) },
   ];
   if (mode === "gateway-probe")
@@ -156,14 +204,25 @@ async function main() {
     !reports.some(
       (report) =>
         report.status === "passed" &&
+        report.sourceSha === data.candidateSha &&
+        Array.isArray(report.checks) &&
+        requiredChecks.every((check) => report.checks.includes(check)) &&
         report.candidateSha === data.candidateSha &&
         report.fixtureConfigSha256 === fixtureConfigDigest(config) &&
         (mode === "runtime-probe" || report.phase === phase),
     )
   )
     throw new Error("No successful execution/probe evidence");
+  const finalInventory = await servingInventory(api, data);
   console.log(
-    JSON.stringify({ execution: execution.name, image: data.image, serviceAccount, reports }),
+    JSON.stringify({
+      execution: execution.name,
+      image: data.image,
+      serviceAccount,
+      inventory,
+      finalInventory,
+      reports,
+    }),
   );
 }
 main().catch(() => {

@@ -341,6 +341,7 @@ export async function probeRuntimeIsolation(config, { fetch: fetcher = fetch, sq
       "Gateway impersonation: actual IAM permission denial required, not a disabled API",
     );
   checks.push("gateway-impersonation-denied");
+  console.log(JSON.stringify({ runtimeProbeProgress: "iam-negative-matrix-complete" }));
   if (typeof sql !== "function") throw new Error("Real SQL probe dependency required");
   for (const origin of [config.appOrigin, config.otherAppOrigin]) {
     const idToken = await (
@@ -367,7 +368,9 @@ export async function probeRuntimeIsolation(config, { fetch: fetcher = fetch, sq
       throw new Error("Non-gateway authenticated app invocation not denied");
   }
   checks.push("non-gateway-authenticated-own-and-other-app-invocation-denied");
+  console.log(JSON.stringify({ runtimeProbeProgress: "sql-own-inspect-start" }));
   await sql(ownDsn, config.databaseRole, "inspect");
+  console.log(JSON.stringify({ runtimeProbeProgress: "sql-own-inspect-complete" }));
   checks.push("own-database-least-privilege-positive-control");
   for (const [label, name] of [
     ["platform-database-connect-denied", config.platformDatabase],
@@ -376,6 +379,7 @@ export async function probeRuntimeIsolation(config, { fetch: fetcher = fetch, sq
     const target = new URL(ownDsn);
     target.pathname = `/${name}`;
     try {
+      console.log(JSON.stringify({ runtimeProbeProgress: label }));
       await sql(target.href, config.databaseRole, "connect-only");
     } catch (error) {
       if (error?.code !== "42501" || error?.stage !== "connect")

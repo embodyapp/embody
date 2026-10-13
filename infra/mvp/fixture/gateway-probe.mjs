@@ -9,6 +9,7 @@ import {
   PostgresGatewayStore,
   newCredential,
 } from "../../../packages/gateway/dist/index.js";
+import { parseExecutionStream } from "../../../packages/gateway/dist/dispatch.js";
 import { probePrivateInvocation } from "../../../scripts/probe-m05-invocation.mjs";
 import { fixtureConfigDigest } from "../../../scripts/probe-m05-runtime.mjs";
 const { fetch, AbortSignal } = globalThis;
@@ -16,7 +17,7 @@ const require = createRequire(new URL("../../../packages/gateway/package.json", 
 const { SignJWT, importPKCS8 } = await import(require.resolve("jose"));
 export async function runGatewayProbe(config) {
   const phase = process.env.EMBODY_M05_PHASE ?? "initial";
-  if (!["initial", "overlap", "removed", "watch-removal", "external"].includes(phase))
+  if (!["initial", "publish", "overlap", "removed", "watch-removal", "external"].includes(phase))
     throw new Error("Invalid rotation phase");
   const signing = await hostedSigningIdentity({
     issuer: process.env.GATEWAY_JWT_ISSUER,
@@ -66,7 +67,12 @@ export async function runGatewayProbe(config) {
         signing,
       );
       if (
-        (await fetch(new URL("/health", origin), { redirect: "error" })).status !== 404 ||
+        (
+          await fetch(new URL("/health", origin), {
+            redirect: "error",
+            signal: AbortSignal.timeout(15000),
+          })
+        ).status !== 404 ||
         (await call(jwt, origin)).status !== 404
       )
         throw new Error("External ingress not closed");
@@ -152,46 +158,70 @@ export async function runGatewayProbe(config) {
   let record;
   try {
     record = await store.putCredential(issued.credential, null);
-    const gatewayUrl = process.env.EMBODY_GATEWAY_ORIGIN;
-    for (const route of ["execute", "execute/stream"]) {
-      const response = await fetch(
-        `${gatewayUrl}/w/${config.workspaceId}/api/${route}/kanban/kanban.ping`,
-        {
-          method: "POST",
-          redirect: "error",
-          signal: AbortSignal.timeout(30000),
-          headers: {
-            authorization: `Bearer ${issued.token}`,
-            "content-type": "application/json",
-          },
-          body: "{}",
-        },
-      );
-      if (response.status !== 200) throw new Error("Gateway roundtrip failed");
-      await response.text();
-      checks.push(`${route}-roundtrip-accepted`);
-    }
-    const { Client } = await import(require.resolve("@modelcontextprotocol/sdk/client/index.js"));
-    const { StreamableHTTPClientTransport } = await import(
-      require.resolve("@modelcontextprotocol/sdk/client/streamableHttp.js")
+    const gatewayOrigins = JSON.parse(
+      process.env.EMBODY_GATEWAY_ORIGINS ?? JSON.stringify([process.env.EMBODY_GATEWAY_ORIGIN]),
     );
-    const client = new Client({ name: "m05-live", version: "1" });
-    try {
-      await client.connect(
-        new StreamableHTTPClientTransport(new URL(`/w/${config.workspaceId}/mcp`, gatewayUrl), {
-          requestInit: { headers: { authorization: `Bearer ${issued.token}` } },
-        }),
-      );
-      const result = await client.callTool({ name: "kanban__kanban_ping", arguments: {} });
+    const assertPing = (value, actorType) => {
       if (
-        result.isError ||
-        !JSON.stringify(result).includes('"agent"') ||
-        !JSON.stringify(result).includes('"delegation"')
+        value?.ok !== true ||
+        value.appId !== config.appAudience ||
+        value.orgId !== config.workspaceId ||
+        value.actorType !== actorType ||
+        (actorType === "agent" &&
+          (value.delegation?.subjectId !== principal.actorId ||
+            value.delegation?.subjectType !== principal.actorType))
       )
-        throw new Error("Live MCP delegated actor missing");
-      checks.push("mcp-delegated-agent-roundtrip-accepted");
-    } finally {
-      await client.close();
+        throw new Error("Gateway attribution roundtrip failed");
+    };
+    for (const gatewayUrl of gatewayOrigins) {
+      for (const route of ["execute", "execute/stream"]) {
+        const response = await fetch(
+          `${gatewayUrl}/w/${config.workspaceId}/api/${route}/kanban/kanban.ping`,
+          {
+            method: "POST",
+            redirect: "error",
+            signal: AbortSignal.timeout(30000),
+            headers: {
+              authorization: `Bearer ${issued.token}`,
+              "content-type": "application/json",
+            },
+            body: "{}",
+          },
+        );
+        if (response.status !== 200) throw new Error("Gateway roundtrip failed");
+        if (route === "execute") assertPing(await response.json(), "human");
+        else {
+          let terminal = 0;
+          for await (const event of parseExecutionStream(response.body, "m05-live-stream")) {
+            if (event.type === "error") throw new Error("Gateway stream execution failed");
+            if (event.type === "result") {
+              terminal++;
+              assertPing(event.value, "human");
+            }
+          }
+          if (terminal !== 1) throw new Error("Gateway stream terminal result missing");
+        }
+        checks.push(`${route}-roundtrip-accepted`);
+      }
+      const { Client } = await import(require.resolve("@modelcontextprotocol/sdk/client/index.js"));
+      const { StreamableHTTPClientTransport } = await import(
+        require.resolve("@modelcontextprotocol/sdk/client/streamableHttp.js")
+      );
+      const client = new Client({ name: "m05-live", version: "1" });
+      try {
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL(`/w/${config.workspaceId}/mcp`, gatewayUrl), {
+            requestInit: { headers: { authorization: `Bearer ${issued.token}` } },
+          }),
+        );
+        const result = await client.callTool({ name: "kanban__kanban_ping", arguments: {} });
+        if (result.isError || result.content?.[0]?.type !== "text")
+          throw new Error("Live MCP delegated actor missing");
+        assertPing(JSON.parse(result.content[0].text), "agent");
+        checks.push("mcp-delegated-agent-roundtrip-accepted");
+      } finally {
+        await client.close();
+      }
     }
   } finally {
     if (record) await store.putCredential({ ...record, revoked: true }, record.revision);

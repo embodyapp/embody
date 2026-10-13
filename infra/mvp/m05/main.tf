@@ -152,6 +152,31 @@ resource "google_project_service" "compute" {
   service            = "compute.googleapis.com"
   disable_on_destroy = false
 }
+resource "google_project_service" "dns" {
+  count              = var.enable_network ? 1 : 0
+  service            = "dns.googleapis.com"
+  disable_on_destroy = false
+}
+resource "google_dns_managed_zone" "run_private" {
+  count      = var.enable_network ? 1 : 0
+  name       = "${var.prefix}-run-private"
+  dns_name   = "run.app."
+  visibility = "private"
+  private_visibility_config {
+    networks {
+      network_url = google_compute_network.fixture[0].id
+    }
+  }
+  depends_on = [google_project_service.dns]
+}
+resource "google_dns_record_set" "run_private" {
+  for_each     = var.enable_network ? toset(["run.app.", "*.run.app."]) : toset([])
+  name         = each.value
+  managed_zone = google_dns_managed_zone.run_private[0].name
+  type         = "A"
+  ttl          = 30
+  rrdatas      = ["199.36.153.8", "199.36.153.9", "199.36.153.10", "199.36.153.11"]
+}
 resource "google_compute_network" "fixture" {
   count                   = var.enable_network ? 1 : 0
   name                    = "${var.prefix}-network"

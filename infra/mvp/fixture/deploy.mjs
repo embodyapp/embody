@@ -6,6 +6,7 @@ import { PostgresGatewayStore } from "../../../packages/gateway/dist/index.js";
 import { Kernel } from "../../../packages/core/dist/index.js";
 import { PostgresStorage } from "../../../packages/storage/dist/index.js";
 import { fixtureApp } from "./app.mjs";
+import { immutableLeaf, servingInventory } from "./inventory.mjs";
 const { fetch, AbortSignal } = globalThis;
 let stage = "admission";
 async function main() {
@@ -103,6 +104,18 @@ async function main() {
   const phase = process.env.EMBODY_M05_PHASE ?? "initial";
   if (!["initial", "publish", "overlap", "removed"].includes(phase))
     throw new Error("Invalid phase");
+  if (phase !== "initial") {
+    const prior = { publish: "initial", overlap: "publish", removed: "overlap" }[phase];
+    if (data.phase !== prior || data.image !== image || data.candidateSha !== candidateSha)
+      throw new Error("Rotation must use ordered phases on the same candidate");
+    await servingInventory(api, data);
+  } else {
+    delete data.publishAt;
+    delete data.switchedAt;
+    delete data.removedAt;
+    delete data.servingRevisions;
+  }
+  data.leafImage = immutableLeaf(image);
   if (phase === "overlap" && (!data.publishAt || Date.now() - Date.parse(data.publishAt) < 60000))
     throw new Error("Public-key overlap must converge for60s before switching");
   if (
@@ -352,6 +365,7 @@ async function main() {
     otherDatabase: "embody_test_other_db",
   };
   data.config = config;
+  data.inventory = await servingInventory(api, data);
   await savePrivate(data);
   console.log(
     JSON.stringify({
@@ -361,6 +375,7 @@ async function main() {
       candidateSha,
       gatewayRevision: gateway.latestReadyRevision,
       servingRevisions: data.servingRevisions ?? [],
+      inventory: data.inventory,
       gatewayOrigin: gateway.uri,
       appOrigins: data.apps.map((app) => app.origin),
       issuer,
