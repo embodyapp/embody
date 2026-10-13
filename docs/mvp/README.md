@@ -10,7 +10,7 @@
 - [Durable workspaces and credentials](./WORKSPACES.md): hosted provisioning, identity/name bindings, route migration and cache/failure semantics.
 - [Hosted identity and rotation](./IDENTITY.md): asymmetric app/workspace binding, provider identity separation, required role matrix and revocation bounds; [M05 live IAM/SQL/rotation evidence](./evidence/M05-live-b429/README.md) technical gates and cleanup independently accepted; final committed-evidence CI/task disposition in [STATUS](./STATUS.md).
 - [Hosted MCP client contract](./MCP.md): stateless methods, headers, capability/cancellation limits and named-client qualification.
-- [Hosted dispatch safety](./DISPATCH.md): connection policy, deadlines, no-replay semantics, durable workspace quotas/audit and retention operations (M07 acceptance pending).
+- [Hosted dispatch safety](./DISPATCH.md): connection policy, deadlines, no-replay semantics, durable workspace quotas/audit and retention operations (accepted M07; provider qualification remains separate).
 - [Verification commands and prerequisites](./TESTING.md): mandatory DB/runtime-role fixture, MVP/cloud failure gates, clean packed/E2E runs and sanitized evidence.
 - [M02 API/CLI and workload contracts](./CONTRACTS.md): implemented schemas and policy; deployment endpoints/commands still await their implementation tasks.
 
