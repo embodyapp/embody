@@ -111,7 +111,14 @@ export function mcpErrorResult(error: McpErrorDetails): CallToolResult {
   };
 }
 export function mcpResult(value: unknown): CallToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(value) }] };
+  return {
+    content: [{ type: "text", text: JSON.stringify(value) }],
+    // MCP structured content must be an object. Keep text for older/plain clients and
+    // preserve primitive/array results without inventing an incompatible wrapper.
+    ...(value !== null && typeof value === "object" && !Array.isArray(value)
+      ? { structuredContent: value as Record<string, unknown> }
+      : {}),
+  };
 }
 
 export interface McpHttpOptions<TContext> {
@@ -146,10 +153,22 @@ interface Session<TContext> {
 /** Official-SDK Streamable HTTP adapter; stateful sessions pin identity and endpoint. */
 export class McpHttpHandler<TContext> {
   private readonly sessions = new Map<string, Session<TContext>>();
-  private readonly activeStateless = new Set<Server>();
+  private readonly activeStateless = new Map<
+    Server,
+    {
+      response: ServerResponse;
+      close: () => Promise<void>;
+    }
+  >();
+  private closing: Promise<void> | undefined;
   public constructor(private readonly options: McpHttpOptions<TContext>) {}
 
   public async handle(input: McpHttpRequest<TContext>): Promise<void> {
+    if (this.closing) {
+      if (!input.response.destroyed)
+        this.jsonError(input.response, 503, -32_000, "MCP handler is shutting down");
+      return;
+    }
     const header = input.request.headers["mcp-session-id"];
     const sessionId = typeof header === "string" ? header : undefined;
     const stateless = this.options.sessionMode === "stateless";
@@ -245,37 +264,53 @@ export class McpHttpHandler<TContext> {
     transport.onclose = () => {
       if (transport.sessionId) this.sessions.delete(transport.sessionId);
     };
+    let closed: Promise<void> | undefined;
+    const closeServer = () => (closed ??= server.close());
     if (stateless) {
-      this.activeStateless.add(server);
+      this.activeStateless.set(server, { response: input.response, close: closeServer });
       input.response.once("close", () => {
         this.activeStateless.delete(server);
-        void server.close();
+        void closeServer();
       });
     }
     try {
       // Attach disconnect cleanup before any await; recheck after connection before dispatch.
       // SDK 1.x transport declarations are not exactOptionalPropertyTypes-compatible.
       await server.connect(transport as unknown as Transport);
-      if (stateless && (input.response.destroyed || input.request.socket.destroyed)) {
+      if (
+        stateless &&
+        (this.closing || input.response.destroyed || input.request.socket.destroyed)
+      ) {
         this.activeStateless.delete(server);
-        await server.close();
+        input.response.destroy();
+        await closeServer();
         return;
       }
       await transport.handleRequest(input.request, input.response, input.body);
     } catch (error) {
       if (stateless) {
         this.activeStateless.delete(server);
-        await server.close();
+        await closeServer();
       }
       throw error;
     }
     if (transport.sessionId) this.sessions.set(transport.sessionId, session);
   }
 
-  public async close(): Promise<void> {
+  public close(): Promise<void> {
+    return (this.closing ??= this.dispose());
+  }
+  private async dispose(): Promise<void> {
     await Promise.all([...this.sessions.values()].map((session) => session.server.close()));
     this.sessions.clear();
-    await Promise.all([...this.activeStateless].map((server) => server.close()));
+    await Promise.all(
+      [...this.activeStateless.values()].map(({ response, close }) => {
+        // SDK close aborts handlers but does not necessarily terminate the HTTP response.
+        // End request-owned streams too so clients do not wait until their own deadline.
+        response.destroy();
+        return close();
+      }),
+    );
     this.activeStateless.clear();
   }
   private jsonError(response: ServerResponse, status: number, code: number, message: string): void {

@@ -31,6 +31,7 @@
     "test:mvp": "node scripts/test-mvp.mjs",
     "test:gateway-store": "node scripts/test-gateway-store.mjs",
     "test:mvp:cloud": "node scripts/test-mvp-cloud.mjs",
+    "test:mvp:client": "pnpm build && node scripts/test-mvp-client.mjs",
     "test:mvp:runtime-isolation": "node scripts/probe-m05-runtime.mjs",
     "test:mvp:private-invocation": "node scripts/probe-m05-invocation.mjs",
     "test:baseline": "node scripts/test-baseline.mjs",

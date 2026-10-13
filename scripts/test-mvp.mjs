@@ -22,7 +22,7 @@ await main("mvp", async () => {
   const suites = {};
   try {
     // Add later milestone integration suites explicitly here as their implementations land.
-    for (const pkg of ["cloud-contracts", "auth", "host", "gateway"]) {
+    for (const pkg of ["cloud-contracts", "auth", "host", "mcp", "gateway"]) {
       const report = join(directory, `${pkg}.json`);
       suites[pkg] = await runVitest(
         "pnpm",

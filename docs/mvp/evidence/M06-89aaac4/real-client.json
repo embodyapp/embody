@@ -1,0 +1,170 @@
+{
+  "gate": "mvp-client",
+  "status": "passed",
+  "timestamp": "2026-10-13T18:18:11.728Z",
+  "commit": "89aaac4d520042fe9bc3968eaedb1f308c9db95c",
+  "dirty": false,
+  "node": "v24.21.0",
+  "lockfileSha256": "9f862aa8602908a4934b9dcc20ded53d768ca5ef747c7e535cbba6726cb76990",
+  "schemaSourceSha256": "5b9f98f62202e5aa3c154a6d6e5487cd6198da4703e6638b4a1413c951b0b5e6",
+  "platformSchemaSourceSha256": "52490f3fb623257a331f0046115caec72989697fc8402564886ec3f747bca553",
+  "postgresFixtureSha256": "5ee505a6ae07b9b1bfbb9a98493fa0495081732cf2ca423a42311e69f5dea580",
+  "counts": {
+    "clientToolCalls": 2,
+    "plainCliCalls": 1,
+    "failed": 0,
+    "skipped": 0
+  },
+  "images": [],
+  "client": "2.1.296 (Claude Code)",
+  "sdk": "1.32.1",
+  "models": ["claude-haiku-5-5"],
+  "environment": "local synthetic hosted gateway + authenticated host",
+  "gatewayReplacement": true,
+  "idle": {
+    "from": "2026-10-13T18:16:10.964Z",
+    "to": "2026-10-13T18:18:10.966Z",
+    "observedSeconds": 120,
+    "newRequests": 0,
+    "activeResponses": 0,
+    "openSockets": 0,
+    "clientStillRunning": true
+  },
+  "results": [
+    {
+      "subtype": "success",
+      "isError": false,
+      "markerObserved": true,
+      "costUsd": 0.00015557
+    },
+    {
+      "subtype": "success",
+      "isError": false,
+      "markerObserved": true,
+      "costUsd": 0.00026855
+    }
+  ],
+  "toolUses": [
+    {
+      "name": "mcp__embody__kanban__kanban_ping"
+    },
+    {
+      "name": "mcp__embody__kanban__kanban_ping"
+    }
+  ],
+  "requests": [
+    {
+      "at": "2026-10-13T18:16:07.769Z",
+      "replica": 0,
+      "httpMethod": "POST",
+      "path": "/w/ws_m06client001/mcp",
+      "method": "server/discover",
+      "authenticated": true,
+      "sessionHeader": false,
+      "protocolVersion": "2026-07-28",
+      "status": 400
+    },
+    {
+      "at": "2026-10-13T18:16:07.791Z",
+      "replica": 1,
+      "httpMethod": "POST",
+      "path": "/w/ws_m06client001/mcp",
+      "method": "initialize",
+      "authenticated": true,
+      "sessionHeader": false,
+      "protocolVersion": null,
+      "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "version": "2.1.296",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code"
+      },
+      "status": 200
+    },
+    {
+      "at": "2026-10-13T18:16:07.797Z",
+      "replica": 0,
+      "httpMethod": "POST",
+      "path": "/w/ws_m06client001/mcp",
+      "method": "notifications/initialized",
+      "authenticated": true,
+      "sessionHeader": false,
+      "protocolVersion": "2025-11-25",
+      "status": 202
+    },
+    {
+      "at": "2026-10-13T18:16:07.798Z",
+      "replica": 1,
+      "httpMethod": "GET",
+      "path": "/w/ws_m06client001/mcp",
+      "method": null,
+      "authenticated": true,
+      "sessionHeader": false,
+      "protocolVersion": "2025-11-25",
+      "status": 405
+    },
+    {
+      "at": "2026-10-13T18:16:07.800Z",
+      "replica": 0,
+      "httpMethod": "POST",
+      "path": "/w/ws_m06client001/mcp",
+      "method": "tools/list",
+      "authenticated": true,
+      "sessionHeader": false,
+      "protocolVersion": "2025-11-25",
+      "status": 200
+    },
+    {
+      "at": "2026-10-13T18:16:08.973Z",
+      "replica": 1,
+      "httpMethod": "POST",
+      "path": "/w/ws_m06client001/mcp",
+      "method": "tools/call",
+      "authenticated": true,
+      "sessionHeader": false,
+      "protocolVersion": "2025-11-25",
+      "status": 200
+    },
+    {
+      "at": "2026-10-13T18:16:10.314Z",
+      "replica": 0,
+      "httpMethod": "POST",
+      "path": "/w/ws_m06client001/mcp",
+      "method": "tools/call",
+      "authenticated": true,
+      "sessionHeader": false,
+      "protocolVersion": "2025-11-25",
+      "status": 200
+    },
+    {
+      "at": "2026-10-13T18:18:11.690Z",
+      "replica": 1,
+      "httpMethod": "GET",
+      "path": "/w/ws_m06client001/api/catalog",
+      "method": null,
+      "authenticated": true,
+      "sessionHeader": false,
+      "protocolVersion": null,
+      "status": 200
+    },
+    {
+      "at": "2026-10-13T18:18:11.697Z",
+      "replica": 0,
+      "httpMethod": "POST",
+      "path": "/w/ws_m06client001/api/execute/stream/kanban/kanban.ping",
+      "method": null,
+      "authenticated": true,
+      "sessionHeader": false,
+      "protocolVersion": null,
+      "status": 200
+    }
+  ],
+  "appRequestsBeforeCli": 2,
+  "appRequestsAfterCli": 3,
+  "limitations": [
+    "No cloud zero-instance proof",
+    "120-second idle window is not a universal client guarantee",
+    "Memory catalog here; mandatory PostgreSQL gate supplies durable-store proof"
+  ]
+}
