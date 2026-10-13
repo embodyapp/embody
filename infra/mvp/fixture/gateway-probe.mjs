@@ -339,20 +339,34 @@ export async function runGatewayProbe(config) {
       const watchStart = Date.now();
       let lastOldPublicationAt, removedAt;
       for (let attempt = 0; attempt < 150; attempt++) {
-        const jwks = await (
-          await fetch(`${process.env.EMBODY_GATEWAY_ORIGIN}/.well-known/jwks.json`, {
-            redirect: "error",
-            signal: AbortSignal.timeout(5000),
-          })
-        ).json();
+        let jwks;
+        try {
+          jwks = await (
+            await fetch(`${process.env.EMBODY_GATEWAY_ORIGIN}/.well-known/jwks.json`, {
+              redirect: "error",
+              signal: AbortSignal.timeout(5000),
+            })
+          ).json();
+        } catch (error) {
+          // A rollout transport interruption is not removal or a denial. Keep the last positive
+          // publication time unchanged, so the eventual measured upper bound remains conservative.
+          if (
+            error.name !== "TimeoutError" &&
+            !["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT"].includes(error.cause?.code)
+          )
+            throw error;
+          await delay(2000);
+          continue;
+        }
         if (!jwks.keys.some((key) => key.kid === "m05-key-1")) {
           if (!lastOldPublicationAt)
             throw new Error("Old key publication was never observed before removal");
           removedAt = Date.now();
           break;
         }
+        const firstPublication = !lastOldPublicationAt;
         lastOldPublicationAt = Date.now();
-        if (attempt === 0)
+        if (firstPublication)
           console.log(
             JSON.stringify({
               rotationWatchReady: true,

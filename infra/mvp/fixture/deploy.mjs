@@ -147,7 +147,8 @@ async function main() {
         networkInterfaces: [{ network: `${prefix}-network`, subnetwork: `${prefix}-subnet` }],
       },
       serviceAccount: gatewayEmail,
-      scaling: { minInstanceCount: 0, maxInstanceCount: 1 },
+      // Keep rotation authorities warm only during this short-lived paid acceptance window.
+      scaling: { minInstanceCount: phase === "initial" ? 0 : 1, maxInstanceCount: 1 },
       maxInstanceRequestConcurrency: 4,
       timeout: "120s",
       volumes: [{ name: "cloudsql", cloudSqlInstance: { instances: [connection] } }],
