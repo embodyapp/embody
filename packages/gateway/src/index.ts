@@ -16,6 +16,7 @@ export { hostedSigningIdentity } from "./identity.js";
 export { cloudRunInvocationToken, type CloudRunInvocationOptions } from "./cloud-run.js";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
+import { boundedFetch } from "./safe-fetch.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import {
   SignJWT,
@@ -31,6 +32,7 @@ import {
   ForbiddenError,
   NotFoundError,
   UnauthenticatedError,
+  UnavailableError,
   actionEffectSchema,
   appMetadataSchema,
   stableStringify,
@@ -50,6 +52,7 @@ import {
   type AuditOutcome,
   type AuditSink,
   type DispatchDeps,
+  type DispatchAdmission,
   type DispatchSurface,
   type PublicError,
 } from "./dispatch.js";
@@ -69,6 +72,7 @@ export {
   type AuditOutcome,
   type AuditRecord,
   type AuditSink,
+  type DispatchAdmission,
   type DispatchSurface,
   type PublicError,
 } from "./dispatch.js";
@@ -456,6 +460,10 @@ export interface GatewayOptions {
   readonly auth: AuthChain;
   readonly token: GatewayTokenOptions;
   readonly fetch?: typeof fetch;
+  readonly admission?: DispatchAdmission;
+  readonly actionTimeoutMs?: number;
+  readonly requestTimeoutMs?: number;
+  readonly auditCompletionTimeoutMs?: number;
   /** Trusted platform invocation identity. Never derived from caller credentials. */
   readonly invocationToken?: (origin: string) => Promise<string>;
   /** Defaults to an in-memory log; use `jsonLineAuditSink()` or a durable sink in production. */
@@ -478,9 +486,33 @@ function bearer(value: string | undefined): string {
 }
 /** Fastify gateway control-plane server. */
 export function createGateway(options: GatewayOptions): FastifyInstance {
-  const app = Fastify({ bodyLimit: 1_048_576 });
+  if (
+    options.actionTimeoutMs !== undefined &&
+    (!Number.isInteger(options.actionTimeoutMs) ||
+      options.actionTimeoutMs < 1 ||
+      options.actionTimeoutMs > 30_000)
+  )
+    throw new TypeError("Action deadline must be between 1 and 30000 milliseconds");
+  const requestTimeoutMs = options.requestTimeoutMs ?? 60_000;
+  if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1 || requestTimeoutMs > 60_000)
+    throw new TypeError("Whole request deadline must be between 1 and 60000 milliseconds");
+  const auditCompletionTimeoutMs = options.auditCompletionTimeoutMs ?? 5_000;
+  if (
+    !Number.isInteger(auditCompletionTimeoutMs) ||
+    auditCompletionTimeoutMs < 1 ||
+    auditCompletionTimeoutMs > 5_000
+  )
+    throw new TypeError("Audit completion deadline must be between 1 and 5000 milliseconds");
+  const app = Fastify({
+    bodyLimit: 1_048_576,
+    requestTimeout: requestTimeoutMs,
+    connectionTimeout: requestTimeoutMs,
+  });
   const audit = options.audit ?? new MemoryAuditLog();
-  const fetcher = options.fetch ?? fetch;
+  const fetcher = boundedFetch(options.fetch ?? fetch, options.actionTimeoutMs);
+  const inFlight = new Map<string, { promise: Promise<void>; resolve: () => void }>();
+  const controllers = new Set<AbortController>();
+  const requestSignals = new WeakMap<FastifyRequest, AbortSignal>();
   app.setErrorHandler((error, request, reply) => {
     const requestId = String(reply.getHeader("x-request-id") ?? request.id);
     const result = toErrorEnvelope(error, requestId, options.environment ?? "production");
@@ -488,8 +520,42 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       reply.header("retry-after", String(error.retryAfterSeconds));
     void reply.status(result.status).send(result.body);
   });
-  app.addHook("onRequest", async (_request, reply) => {
-    reply.header("x-request-id", randomUUID());
+  app.addHook("onRequest", async (request, reply) => {
+    const requestId = randomUUID();
+    reply.header("x-request-id", requestId);
+    const controller = new AbortController();
+    controllers.add(controller);
+    requestSignals.set(request, controller.signal);
+    const timer = setTimeout(() => {
+      controller.abort();
+      if (!reply.raw.destroyed && !reply.raw.writableEnded) {
+        if (!reply.raw.headersSent) {
+          reply.header("connection", "close");
+          reply.raw.once("finish", () => request.raw.destroy());
+          void reply.status(503).send({
+            error: {
+              code: "UNAVAILABLE",
+              message: "Request deadline exceeded; outcome unknown; do not replay",
+              requestId,
+            },
+          });
+        } else reply.raw.destroy();
+      }
+    }, requestTimeoutMs);
+    timer.unref();
+    const aborted = () => controller.abort();
+    const closed = () => {
+      if (!reply.raw.writableEnded) controller.abort();
+      clearTimeout(timer);
+      controllers.delete(controller);
+      request.raw.off("aborted", aborted);
+      reply.raw.off("finish", closed);
+      reply.raw.off("close", closed);
+    };
+    request.raw.once("aborted", aborted);
+    reply.raw.once("finish", closed);
+    reply.raw.once("close", closed);
+    if (request.raw.aborted || reply.raw.destroyed) controller.abort();
   });
   const registration = (request: { headers: Record<string, string | string[] | undefined> }) =>
     bearer(
@@ -557,6 +623,36 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       scoped,
     ).filter((entry) => scopeAllows(principal, entry.appId, entry.target));
   const dispatchDeps: DispatchDeps = {
+    timeoutMs: options.actionTimeoutMs ?? 30_000,
+    completionTimeoutMs: auditCompletionTimeoutMs,
+    ...(options.admission
+      ? {
+          admission: {
+            async admit(record) {
+              let resolve!: () => void;
+              const promise = new Promise<void>((done) => {
+                resolve = done;
+              });
+              inFlight.set(record.requestId, { promise, resolve });
+              try {
+                await options.admission!.admit(record);
+              } catch (error) {
+                resolve();
+                inFlight.delete(record.requestId);
+                throw error;
+              }
+            },
+            async complete(record) {
+              try {
+                await options.admission!.complete(record);
+              } finally {
+                inFlight.get(record.requestId)?.resolve();
+                inFlight.delete(record.requestId);
+              }
+            },
+          },
+        }
+      : {}),
     ...(options.invocationToken ? { invocationToken: options.invocationToken } : {}),
     lookup: (appId) => {
       const registered = options.registry.get(appId);
@@ -574,9 +670,18 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       issueGatewayToken(principal, appId, requestId, options.token),
     audit,
   };
+  const hostError = (body: unknown, requestId: string): PublicError => {
+    const error = parseErrorEnvelope(body, requestId);
+    return options.admission && (error.code === "INTERNAL_ERROR" || error.code === "UNAVAILABLE")
+      ? { ...error, message: "Action outcome unknown; do not replay; inspect using request ID" }
+      : error;
+  };
   const mcpError = (error: PublicError): McpExecutionEvent => ({
     type: "error",
-    message: error.message,
+    message:
+      options.admission && (error.code === "INTERNAL_ERROR" || error.code === "UNAVAILABLE")
+        ? "Action outcome unknown; do not replay; inspect using request ID"
+        : error.message,
     code: error.code,
     requestId: error.requestId,
     ...(error.details === undefined ? {} : { details: error.details }),
@@ -594,7 +699,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     let prepared;
     try {
       prepared = await prepareDispatch(
-        { principal, appId: entry.appId, target: entry.target, requestId, surface: "mcp" },
+        { principal, appId: entry.appId, target: entry.target, requestId, surface: "mcp", signal },
         dispatchDeps,
       );
     } catch (error) {
@@ -606,7 +711,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     try {
       const response = await fetcher(new URL("/execute/stream", prepared.endpoint), {
         method: "POST",
-        signal,
+        signal: AbortSignal.any([signal, prepared.signal]),
         redirect: "error",
         headers: prepared.headers,
         body: JSON.stringify({ protocolVersion: 1, target: entry.target, input }),
@@ -618,17 +723,19 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         } catch {
           body = undefined;
         }
-        const error = parseErrorEnvelope(body, requestId);
+        const error = hostError(body, requestId);
         errorCode = error.code;
         yield mcpError(error);
         return;
       }
       for await (const event of parseExecutionStream(response.body, requestId)) {
+        if (prepared.signal.aborted || signal.aborted)
+          throw new UnavailableError("Action deadline exceeded; outcome unknown; do not replay");
         if (event.type === "progress") yield event;
         else if (event.type === "result") {
           outcome = "success";
           errorCode = undefined;
-          yield event;
+          yield { ...event, requestId };
         } else {
           errorCode = event.error.code;
           yield mcpError(event.error);
@@ -640,7 +747,13 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         errorCode = undefined;
         throw error;
       }
-      const publicError = publicErrorFrom(error, requestId);
+      if (options.admission) outcome = "unknown";
+      const publicError = publicErrorFrom(
+        options.admission
+          ? new UnavailableError("Action outcome unknown; do not replay; inspect using request ID")
+          : error,
+        requestId,
+      );
       errorCode = publicError.code;
       yield mcpError(publicError);
     } finally {
@@ -648,7 +761,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         outcome = "cancelled";
         errorCode = undefined;
       }
-      prepared.finish({ outcome, ...(errorCode === undefined ? {} : { errorCode }) });
+      await prepared.finish({ outcome, ...(errorCode === undefined ? {} : { errorCode }) });
     }
   };
   const mcpActor = options.mcp?.actor ?? "agent-on-behalf";
@@ -711,6 +824,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
   const mcpRoute = async (request: FastifyRequest, reply: FastifyReply) => {
     const principal = await authenticateSurface(request, reply, "mcp");
     const scoped = (request.params as { appId?: string }).appId;
+    if (requestSignals.get(request)?.aborted) throw new UnavailableError("Request cancelled");
     reply.hijack();
     await mcp.handle({
       request: request.raw,
@@ -726,17 +840,42 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     app.route({ method: ["GET", "POST", "DELETE"], url: route(url), handler: mcpRoute });
   // Fastify onClose runs after outstanding connections drain. Request-owned MCP
   // streams must close before that drain, otherwise shutdown can wait indefinitely.
-  app.addHook("preClose", async () => mcp.close());
-  app.addHook("onClose", async () => mcp.close());
+  app.addHook("preClose", async () => {
+    for (const controller of controllers) controller.abort();
+    await mcp.close();
+  });
+  app.addHook("onClose", async () => {
+    await mcp.close();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.all([...inFlight.values()].map((entry) => entry.promise)),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, 35_000);
+          timer.unref();
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  });
   app.post(route("/api/execute/stream/:appId/:target"), async (request, reply) => {
     const principal = await authenticateSurface(request, reply, "stream");
     const { appId, target } = request.params as { appId: string; target: string };
     const requestId = String(reply.getHeader("x-request-id"));
     const prepared = await prepareDispatch(
-      { principal, appId, target, requestId, surface: "stream" },
+      {
+        principal,
+        appId,
+        target,
+        requestId,
+        surface: "stream",
+        signal: requestSignals.get(request)!,
+      },
       dispatchDeps,
     );
     const controller = new AbortController();
+    controllers.add(controller);
     const clientClosed = () => {
       if (!reply.raw.writableEnded) controller.abort();
     };
@@ -749,13 +888,13 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
       const response = await fetcher(new URL("/execute/stream", prepared.endpoint), {
         method: "POST",
         redirect: "error",
-        signal: controller.signal,
+        signal: AbortSignal.any([controller.signal, prepared.signal]),
         headers: prepared.headers,
         body: JSON.stringify({ protocolVersion: 1, target, input: request.body }),
       });
       if (!response.ok || !response.body) {
         const body: unknown = await response.json().catch(() => undefined);
-        const error = parseErrorEnvelope(body, requestId);
+        const error = hostError(body, requestId);
         errorCode = error.code;
         reply.status(response.ok ? 502 : response.status);
         return { error };
@@ -769,7 +908,19 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         "x-request-id": requestId,
       });
       // Use the same bounded parser and public errors as MCP; never relay raw host errors.
-      for await (const event of parseExecutionStream(response.body, requestId)) {
+      for await (const remoteEvent of parseExecutionStream(response.body, requestId)) {
+        const event =
+          remoteEvent.type === "error" &&
+          options.admission &&
+          (remoteEvent.error.code === "INTERNAL_ERROR" || remoteEvent.error.code === "UNAVAILABLE")
+            ? {
+                ...remoteEvent,
+                error: {
+                  ...remoteEvent.error,
+                  message: "Action outcome unknown; do not replay; inspect using request ID",
+                },
+              }
+            : remoteEvent;
         if (event.type === "result") {
           outcome = "success";
           errorCode = undefined;
@@ -785,12 +936,21 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
             const done = () => {
               reply.raw.off("drain", done);
               reply.raw.off("close", done);
+              prepared.signal.removeEventListener("abort", timedOut);
+              controller.signal.removeEventListener("abort", timedOut);
               resolve();
+            };
+            const timedOut = () => {
+              reply.raw.destroy();
+              done();
             };
             reply.raw.once("drain", done);
             reply.raw.once("close", done);
+            prepared.signal.addEventListener("abort", timedOut, { once: true });
+            controller.signal.addEventListener("abort", timedOut, { once: true });
+            if (prepared.signal.aborted || controller.signal.aborted) timedOut();
           });
-        if (controller.signal.aborted) break;
+        if (controller.signal.aborted || prepared.signal.aborted) break;
       }
       return undefined;
     } catch (error) {
@@ -798,24 +958,29 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         outcome = "cancelled";
         errorCode = undefined;
       } else errorCode = publicErrorFrom(error, requestId).code;
+      if (options.admission && !controller.signal.aborted) outcome = "unknown";
+      const transportError = options.admission
+        ? new UnavailableError("Action outcome unknown; do not replay; inspect using request ID")
+        : error;
       if (hijacked) {
         if (!controller.signal.aborted && !reply.raw.destroyed)
           reply.raw.write(
-            `event: error\ndata: ${JSON.stringify({ error: publicErrorFrom(error, requestId) })}\n\n`,
+            `event: error\ndata: ${JSON.stringify({ error: publicErrorFrom(transportError, requestId) })}\n\n`,
           );
         return undefined;
       }
-      throw error;
+      throw transportError;
     } finally {
       if (controller.signal.aborted && outcome !== "success") {
         outcome = "cancelled";
         errorCode = undefined;
       }
       reply.raw.off("close", clientClosed);
+      controllers.delete(controller);
       if (hijacked) reply.raw.end();
       // Cleanup abort must not change failure into a client cancellation.
       controller.abort();
-      prepared.finish({ outcome, ...(errorCode === undefined ? {} : { errorCode }) });
+      await prepared.finish({ outcome, ...(errorCode === undefined ? {} : { errorCode }) });
     }
   });
   app.post(route("/api/execute/:appId/:target"), async (request, reply) => {
@@ -823,18 +988,30 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
     const { appId, target } = request.params as { appId: string; target: string };
     const principal = await authenticateSurface(request, reply, "http");
     const prepared = await prepareDispatch(
-      { principal, appId, target, requestId, surface: "http" },
+      {
+        principal,
+        appId,
+        target,
+        requestId,
+        surface: "http",
+        signal: requestSignals.get(request)!,
+      },
       dispatchDeps,
     );
     let outcome: AuditOutcome = "failure";
     let errorCode: PublicError["code"] | undefined = "INTERNAL_ERROR";
     const controller = new AbortController();
+    controllers.add(controller);
+    const clientClosed = () => {
+      if (!reply.raw.writableEnded) controller.abort();
+    };
+    reply.raw.once("close", clientClosed);
     request.raw.once("aborted", () => controller.abort());
     try {
       const response = await fetcher(new URL("/execute", prepared.endpoint), {
         method: "POST",
         redirect: "error",
-        signal: controller.signal,
+        signal: AbortSignal.any([controller.signal, prepared.signal]),
         headers: prepared.headers,
         body: JSON.stringify({ protocolVersion: 1, target, input: request.body }),
       });
@@ -847,7 +1024,7 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         outcome = "success";
         errorCode = undefined;
       } else {
-        const error = parseErrorEnvelope(body, requestId);
+        const error = hostError(body, requestId);
         errorCode = error.code;
         return { error };
       }
@@ -857,9 +1034,16 @@ export function createGateway(options: GatewayOptions): FastifyInstance {
         outcome = "cancelled";
         errorCode = undefined;
       } else errorCode = internalError(requestId).code;
+      if (options.admission)
+        throw new UnavailableError(
+          "Action outcome unknown; do not replay; inspect using request ID",
+        );
       throw error;
     } finally {
-      prepared.finish({ outcome, ...(errorCode === undefined ? {} : { errorCode }) });
+      controllers.delete(controller);
+      reply.raw.off("close", clientClosed);
+      controller.abort();
+      await prepared.finish({ outcome, ...(errorCode === undefined ? {} : { errorCode }) });
     }
   });
   return app;

@@ -25,7 +25,7 @@ await main("platform-prepare", async () => {
       )
     ).rows;
     if (
-      tables.length !== 3 ||
+      tables.length !== 5 ||
       tables.some((table) => table.tableowner !== decodeURIComponent(migration.username))
     )
       throw new Error("Platform maintenance role must own all platform tables");

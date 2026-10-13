@@ -24,7 +24,7 @@ export interface McpCatalogEntry {
 }
 export type McpExecutionEvent =
   | { readonly type: "progress"; readonly update: ProgressUpdate }
-  | { readonly type: "result"; readonly value: unknown }
+  | { readonly type: "result"; readonly value: unknown; readonly requestId?: string }
   | ({ readonly type: "error" } & McpErrorDetails);
 
 /** Public, already-sanitized error information relayed to MCP clients. */
@@ -110,8 +110,9 @@ export function mcpErrorResult(error: McpErrorDetails): CallToolResult {
     ...(Object.keys(meta).length === 0 ? {} : { _meta: meta }),
   };
 }
-export function mcpResult(value: unknown): CallToolResult {
+export function mcpResult(value: unknown, requestId?: string): CallToolResult {
   return {
+    ...(requestId === undefined ? {} : { _meta: { "embody/requestId": requestId } }),
     content: [{ type: "text", text: JSON.stringify(value) }],
     // MCP structured content must be an object. Keep text for older/plain clients and
     // preserve primitive/array results without inventing an incompatible wrapper.
@@ -250,7 +251,7 @@ export class McpHttpHandler<TContext> {
                   message: event.update.message,
                 },
               });
-          } else if (event.type === "result") terminal = mcpResult(event.value);
+          } else if (event.type === "result") terminal = mcpResult(event.value, event.requestId);
           else {
             terminal = mcpErrorResult(event);
           }

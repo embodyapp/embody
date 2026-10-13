@@ -4,6 +4,8 @@ import { hasPermission } from "@embody/cloud-contracts";
 import { AuthChain, createGateway, type GatewayOptions, type RegisteredApp } from "./index.js";
 import { credentialHash, type GatewayStore, type WorkspaceCredential } from "./store.js";
 import { publicSigningKeys } from "./identity.js";
+import { publicEndpointFetch } from "./safe-fetch.js";
+import { jsonLineAuditSink } from "./dispatch.js";
 
 interface RequestContext {
   credential: WorkspaceCredential;
@@ -40,6 +42,9 @@ export function createWorkspaceGateway(options: WorkspaceGatewayOptions) {
   };
   const gateway = createGateway({
     ...options,
+    admission: options.store,
+    fetch: options.fetch ?? publicEndpointFetch,
+    audit: options.audit ?? jsonLineAuditSink(),
     mcp: { actor: "agent-on-behalf" },
     environment: "production",
     catalogMaxAgeSeconds: 0,

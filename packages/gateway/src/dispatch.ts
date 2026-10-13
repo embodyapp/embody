@@ -142,16 +142,19 @@ export class SseFrameDecoder {
 
   public push(chunk: Uint8Array): readonly SseFrame[] {
     this.pending += this.decoder.decode(chunk, { stream: true });
-    if (this.pending.length > MAX_FRAME) throw new UnavailableError("Remote frame is too large");
     const frames: SseFrame[] = [];
     let boundary: number;
     while ((boundary = this.pending.indexOf("\n\n")) >= 0) {
       const frame = this.pending.slice(0, boundary);
+      if (Buffer.byteLength(frame) > MAX_FRAME)
+        throw new UnavailableError("Remote frame is too large");
       this.pending = this.pending.slice(boundary + 2);
       const event = /^event: (.+)$/m.exec(frame)?.[1];
       const data = /^data: (.+)$/m.exec(frame)?.[1];
       if (event && data) frames.push({ event, data });
     }
+    if (Buffer.byteLength(this.pending) > MAX_FRAME)
+      throw new UnavailableError("Remote frame is too large");
     return frames;
   }
 }
@@ -218,7 +221,12 @@ export async function* parseExecutionStream(
 // Audit
 // ---------------------------------------------------------------------------
 
-export type AuditOutcome = "success" | "failure" | "cancelled";
+export type AuditOutcome = "success" | "failure" | "cancelled" | "unknown";
+
+export interface DispatchAdmission {
+  admit(record: AuditRecord): Promise<void>;
+  complete(record: AuditRecord): Promise<void>;
+}
 
 export interface AuditRecord {
   readonly requestId: string;
@@ -281,6 +289,9 @@ export interface DispatchDeps {
   /** Provider identity token for the trusted catalog origin, independent of principal JWTs. */
   readonly invocationToken?: (origin: string) => Promise<string>;
   readonly audit: AuditSink;
+  readonly admission?: DispatchAdmission;
+  readonly timeoutMs?: number;
+  readonly completionTimeoutMs?: number;
   readonly now?: () => number;
 }
 
@@ -290,13 +301,18 @@ export interface DispatchContext {
   readonly target: string;
   readonly requestId: string;
   readonly surface: DispatchSurface;
+  readonly signal?: AbortSignal;
 }
 
 export interface PreparedDispatch {
   readonly endpoint: URL;
   readonly headers: Readonly<Record<string, string>>;
+  readonly signal: AbortSignal;
   /** Records the audit entry exactly once. */
-  finish(outcome: { readonly outcome: AuditOutcome; readonly errorCode?: EmbodyErrorCode }): void;
+  finish(outcome: {
+    readonly outcome: AuditOutcome;
+    readonly errorCode?: EmbodyErrorCode;
+  }): Promise<void>;
 }
 
 /**
@@ -309,11 +325,31 @@ export async function prepareDispatch(
 ): Promise<PreparedDispatch> {
   const now = deps.now ?? Date.now;
   const started = now();
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), deps.timeoutMs ?? 30_000);
+  timer.unref();
+  const signal = AbortSignal.any([timeout.signal, ...(context.signal ? [context.signal] : [])]);
+  const deadline = new Promise<never>((_resolve, reject) => {
+    const abort = () =>
+      reject(
+        new UnavailableError(
+          "Action deadline exceeded or cancelled; outcome unknown; do not replay",
+        ),
+      );
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+  });
+  void deadline.catch(() => undefined);
+  const bounded = <T>(operation: Promise<T>): Promise<T> => Promise.race([operation, deadline]);
   let finished = false;
-  const finish: PreparedDispatch["finish"] = ({ outcome, errorCode }) => {
+  let admitted = false;
+  let pendingAdmission: Promise<void> | undefined;
+  let intent: AuditRecord | undefined;
+  const finish: PreparedDispatch["finish"] = async ({ outcome, errorCode }) => {
     if (finished) return;
     finished = true;
-    deps.audit.append({
+    clearTimeout(timer);
+    const record: AuditRecord = {
       requestId: context.requestId,
       orgId: context.principal.orgId,
       appId: context.appId,
@@ -328,12 +364,40 @@ export async function prepareDispatch(
               : { client: context.principal.delegation.client }),
           }),
       surface: context.surface,
-      outcome,
+      outcome:
+        deps.admission &&
+        (outcome === "cancelled" || errorCode === "INTERNAL_ERROR" || errorCode === "UNAVAILABLE")
+          ? "unknown"
+          : outcome,
       ...(errorCode === undefined ? {} : { errorCode }),
       durationMs: now() - started,
-    });
+    };
+    if (admitted) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          deps.admission!.complete(record),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () => reject(new UnavailableError("Audit completion deadline exceeded")),
+              deps.completionTimeoutMs ?? 5_000,
+            );
+            timer.unref();
+          }),
+        ]);
+      } catch {
+        // A completion-store outage cannot undo a known host result or erase its ID.
+        // The committed intent remains unknown; emit sanitized correlation metadata.
+        deps.audit.append({ ...record, outcome: "unknown", errorCode: "UNAVAILABLE" });
+        return;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    deps.audit.append(record);
   };
   try {
+    if (signal.aborted) throw new UnavailableError("Action cancelled before dispatch");
     const registered = deps.lookup(context.appId);
     if (!registered || registered.status !== "healthy")
       throw new UnavailableError(`${context.appId} is temporarily unavailable`);
@@ -345,13 +409,39 @@ export async function prepareDispatch(
       `${context.principal.orgId}:${context.principal.actorId}:${context.appId}:${context.target}`,
     );
     if (retry !== undefined) throw new DispatchRateLimitedError(retry);
+    if (deps.admission) {
+      intent = {
+        requestId: context.requestId,
+        orgId: context.principal.orgId,
+        actorId: context.principal.actorId,
+        appId: context.appId,
+        target: context.target,
+        surface: context.surface,
+        ...(context.principal.delegation
+          ? {
+              subjectId: context.principal.delegation.subjectId,
+              ...(context.principal.delegation.client
+                ? { client: context.principal.delegation.client }
+                : {}),
+            }
+          : {}),
+        outcome: "unknown",
+        durationMs: 0,
+      };
+      pendingAdmission = deps.admission.admit(intent);
+      await bounded(pendingAdmission);
+      admitted = true;
+    }
     const endpoint = new URL(registered.endpoint);
-    const invocationToken = await deps.invocationToken?.(endpoint.origin);
+    const invocationToken = await bounded(Promise.resolve(deps.invocationToken?.(endpoint.origin)));
     if (invocationToken !== undefined && (!invocationToken || /\s/.test(invocationToken)))
       throw new UnavailableError("Invalid provider invocation token");
-    const token = await deps.issueToken(context.principal, context.appId, context.requestId);
+    const token = await bounded(
+      deps.issueToken(context.principal, context.appId, context.requestId),
+    );
     return {
       endpoint,
+      signal,
       headers: {
         "content-type": "application/json",
         "x-request-id": context.requestId,
@@ -361,7 +451,15 @@ export async function prepareDispatch(
       finish,
     };
   } catch (error) {
-    finish({
+    if (!admitted && pendingAdmission && intent) {
+      // Admission may commit after our deadline/cancellation. Never dispatch it; drain
+      // its eventual unknown completion instead of leaking a process-owned reservation.
+      const late = intent;
+      void pendingAdmission
+        .then(() => deps.admission!.complete({ ...late, durationMs: now() - started }))
+        .catch(() => undefined);
+    }
+    await finish({
       outcome: "failure",
       errorCode: error instanceof EmbodyError ? error.code : "INTERNAL_ERROR",
     });
