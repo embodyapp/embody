@@ -18,9 +18,7 @@
   "images": [],
   "client": "2.1.296 (Claude Code)",
   "sdk": "1.32.1",
-  "models": [
-    "claude-haiku-5-5"
-  ],
+  "models": ["claude-haiku-5-5"],
   "environment": "local synthetic hosted gateway + authenticated host",
   "gatewayReplacement": true,
   "idle": {
