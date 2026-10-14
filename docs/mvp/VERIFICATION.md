@@ -9,7 +9,7 @@
 - Missing required DB/cloud credentials must fail the selected gate, not silently skip it. Local unit suites may explicitly skip optional environments, but cannot satisfy release gates.
 - Tests use injected clocks/barriers for determinism. Real cloud scale-down uses bounded observation of provider metrics, not an arbitrary sleep followed by an assumption.
 - Evidence must not include tokens, connection strings, source secrets or customer payloads.
-- M03 implements the local/CI runners documented in [TESTING.md](./TESTING.md). Later tasks extend their explicit suite list. The cloud entry point fails closed until actual M09–M17 qualification suites exist; a runnable prerequisite gate is not cloud qualification.
+- M03 implements the local/CI runners documented in [TESTING.md](./TESTING.md). Later tasks extend their explicit suite list. The cloud entry point fails closed until actual M09–M17 and M19–M21 qualification suites exist; a runnable prerequisite gate is not cloud qualification.
 
 ## Test layers and commands
 
@@ -45,10 +45,14 @@ All of the following must pass before M17/M18 are DONE:
 | V12 | Failed update, concurrent update, cancel and rollback | Previous app remains usable; one winning generation; incompatible rollback rejected | M13 |
 | V13 | Revoke key, rotate signing/app secret, disable/delete during deploy | Revocation within bound; no stale job resurrection; no secret output | M05/M15 |
 | V14 | Restore/export one app | Data checksums restored, old binding fenced, other workspace unchanged | M16 |
-| V15 | Unsupported background/local-state fixtures | Declared unsupported features rejected; outbox treatment bounded and documented | M08 |
+| V15 | Unsupported cron/local-state fixtures; events/workflows under request-only profile | Rejected with actionable errors; request-only outbox treatment bounded and documented | M08/M20 |
 | V16 | Restart/replica switching after quota use or pending audit | Counters not reset; committed audit intent survives, interrupted outcome remains unknown | M07 |
 | V17 | Idle observation while deployment worker/maintenance runs | No recurring gateway/app wake solely for maintenance; deployment survives gateway zero | M12/M16/M17 |
 | V18 | Cost/latency/operating review | Measured budget and supported-client limits, recovery and customer-data approvals | M09/M16–M18 |
+| V19 | Publish an event with gateway and apps at zero | Only the gateway and subscribing apps wake; each subscriber handles it once; unrelated apps stay asleep | M20/M21/M17 |
+| V20 | Workflow with a delayed step, everything idle | No wake before the due time; step runs once when due; status/cancel/retry via CLI and MCP | M19/M20/M17 |
+| V21 | Crash mid-step, mid-delivery and between enqueue/commit | No lost work, no duplicate effect in the ledger; failures dead-letter visibly | M19–M21 |
+| V22 | Queue outage, cross-workspace subscription, forged drain/delivery | Writes fail closed; foreign and forged calls rejected; no app woken by denied work | M20/M21 |
 
 ## Scale-to-zero measurement protocol
 
@@ -88,9 +92,9 @@ No secrets in command lines or evidence. If an acceptance case is not executed, 
 
 M18 requires:
 
-- All M01–M17 accepted, with evidence for every applicable case on the final candidate.
+- All M01–M17 and M19–M21 accepted, with evidence for every applicable case on the final candidate.
 - Workspace regression, real Postgres, packed consumer, distributed E2E and MVP suites passing; zero required skips.
-- Real-cloud V04–V06 and V17 evidence, not configuration-only claims.
+- Real-cloud V04–V06, V17, V19 and V20 evidence, not configuration-only claims.
 - Verified access isolation, mutation ambiguity handling, deploy recovery, rollback, revocation and restore.
 - Approved budget, workload limits, supported client/version, support responsibility, terms/privacy and data retention.
 - An explicit owner decision to release the invite-only candidate. No automatic claim of general availability or completion of broader P11–P15/hosting plans.

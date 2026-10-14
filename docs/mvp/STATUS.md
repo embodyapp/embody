@@ -1,6 +1,6 @@
 # Minimal hosted MVP status
 
-**Last updated: 2026-10-14. M01–M08 are DONE (8/18). M05 has accepted live IAM/SQL/ingress/rotation proof and cleanup. M06 has accepted stateless/client/idle proof. M07 has accepted safe dispatch, shared PostgreSQL quotas/durable audit, ambiguity/effect-ledger/failure-injection evidence, independent code/final acceptance and exact-candidate Node22/24 CI. M08 has accepted hosted request-only runtime, zero-retention generated notifications, real-DB boot/atomicity/termination proof, packed request-only scaffold, independent final acceptance and exact-candidate Node22/24 CI. Broader G1/production provider/secure hosted release qualification, billing invoice and M09–M18 remain open.**
+**Last updated: 2026-10-14. M01–M08 are DONE (8/21). Scope change 2026-10-14: events, subscriptions and durable workflows are now in the MVP (M19–M21 added; M09, M11–M18 amended). M05 has accepted live IAM/SQL/ingress/rotation proof and cleanup. M06 has accepted stateless/client/idle proof. M07 has accepted safe dispatch, shared PostgreSQL quotas/durable audit, ambiguity/effect-ledger/failure-injection evidence, independent code/final acceptance and exact-candidate Node22/24 CI. M08 has accepted hosted request-only runtime, zero-retention generated notifications, real-DB boot/atomicity/termination proof, packed request-only scaffold, independent final acceptance and exact-candidate Node22/24 CI. Broader G1/production provider/secure hosted release qualification, billing invoice and M09–M21 remain open.**
 
 Scope: [README](./README.md). Tasks and acceptance cases: [IMPLEMENTATION](./IMPLEMENTATION.md). Required evidence: [VERIFICATION](./VERIFICATION.md).
 
@@ -27,7 +27,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | M06 | Stateless MCP and supported client contract | M04, M05 | DONE | pi | [#38](https://github.com/embodyapp/embody/pull/38), [evidence](./evidence/M06-2026-10-13.md), [contract](./MCP.md); frozen `89aaac4`, exact-tree [CI38445328639](https://github.com/embodyapp/embody/actions/runs/38445328639) all9 green; final reviewed evidence `a5142ab` [CI38446730467](https://github.com/embodyapp/embody/actions/runs/38446730467) all9 green. Both Node22/24 mandatory182/zero skips and packed/E2E; real Claude Code2.1.296 directHTTP/replica replacement, 120s live idle zero requests/responses/sockets, plain CLI passed. [Independent acceptance](./evidence/M06-89aaac4/independent-final-review.md), bookkeeping conditions satisfied. No cross-replica notification, durable audit or cloud-zero proof; PR remains stacked/unmerged |
 | M07 | Safe dispatch, quotas and durable audit | M04, M05, M06 | DONE | pi | [#39](https://github.com/embodyapp/embody/pull/39); frozen11f56b9 [CI38455216022](https://github.com/embodyapp/embody/actions/runs/38455216022) all9 green; [independent final acceptance](./evidence/M07-11f56b9/independent-final-review.md). Final reviewed evidence e818cf6 [CI38457329977](https://github.com/embodyapp/embody/actions/runs/38457329977) all9 green; Node22/24 mandatory270/zero skips (gateway-store43), quality359/optional11 + runner36 and packed/E2E. [Artifacts/cleanup/residuals](./evidence/M07-2026-10-13.md), [final status audit](https://github.com/embodyapp/embody/pull/39#issuecomment-6153752529); accepted/unmerged stack, no M08/M17/provider/release claim |
 | M08 | Request-only sleep-safe host/scaffold | M02, M03, M05 | DONE | pi | [#40](https://github.com/embodyapp/embody/pull/40); frozen3e1f268 [CI38535915385](https://github.com/embodyapp/embody/actions/runs/38535915385) all9 green; [independent final acceptance](./evidence/M08-3e1f268/independent-final-review.md) after [initial rejection](./evidence/M08-3e1f268/initial-code-review-587d74a.md) (B1 session-termination crash fixed/regression-tested). Node22/24 m08 122, mandatory295, gateway-store43, postgres16 all zero skips, packed request-only scaffold and baselines. [Contract](./RUNTIME.md), [evidence/residuals](./evidence/M08-local.md); accepted/unmerged stack, no cloud-zero/provider/release claim |
-| M09 | Cloud/database qualification and costs | M03, M05, M08 | NOT_STARTED | — | Provider database, region and budget decisions below |
+| M09 | Cloud/database/queue qualification and costs | M03, M05, M08 | NOT_STARTED | — | Provider database, region, budget and wake-queue (Cloud Tasks) decisions below |
 | M10 | Authenticated safe source admission | M02, M04, M05, M09 | NOT_STARTED | — | — |
 | M11 | Isolated build and artifact admission | M08, M09, M10 | NOT_STARTED | — | — |
 | M12 | Durable deployment controller/recovery | M04, M09, M10, M11 | NOT_STARTED | — | — |
@@ -35,10 +35,13 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | M14 | Packed CLI deploy/control journey | M06, M10, M12, M13 | NOT_STARTED | — | — |
 | M15 | Logs/secrets/lifecycle controls | M07, M13, M14 | NOT_STARTED | — | — |
 | M16 | Recovery/operations/customer-data readiness | M07, M09, M13, M15 | NOT_STARTED | — | Includes manual accountable approvals |
-| M17 | Real zero-instance and centralized-control proof | M03–M16 | NOT_STARTED | — | Requires actual cloud/client evidence |
-| M18 | Candidate review and controlled release | M01–M17 | NOT_STARTED | — | Owner release decision required |
+| M17 | Real zero-instance and centralized-control proof | M03–M16, M19–M21 | NOT_STARTED | — | Requires actual cloud/client evidence, including event and delayed-step wakes |
+| M18 | Candidate review and controlled release | M01–M17, M19–M21 | NOT_STARTED | — | Owner release decision required |
+| M19 | Workflow engine gates for hosted use | M03, M08 | NOT_STARTED | — | Closes framework P11-02 (crash/cancellation matrix, runtime-role claims) and P11-03 (CLI/MCP workflow journey); can start now |
+| M20 | Queue-woken durable runtime | M08, M19 (local); M09, M12 (real queue) | NOT_STARTED | — | Durable profile, enqueue-before-commit, platform-only drain endpoint |
+| M21 | Gateway event relay and subscriptions | M04, M05, M07, M12, M13, M20 | NOT_STARTED | — | ADR 0004 relay transport; same-workspace subscriptions |
 
-**Completed implementation tasks: 8 / 18.** Existing framework code is a foundation, not proof these hosted acceptance cases have passed. Update this count when task states change.
+**Completed implementation tasks: 8 / 21.** Existing framework code is a foundation, not proof these hosted acceptance cases have passed. Update this count when task states change.
 
 ## Decision ledger
 
@@ -46,27 +49,33 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 |---|---|---|---|---|
 | MD01 | User CLI deploy; centralized CLI/MCP control | ACCEPTED | Owner conversation | README product promise |
 | MD02 | Gateway and apps must reach zero instances | ACCEPTED | Owner conversation | Mandatory M17/V04–V06/V17, no warm-instance correctness dependency |
-| MD03 | Narrow request-driven profile; background jobs/workflows and GenUI excluded | ACCEPTED-SCOPE | Owner conversation | Does not mark broader framework gates complete |
-| MD04 | Cloud Run runtime, one region | BASELINE | M09 owner | Confirm region/project/quota and actual controls before deployment |
-| MD05 | Managed PostgreSQL provider and backup tier | OPEN | M09 owner | Qualify Neon versus Cloud SQL; no free-tier production assumption |
-| MD06 | Monthly ceiling and resource/cold-latency limits | OPEN | Owner + M09 | Approve before real cloud test spend; alerts are not hard caps |
+| MD03 | Narrow request-driven profile; GenUI and cron excluded | REVISED 2026-10-14 | Owner conversation | Originally excluded background jobs/workflows. Revised: events, subscriptions and durable workflows are in scope (M19–M21); cron, app-to-app RPC and GenUI remain excluded |
+| MD04 | Cloud Run runtime, one region | DECIDED | Owner delegated 2026-10-14 | **us-central1**, project `embody-cloud`: same region already proven in M05 and among the lowest-priced Cloud Run/Cloud SQL regions. Confirm quotas and actual controls in M09 |
+| MD05 | Managed PostgreSQL provider and backup tier | DECIDED | Owner approved 2026-10-14 | **Cloud SQL for PostgreSQL** in `us-central1`, one shared small instance with a separate database and least-privilege roles per app (no instance per app), so it fits the $50/month ceiling. Same cloud as Cloud Run and already proven in M05. Neon is the fallback if M09 shows Cloud SQL misses the cost or latency targets; Supabase rejected (overlaps Embody auth/API, cross-cloud). Backup tier chosen in M09; no free-tier production assumption |
+| MD06 | Monthly ceiling and resource/cold-latency limits | DECIDED | Owner approved 2026-10-14 (latency delegated) + M09 | **Ceiling: $50/month** for the running MVP (all fixed and variable charges: database, Cloud Run, queue, images, storage, backups, network, logs); budget alerts at 50/80/100% are not hard caps. **One-off M09 qualification budget: $25.** **Cold-latency targets (p95, measured in M09/M17):** gateway-only cold discovery ≤ 3 s; gateway + app cold action ≤ 6 s with the database warm; ≤ 10 s if the database itself was idle/suspended; warm action gateway overhead ≤ 300 ms. MVP targets: missing them is recorded and improved later, it does not block release unless the existing 30 s action deadline is exceeded |
 | MD07 | First supported token-capable MCP client/version | DECIDED | M06 owner | Claude Code **2.1.296 direct HTTP**, SDK1.32.1/protocol2025-11-25; [clean-candidate real transcript](./evidence/M06-89aaac4/real-client.json), two calls across replicas/replacement, 120s live idle zero requests/responses/sockets and plain CLI. Other versions/stdio/desktop/GenUI unqualified |
-| MD08 | Request-only generated-CRUD outbox semantics | DECIDED | pi / M08 | [Explicit zero retention](./RUNTIME.md#outbox-decision-zero-retained-generated-notifications) for generated notifications; entity/hooks remain atomic, custom publishing fails, legacy work must be settled before migration. Accepted with M08 ([final review](./evidence/M08-3e1f268/independent-final-review.md)) |
+| MD08 | Request-only generated-CRUD outbox semantics | DECIDED | pi / M08 | [Explicit zero retention](./RUNTIME.md#outbox-decision-zero-retained-generated-notifications) for generated notifications; entity/hooks remain atomic, custom publishing fails, legacy work must be settled before migration. Accepted with M08 ([final review](./evidence/M08-3e1f268/independent-final-review.md)). Still holds for the request-only profile; the durable profile (M20) retains events per ADR 0004 |
 | MD09 | Isolated build provider/recipe and runtime network controls | OPEN | M09/M11 owner | Negative IAM/network/build tests required for user source |
 | MD10 | Customer-data retention/restore/support/terms | OPEN | Owner + M16 | Approve before any customer data; manual decisions need evidence |
+| MD11 | Hosted event transport | DECIDED | Owner approved 2026-10-14 | Gateway relay (ADR 0004 P7-04): hosted apps cannot reach each other directly; centralised auth, retries and dead letters |
+| MD12 | Recovery of lost wake-ups | DECIDED | Owner approved 2026-10-14 | Enqueue before commit with deterministic names; enqueue failure aborts the write; queue retries outlast transactions; overdue work re-enqueued after any inbound request. No periodic sweep, so strict idle zero holds |
+| MD13 | Cron/scheduled jobs | EXCLUDED | Owner approved 2026-10-14 | Not requested; cheap follow-up once M20 exists (Cloud Scheduler to the drain endpoint) |
+| MD14 | Durable work limits | DECIDED | Owner approved 2026-10-14 | Step duration ≤ the 30 s action deadline; delay ≤ 30 days (Cloud Tasks limit); event envelope ≤ 256 KiB; delivery/inbox retention 30 days |
 
 ## Milestone gates
 
 | Gate | Required tasks | State | Evidence |
 |---|---|---|---|
 | G0: integrated baseline/contracts/tests | M01–M03 | PASSED | M01–M03 accepted; #33/#34/#35 evidence. Later release candidates must rerun exact integrated gates; no cloud/release approval. |
-| G1: secure persistent request-only gateway/runtime | M04–M09 | NOT_EVALUATED | — |
-| G2: user-operated deploy and management | M10–M15 | NOT_EVALUATED | — |
+| G1: secure persistent gateway/runtime | M04–M09, M19, M20 | NOT_EVALUATED | — |
+| G2: user-operated deploy, events and management | M10–M15, M21 | NOT_EVALUATED | — |
 | G3: recoverable operated candidate | M16 | NOT_EVALUATED | — |
 | G4: actual scale-to-zero, isolation and client proof | M17 | NOT_EVALUATED | — |
 | G5: invite-only release approved | M18 | NOT_EVALUATED | — |
 
 ## Activity log
+
+- 2026-10-14 — claude — Scope change — owner decided events, subscriptions and durable workflows are part of the MVP. MD03 revised; MD11–MD14 recorded with recommended defaults, then approved by the owner the same day. Added M19 (workflow engine gates), M20 (queue-woken durable runtime) and M21 (gateway event relay); amended M09 (wake-queue qualification), M11 (manifest), M12 (shared queue), M13 (workflow version retention, subscription binding), M14–M17 and M18 dependencies; added V19–V22. README promise, exclusions and scale-to-zero rule 13 updated. M08 stays DONE: its request-only profile remains supported and the durable profile extends it. No code changed. Task count 8/21.
 
 - 2026-10-14 — claude — M08 — IN_REVIEW → DONE — `feat/mvp-m08-request-only`, [#40](https://github.com/embodyapp/embody/pull/40) stacked on accepted/unmerged #39. pi's implementation committed as `587d74a`; its [CI38532322030](https://github.com/embodyapp/embody/actions/runs/38532322030) failed (packed scaffold `npm install` crash under npm 10; not counted), fixed by `157d90b` (npm@11 as in packed baseline). [Initial independent review](./evidence/M08-3e1f268/initial-code-review-587d74a.md) rejected B1: hosted idle-in-transaction termination emitted an unhandled pg `error` and crashed the instance (reproduced). `3e1f268` holds checkout-lifetime client listeners, discards broken clients, guards idle pool errors, adds a real-PostgreSQL subprocess regression (fails on old code) and pins hosted pool limits (N1). [Independent final review](./evidence/M08-3e1f268/independent-final-review.md) accepts M08.a–d and re-verified the B1 fix. Exact candidate `3e1f2686d0f2600d6c33b10898f97039e3f9b015` [CI38535915385](https://github.com/embodyapp/embody/actions/runs/38535915385) all9 green; Node22/24 m08 122, mandatory295, gateway-store43, postgres16 all zero skips, packed request-only scaffold and baselines ([artifacts](./evidence/M08-3e1f268/)). Local Node22/24 m08 122/zero skips; Node24 lint/typecheck/api-report/format/verification pass, test380/16 optional DB skips. Evidence rebound to the frozen SHA (N7); N2–N6, N8, N9 recorded as [residuals](./evidence/M08-local.md). Owned fixture/network removed; shared `embody-local-*` services untouched. MD08 decided. No main merge, cloud-zero, provider or human release approval claimed. 8/18 tasks DONE.
 
