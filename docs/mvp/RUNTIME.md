@@ -1,5 +1,12 @@
 # Hosted request-only runtime (M08)
 
+> **Scope change 2026-10-14:** events, subscriptions and durable workflows are now part
+> of the hosted MVP. They will run in a separate hosted *durable* profile (M20, with
+> M19 and M21) that is woken by queue tasks instead of workers. This request-only
+> profile stays supported unchanged. Where this page says such apps "must use reference
+> mode", read that as "until the durable profile lands". See
+> [README](./README.md) and [IMPLEMENTATION](./IMPLEMENTATION.md#m20--queue-woken-durable-runtime).
+
 `EMBODY_HOST_PROFILE=hosted` selects the request-only host; the default `reference`
 profile retains the existing self-hosted registration, heartbeat, event and workflow
 workers. Hosted runtime requires Node 22.x or 24.x, production, PostgreSQL runtime

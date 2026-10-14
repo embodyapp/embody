@@ -163,12 +163,14 @@ Steps:
 4. Enforce ingress and network/identity containment. If the provider configuration cannot contain user code at the documented boundary, block user deployment rather than calling review a sandbox.
 5. Configure secrets, images, source storage, backups and lifecycle limits. Bound builds/logs/storage and set alerts plus an emergency admission stop.
 6. Record price assumptions, quotas, domain/egress/fixed-cost line items and approved monthly ceiling. No unsupported free-tier/SLA promise.
+7. Qualify the wake queue (Cloud Tasks): OIDC invoker identity bound to platform/app audiences, deterministic task names and their de-duplication window, schedule time up to 30 days, retry/backoff ceilings that outlast the longest transaction, per-workspace queue quotas, outage behavior and cost.
 
 Acceptance:
 - **M09.a:** fresh IaC apply creates a usable baseline; teardown removes only owned test resources.
 - **M09.b:** app A raw SQL/metadata/network probes cannot access B or the platform; builder has no production credentials.
 - **M09.c:** selected PostgreSQL passes storage/RLS/role tests, connection-storm test and a preliminary restore; cold connection latency recorded.
 - **M09.d:** inspect actual service/revision min/max settings and confirm a disposable request-only service reaches zero. Baseline cost worksheet reviewed by owner.
+- **M09.e:** a task scheduled for later wakes a disposable service at zero only when due; duplicate task names are rejected; a caller without the platform invoker identity cannot invoke; queue cost and quota are in the worksheet.
 
 Docs: provider/database decision, IaC commands, limits and costs. Evidence: real-cloud IAM/SQL/instance traces, sanitized config and dated pricing links.
 
@@ -196,7 +198,7 @@ Docs: packaging exclusions, supported files, upload errors and source retention.
 Steps:
 1. Use one pinned build recipe/runtime, frozen lockfile and bounded build resources; no arbitrary customer Dockerfiles.
 2. Run dependency scripts, app config and manifest extraction only inside isolated unprivileged jobs with staging-only permissions and network restrictions.
-3. Validate output manifest/profile/schema and digest using trusted code outside the build; bind artifact to workspace/source/deployment. Scans/provenance are not proof the code is harmless.
+3. Validate output manifest/profile/schema and digest using trusted code outside the build; bind artifact to workspace/source/deployment. The manifest includes the hosted profile, published event names, subscriptions and versioned workflow definitions (M19–M21). Scans/provenance are not proof the code is harmless.
 4. Admit digest-addressed images with provenance/SBOM/vulnerability policy; trusted signing/admission never executes customer output with elevated credentials.
 5. Persist logs/status with bounded retention and cleanup of failed/orphaned artifacts.
 
@@ -217,6 +219,7 @@ Steps:
 3. Authorize/validate workspace, epoch and current job at each privileged transition; bind provider resource names and endpoints from platform records.
 4. Make provisioning/build references idempotent; serialize promotions per app. Cancellation prevents later promotion; orphan cleanup verifies ownership.
 5. Set a tested reconciliation interval, retry ceiling, timeout and visible terminal failure policy.
+6. Build the queue/task adapter and authenticated task ingress as shared infrastructure; M20 and M21 reuse it for app wakes and event relay rather than adding a second queue path.
 
 Acceptance:
 - **M12.a:** kill after commit/before enqueue, after resource creation/before receipt and before task ACK; reconciliation reaches one active logical deployment without lost jobs.
@@ -236,12 +239,14 @@ Steps:
 3. Validate candidate manifest, readiness and authorized side-effect-free smoke; atomically switch active route/manifest only on success.
 4. Keep previous release serving after failed build/check; drain existing calls with clear generation semantics. Retain rollback images/config references.
 5. Permit compatible rollback by digest/config with fresh checks; fail safely if schema or secret compatibility prevents it.
+6. Bind subscriptions and workflow definitions with the route/manifest switch. Keep every workflow definition version that still has running instances available after promotion or rollback; refuse a release that drops one.
 
 Acceptance:
 - **M13.a:** first deploy registers the app; update switches route and manifest together without mixed catalogs across gateway instances.
 - **M13.b:** failed readiness/compatible migration attempt leaves old route usable; rejected destructive migration does not modify production data.
 - **M13.c:** two concurrent promotions and stale/cancelled worker cannot overwrite the winning generation.
 - **M13.d:** rollback restores previous code with data intact where compatible; incompatible rollback gives explicit refusal.
+- **M13.e:** an instance started on workflow v1 completes on v1 after v2 is promoted; a release removing v1 while instances run is refused; subscriptions switch with the active generation.
 
 Docs: deploy/rollback semantics, migration restrictions, recovery and retention. Evidence: real Cloud Run candidate/promotion/rollback tests with data checksums.
 
@@ -256,7 +261,7 @@ Steps:
 4. Return gateway/MCP setup instructions, never secret values. Keep all platform calls through the central gateway API.
 
 Acceptance:
-- **M14.a:** external packed CLI consumer creates/deploys scaffold, reconnects by ID, discovers app and executes CRUD without operator intervention after account provisioning.
+- **M14.a:** external packed CLI consumer creates/deploys scaffold, reconnects by ID, discovers app and executes CRUD without operator intervention after account provisioning. A durable scaffold variant starts a workflow and reads its status through CLI.
 - **M14.b:** malformed source, build failure, missing scope, stale key and cold timeout have stable exits and actionable errors.
 - **M14.c:** workspace URL prefixes work; credentials/source secrets never appear in stdout/stderr or routine telemetry.
 
@@ -272,12 +277,14 @@ Steps:
 3. Disable admission immediately under the revocation bound; fence queued deployments so they cannot silently re-enable a disabled/deleted app.
 4. Require explicit delete confirmation; stop traffic, revoke runtime credentials, apply documented data/source/image/backup retention, and retain minimal audit.
 5. Provide an operator global/workspace emergency stop that does not delete data or block authorized export/recovery.
+6. Provide authorized CLI/MCP operations for workflows (status, cancel, retry) and event deliveries (list dead letters, retry, purge). Disable/delete stops new deliveries and cancels or compensates running workflows; queued tasks for a disabled app are fenced.
 
 Acceptance:
 - **M15.a:** foreign workspace and app-caller credentials cannot read logs, mutate secrets or manage app lifecycle.
 - **M15.b:** secret rotation reaches new calls without leaking values; old access is revoked within the documented bound.
 - **M15.c:** disable/delete versus in-flight deploy/retry cannot resurrect service; data retention and deletion receipts match policy.
 - **M15.d:** excessive logs and log query requests are bounded and attributable to the correct workspace.
+- **M15.e:** dead-lettered delivery retried by an authorized operator delivers once; foreign workspace cannot see or retry it; disabling an app with a delayed step and pending deliveries prevents both from running.
 
 Docs: management reference, revocation/rotation, deletion and emergency runbook. Evidence: lifecycle race and authorization tests.
 
@@ -288,7 +295,7 @@ Docs: management reference, revocation/rotation, deletion and emergency runbook.
 Steps:
 1. Configure backups and test app-scoped restore to a new binding. Fence old runtimes/connections during cutover; do not affect unrelated apps.
 2. Provide authorized export and operator recovery/deletion procedures; define retention, recovery targets and limitations based on measurements.
-3. Exercise bad deploy, DB outage, compromised key, abusive app and budget-overrun admission stop. Monitor through provider metrics, not recurring gateway/app pings.
+3. Exercise bad deploy, DB outage, queue outage, dead-letter growth, compromised key, abusive app and budget-overrun admission stop. Monitor through provider metrics, not recurring gateway/app pings.
 4. Close applicable packaging, dependency, license/ownership, beta/privacy and support gates with named accountable approval. No implied SLA or legal certification.
 
 Acceptance:
@@ -300,7 +307,7 @@ Docs: recovery measurements, incident runbooks, customer limitations and approva
 
 ## M17 — Real scale-to-zero and centralized-control proof
 
-**Depends on:** M03–M16. **Areas:** `test:mvp:cloud` implementation, cloud metrics and support matrix.
+**Depends on:** M03–M16, M19–M21. **Areas:** `test:mvp:cloud` implementation, cloud metrics and support matrix.
 
 Steps:
 1. Run the exact packaged CLI/image/IaC candidate with two workspaces and at least two apps in one workspace.
@@ -308,22 +315,24 @@ Steps:
 3. Execute the complete release journey in VERIFICATION.md with gateway-only cold and both-cold cases, from CLI and the supported real MCP client.
 4. Measure at least 20 cold trials where actual zero state is evidenced; separate DB warm/cold, platform idle retention and billed usage. Record p50/p95 and failures against M09-approved budgets.
 5. Inject replacement, store outage, ambiguous mutation and denied cross-workspace calls. Record costs, quotas, test teardown and supported idle behavior.
+6. Run the Kanban → Email durable journey: moving a card publishes an event that wakes only the subscriber, which sends one idempotent notification; a workflow with a delayed step resumes at its due time while gateway and apps are at zero.
 
 Acceptance:
 - **M17.a:** actual zero gateway/apps; authenticated discovery wakes gateway only; an authorized action wakes only its app.
 - **M17.b:** data/catalog/credentials/audit/quotas survive replacement; failed cold store access is unavailable, never permissive.
 - **M17.c:** CLI and real MCP journey succeed within approved deadlines without sticky sessions or duplicate writes; denied calls wake no apps.
 - **M17.d:** failed deployment/rollback/revocation and all isolation cases pass; no required test is skipped. Cost report includes fixed and variable charges.
+- **M17.e:** event and delayed-step wakes observed from actual zero with provider metrics; unrelated apps stay asleep; an instance killed mid-step or mid-delivery recovers with one effect in the ledger.
 
 Docs: dated support matrix, cold-latency/cost report and reproduction steps. Evidence: real provider metrics/logs, run IDs, exact hashes and effect ledgers.
 
 ## M18 — Candidate review and controlled release
 
-**Depends on:** M01–M17. **Areas:** release checklist and status.
+**Depends on:** M01–M17, M19–M21. **Areas:** release checklist and status.
 
 Steps:
 1. Review traceability from every requirement to acceptance cases and candidate evidence; rerun relevant gates after code/infra changes.
-2. Ensure every task is DONE with reviewer/evidence and no expired high-risk exceptions. Avoid unsupported GenUI/background-work/SLA claims in docs or landing content.
+2. Ensure every task is DONE with reviewer/evidence and no expired high-risk exceptions. Avoid unsupported GenUI/cron/long-running-step/SLA claims in docs or landing content.
 3. Onboard one design partner with provisioned credentials; observe user-operated deployment and CLI/MCP control. Record rollback/stop decision and support contact.
 4. Tag candidate artifacts and record a release decision; public/general-availability work remains separate.
 
@@ -332,3 +341,65 @@ Acceptance:
 - **M18.b:** first partner completes supported journey; owner approves the exact candidate, limits, costs and residual risks.
 
 Docs: final release record and next backlog. Evidence: reviewed checklist and dated owner decision. Manual approval is required; tests alone cannot approve customer terms or launch.
+
+---
+
+# Scope change 2026-10-14: events, subscriptions and durable workflows
+
+Owner decision (MD03 revised, MD11–MD14): the hosted MVP includes ADR 0003 workflows and ADR 0004 events. The framework engines are reused; only their trigger changes from in-process polling to queue tasks that wake the app when work is due. M08's request-only profile stays supported and accepted; the durable profile extends it. Amendments to M09, M11–M17 above are part of this change.
+
+## M19 — Close workflow engine gates for hosted use
+
+**Depends on:** M03, M08. **Areas:** `packages/core` workflows, `packages/storage` workflow persistence, framework P11-02/P11-03.
+
+Steps:
+1. Complete the P11-02 crash-point and active-cancellation matrix: claim, step effect, completion, compensation and cancellation each interrupted at every persistence boundary.
+2. Replace the cross-tenant `system` claim with a design that works under the M03 runtime role without RLS bypass (per-org claims or a narrowly granted claim function), and test it.
+3. Expose the set of workflow definition versions with running instances so deployment (M13) can refuse to drop them.
+4. Enforce a step duration limit equal to the action deadline and a maximum delay of 30 days at definition validation.
+
+Acceptance:
+- **M19.a:** every crash point yields exactly one completed or compensated logical step; no step runs after cancellation is committed.
+- **M19.b:** claims under the runtime role cannot read or advance another tenant's instances; no RLS bypass is used.
+- **M19.c:** definitions over the step/delay limits fail validation with actionable errors; running-version listing is exact under concurrency.
+
+Docs: workflow contract for hosted apps, limits and idempotency guidance. Evidence: real PostgreSQL crash matrix with zero skips.
+
+## M20 — Queue-woken durable runtime
+
+**Depends on:** M08, M19 (local); M09 and M12 for the real queue adapter. **Areas:** `packages/host`, `packages/core` outbox, queue port and adapters.
+
+Steps:
+1. Add a hosted *durable* profile alongside request-only. It permits events, subscriptions and workflows and still starts no timers or workers.
+2. Define a wake-queue port. Within the transaction that records an outbox event or schedules a workflow step, create a task with a deterministic name and the due time before commit. Enqueue failure aborts the transaction (fail closed).
+3. Add a platform-only drain endpoint: verifies platform invoker identity and app audience, processes one bounded batch within the action deadline, and enqueues a follow-up task when work remains. A task arriving before its transaction is visible retries; one arriving after rollback is a no-op.
+4. Implement delays and retry backoff with task schedule time. Implement ADR 0004 retention (30 days) and its cleanup as scheduled tasks. After any inbound request, the app re-enqueues overdue work it can see (recovery without a periodic sweep, MD12).
+5. Enforce per-app queue quotas and payload limits (256 KiB envelopes); integrate quota/audit records with M07.
+
+Acceptance:
+- **M20.a:** fake timers: no intervals in durable profile; 20 cold boots start no work; work runs only when a drain task arrives.
+- **M20.b:** kill before enqueue, after enqueue before commit, after commit before drain, mid-batch and after effect before acknowledgement: no lost work and one logical effect in the ledger.
+- **M20.c:** queue outage makes publish/start fail and roll back; a delayed step never runs early; drain without platform identity or for another app is rejected.
+- **M20.d:** request-only profile regression passes unchanged; durable profile scaffold builds and runs in the packed consumer.
+
+Docs: durable profile contract, queue semantics, limits, retention and migration from reference mode. Evidence: real PostgreSQL plus fake queue locally; real queue in M09/M17.
+
+## M21 — Gateway event relay and subscriptions
+
+**Depends on:** M04, M05, M07, M12, M13, M20. **Areas:** `packages/gateway` relay, platform DB, receiver inbox.
+
+Steps:
+1. The publisher's drain sends each event to authenticated gateway ingress using its app identity. The gateway verifies producer, workspace and event name against the admitted manifest.
+2. Resolve subscribers from the active catalog (subscriptions bound at promotion, same workspace only, explicit allowlist). Snapshot the destination set and persist one delivery per destination in the platform DB before acknowledging.
+3. Create one queue task per destination; deliver through the gateway to the receiver's `/events/deliver` with app-bound credentials. Receivers deduplicate `(eventId, handlerId)` in their durable inbox.
+4. Apply attempts, backoff and dead letters per destination; one failing destination never blocks or reruns another. No subscriber is a recorded success.
+5. Retain delivery records for 30 days with scheduled cleanup; payloads hidden from audit by default.
+
+Acceptance:
+- **M21.a:** one event with two subscribers is delivered once to each (inbox dedupe proven with duplicate tasks); a failing subscriber dead-letters without affecting the other.
+- **M21.b:** cross-workspace subscription, unlisted event name, forged producer and replayed or expired delivery credentials are rejected.
+- **M21.c:** gateway replacement or crash between persistence, enqueue and delivery loses no delivery and creates no duplicate effect.
+- **M21.d:** subscription changes affect only new events; disabled subscriber receives nothing new.
+
+Docs: event contract for hosted apps, relay semantics, retention and dead-letter operations. Evidence: real platform DB, multi-gateway relay crash matrix and ledger.
+
