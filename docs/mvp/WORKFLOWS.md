@@ -16,6 +16,9 @@ request-only profile still rejects workflows.
   process or record the step after another worker took it over.
 - **Dependencies.** A step becomes runnable once all of its dependencies have completed. Claims
   re-check blocked steps, so two branches finishing at the same moment still release their join.
+- **Atomic attempts.** Each attempt runs under a savepoint. If it fails, times out or gives up
+  after cancellation, its database writes roll back before the failure is recorded, so a retry
+  never duplicates them. Only a successful attempt's writes commit, together with its result.
 - **Retries.** A failing step retries per its `retry` policy, waiting `2^(attempt-1) × backoffMs`
   measured on the worker clock. `NonRetryableWorkflowError` and revoked permissions fail at once.
 - **Start, status, cancel, retry** are generated actions (`<plugin>.<workflow>.start` and so on),
@@ -37,6 +40,15 @@ request-only profile still rejects workflows.
 - A failed compensation leaves the instance `failed`. **Retry** retries the compensation (the
   cancellation stays requested); it never resumes forward steps.
 
+## Locking
+
+Every path that records a step, cancels, retries or settles an orphan locks the instance row
+first and decides under that lock. A cancel arriving while a worker records a step therefore
+either is seen by the worker or waits for it, and the instance always settles. Claims lock step
+rows only, with `SKIP LOCKED`, so a claim never waits and cannot deadlock with cancellation. The
+orphan sweep skips instances and steps that a live worker still holds, so one slow step never
+blocks claims for other tenants.
+
 ## Runtime-role claims
 
 The runtime role has no `BYPASSRLS`, and row-level security shows each transaction only its own
@@ -44,8 +56,10 @@ tenant's rows. A worker serves every tenant of its app, so it claims through one
 function instead:
 
 - `embody_claim_workflow_steps(now, expired, limit, worker)` is `SECURITY DEFINER`, owned by the
-  migration role, with `EXECUTE` revoked from `PUBLIC`. It only claims due steps and returns
-  `(step_id, step_org_id, step_attempt)`: no input, output or principal.
+  migration role, with `search_path = pg_catalog, pg_temp` and `EXECUTE` revoked from `PUBLIC`.
+  It returns `(step_id, step_org_id, step_attempt)` only: no input, output or principal. Besides
+  claiming, it settles orphaned steps of cancelled instances and their instance status. It
+  rejects a worker clock more than ten minutes from the database clock.
 - The worker then processes each claim in that tenant's own transaction, under RLS.
 - `embody_active_workflow_versions()` returns `(definition, version, instances)` for instances
   that are running or retryable (`failed` counts: it can be retried). Deployment (M13) uses it to

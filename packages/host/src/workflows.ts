@@ -46,7 +46,11 @@ export class WorkflowWorker {
   public start(): Promise<void> {
     if (this.timer === undefined) {
       this.stopping = false;
-      this.timer = setInterval(() => void this.tick(), this.options.intervalMs ?? 500);
+      // A failed tick (database outage, lost connection) is retried by the next interval.
+      this.timer = setInterval(
+        () => void this.tick().catch(() => undefined),
+        this.options.intervalMs ?? 500,
+      );
     }
     return Promise.resolve();
   }
@@ -100,12 +104,15 @@ export class WorkflowWorker {
           ? this.watchCancellation(claim.orgId, snapshot.id, controller)
           : undefined;
       try {
-        const output = await this.options.kernel.executeWorkflowStep(step, snapshot, tx, {
-          signal: controller.signal,
-          ...(this.options.stepDeadlineMs === undefined
-            ? {}
-            : { deadlineMs: this.options.stepDeadlineMs }),
-        });
+        const run = () =>
+          this.options.kernel.executeWorkflowStep(step, snapshot, tx, {
+            signal: controller.signal,
+            ...(this.options.stepDeadlineMs === undefined
+              ? {}
+              : { deadlineMs: this.options.stepDeadlineMs }),
+          });
+        // A failed, timed-out or cancelled attempt leaves none of its writes behind.
+        const output = tx.savepoint === undefined ? await run() : await tx.savepoint(run);
         await tx.workflows.completeStep({
           id: step.id,
           output,

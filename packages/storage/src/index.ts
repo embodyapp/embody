@@ -297,6 +297,11 @@ export interface TransactionRepositories {
 
 export interface StorageTransaction extends TransactionRepositories {
   readonly orgId: string;
+  /**
+   * Runs `callback` under a savepoint: its writes roll back if it throws, while the transaction
+   * continues. Workflow workers use it so a failed or timed-out step leaves no writes behind.
+   */
+  savepoint?<T>(callback: () => Promise<T>): Promise<T>;
 }
 
 export interface StorageConnection {
@@ -514,36 +519,49 @@ export const STORAGE_MIGRATIONS: readonly SchemaMigration[] = [
     postgres: `
       CREATE FUNCTION embody_claim_workflow_steps(p_now TIMESTAMPTZ, p_expired TIMESTAMPTZ, p_limit INTEGER, p_worker TEXT)
       RETURNS TABLE (step_id UUID, step_org_id TEXT, step_attempt INTEGER)
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
-      DECLARE orphaned UUID[];
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+      DECLARE orphan RECORD;
       BEGIN
         IF p_limit IS NULL OR p_limit < 1 OR p_limit > 100 THEN RAISE EXCEPTION 'Invalid claim limit'; END IF;
         IF p_worker IS NULL OR length(p_worker) = 0 OR length(p_worker) > 200 THEN RAISE EXCEPTION 'Invalid worker'; END IF;
-        -- A step whose worker died after its instance was cancelled must still settle.
-        WITH settled AS (
+        -- Worker clocks may differ slightly from the database, never by more than ten minutes.
+        IF p_now IS NULL OR p_expired IS NULL OR p_expired > p_now
+          OR p_now > now() + interval '10 minutes' OR p_now < now() - interval '10 minutes'
+        THEN RAISE EXCEPTION 'Invalid claim time'; END IF;
+        -- A step whose worker died after its instance was cancelled must still settle. Instance
+        -- first, then step, as every other write path; SKIP LOCKED so a step a live worker is
+        -- still processing never blocks this claim.
+        FOR orphan IN
+          SELECT s.id AS step_id, s.instance_id FROM public.embody_workflow_steps s
+          JOIN public.embody_workflow_instances i ON i.id = s.instance_id
+          WHERE i.cancel_requested AND s.status = 'running' AND s.claimed_at <= p_expired
+          ORDER BY s.instance_id, s.id LIMIT 100
+        LOOP
+          PERFORM 1 FROM public.embody_workflow_instances i WHERE i.id = orphan.instance_id FOR UPDATE SKIP LOCKED;
+          CONTINUE WHEN NOT FOUND;
           UPDATE public.embody_workflow_steps s
-          SET status = CASE WHEN s.compensatable THEN 'compensating' ELSE 'cancelled' END,
-              scheduled_at = p_now, claimed_at = NULL, claimed_by = NULL
-          FROM public.embody_workflow_instances i
-          WHERE i.id = s.instance_id AND i.cancel_requested AND s.status = 'running' AND s.claimed_at <= p_expired
-          RETURNING s.instance_id)
-        SELECT array_agg(DISTINCT settled.instance_id) INTO orphaned FROM settled;
-        IF orphaned IS NOT NULL THEN
+            SET status = CASE WHEN s.compensatable THEN 'compensating' ELSE 'cancelled' END,
+                scheduled_at = p_now, claimed_at = NULL, claimed_by = NULL
+            WHERE s.id = (SELECT x.id FROM public.embody_workflow_steps x
+              WHERE x.id = orphan.step_id AND x.status = 'running' AND x.claimed_at <= p_expired
+              FOR UPDATE SKIP LOCKED);
+          CONTINUE WHEN NOT FOUND;
           UPDATE public.embody_workflow_instances i SET status = CASE
               WHEN EXISTS (SELECT 1 FROM public.embody_workflow_steps x WHERE x.instance_id = i.id AND x.status = 'compensating') THEN 'compensating'
               WHEN EXISTS (SELECT 1 FROM public.embody_workflow_steps x WHERE x.instance_id = i.id AND x.status = 'running') THEN i.status
               WHEN EXISTS (SELECT 1 FROM public.embody_workflow_steps x WHERE x.instance_id = i.id AND x.status = 'compensated') THEN 'compensated'
               ELSE 'cancelled' END,
             updated_at = p_now, optimistic_version = i.optimistic_version + 1
-          WHERE i.id = ANY(orphaned) AND i.status <> 'failed';
-        END IF;
+          WHERE i.id = orphan.instance_id AND i.status <> 'failed';
+        END LOOP;
+        -- Claims lock step rows only, with SKIP LOCKED, so a claim never waits on another writer.
         RETURN QUERY
         WITH candidates AS (
           SELECT s.id FROM public.embody_workflow_steps s
           JOIN public.embody_workflow_instances i ON i.id = s.instance_id
           WHERE (i.cancel_requested = FALSE
               AND ((s.status IN ('pending','waiting','blocked') AND s.scheduled_at <= p_now) OR (s.status = 'running' AND s.claimed_at <= p_expired))
-              AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(s.dependencies) AS d(value)
+              AND NOT EXISTS (SELECT 1 FROM pg_catalog.jsonb_array_elements_text(s.dependencies) AS d(value)
                 LEFT JOIN public.embody_workflow_steps p ON p.instance_id = s.instance_id AND p.name = d.value
                 WHERE p.status IS NULL OR p.status != 'completed'))
             OR (s.status = 'compensating' AND s.scheduled_at <= p_now
@@ -557,17 +575,13 @@ export const STORAGE_MIGRATIONS: readonly SchemaMigration[] = [
           SET status = CASE WHEN s.status = 'compensating' THEN 'compensating' ELSE 'running' END,
               claimed_at = p_now, claimed_by = p_worker, attempt = s.attempt + 1
           FROM candidates WHERE s.id = candidates.id
-          RETURNING s.id, s.org_id, s.attempt, s.instance_id),
-        touched AS (
-          UPDATE public.embody_workflow_instances i
-          SET status = CASE WHEN i.status = 'pending' THEN 'running' ELSE i.status END, updated_at = p_now
-          WHERE i.id IN (SELECT claimed.instance_id FROM claimed))
+          RETURNING s.id, s.org_id, s.attempt)
         SELECT claimed.id, claimed.org_id, claimed.attempt FROM claimed;
       END $$;
       REVOKE ALL ON FUNCTION embody_claim_workflow_steps(TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, TEXT) FROM PUBLIC;
       CREATE FUNCTION embody_active_workflow_versions()
       RETURNS TABLE (workflow_definition TEXT, workflow_version TEXT, running_instances BIGINT)
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
         SELECT definition, definition_version, count(*) FROM public.embody_workflow_instances
         WHERE status NOT IN ('completed','cancelled','compensated')
         GROUP BY definition, definition_version ORDER BY definition, definition_version

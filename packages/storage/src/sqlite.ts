@@ -544,11 +544,7 @@ class SqliteTransaction implements StorageTransaction {
           )
           .run(next, now, options.workerId, row["id"], expired, expired);
         if (changed.changes === 1) {
-          this.database
-            .prepare(
-              "UPDATE embody_workflow_instances SET status = CASE WHEN status='pending' THEN 'running' ELSE status END, updated_at=? WHERE id=?",
-            )
-            .run(now, row["instance_id"]);
+          // Instance status moves when a step is recorded, as in PostgreSQL.
           claimed.push(
             workflowStepFromRow({
               ...row,
@@ -656,7 +652,7 @@ class SqliteTransaction implements StorageTransaction {
       else
         this.database
           .prepare(
-            "UPDATE embody_workflow_instances SET updated_at=?, optimistic_version=optimistic_version+1 WHERE id=?",
+            "UPDATE embody_workflow_instances SET status=CASE WHEN status IN ('pending','waiting') THEN 'running' ELSE status END, error=NULL, updated_at=?, optimistic_version=optimistic_version+1 WHERE id=?",
           )
           .run(input.now, row["instance_id"]);
     },
@@ -755,6 +751,23 @@ class SqliteTransaction implements StorageTransaction {
     public readonly orgId: string,
     private readonly database: SqliteDatabase,
   ) {}
+
+  /** Runs `callback` under a savepoint; its writes roll back if it throws. */
+  public async savepoint<T>(callback: () => Promise<T>): Promise<T> {
+    const name = `embody_step_${++this.savepoints}`;
+    this.database.exec(`SAVEPOINT ${name}`);
+    let value: T;
+    try {
+      value = await callback();
+    } catch (error) {
+      this.database.exec(`ROLLBACK TO SAVEPOINT ${name}`);
+      this.database.exec(`RELEASE SAVEPOINT ${name}`);
+      throw error;
+    }
+    this.database.exec(`RELEASE SAVEPOINT ${name}`);
+    return value;
+  }
+  private savepoints = 0;
 
   /** Derives a cancelled instance's status from its steps once they settle. */
   private reconcileCancelled(instanceId: string, now: string): void {

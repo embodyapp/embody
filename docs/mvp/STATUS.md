@@ -37,7 +37,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | M16 | Recovery/operations/customer-data readiness | M07, M09, M13, M15 | NOT_STARTED | — | Includes manual accountable approvals |
 | M17 | Real zero-instance and centralized-control proof | M03–M16, M19–M21 | NOT_STARTED | — | Requires actual cloud/client evidence, including event and delayed-step wakes |
 | M18 | Candidate review and controlled release | M01–M17, M19–M21 | NOT_STARTED | — | Owner release decision required |
-| M19 | Workflow engine gates for hosted use | M03, M08 | IN_REVIEW | claude | [Contract](./WORKFLOWS.md), [local evidence](./evidence/M19-local.md): runtime-role claims, crash matrix, fencing, cancellation/compensation fixes, CLI/MCP journey; Node22/24 `test:m19` 38/0 skips. Independent review and exact-candidate CI pending |
+| M19 | Workflow engine gates for hosted use | M03, M08 | IN_REVIEW | claude | [Contract](./WORKFLOWS.md), [local evidence](./evidence/M19-local.md): runtime-role claims, crash matrix, fencing, cancellation/compensation fixes, CLI/MCP journey; [#42](https://github.com/embodyapp/embody/pull/42); initial review rejected `e5f809b` (cancel race, failed-attempt writes), fixed with regressions; Node22/24 `test:m19` 51/0 skips. Re-review and exact-candidate CI pending |
 | M20 | Queue-woken durable runtime | M08, M19 (local); M09, M12 (real queue) | NOT_STARTED | — | Durable profile, enqueue-before-commit, platform-only drain endpoint |
 | M21 | Gateway event relay and subscriptions | M04, M05, M07, M12, M13, M20 | NOT_STARTED | — | ADR 0004 relay transport; same-workspace subscriptions |
 

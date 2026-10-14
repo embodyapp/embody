@@ -392,6 +392,8 @@ class PostgresTransaction implements StorageTransaction {
     },
     get: async (id: string): Promise<WorkflowSnapshot | null> => this.workflowSnapshot(id),
     cancel: async (id: string, now: string): Promise<WorkflowSnapshot | null> => {
+      // Instance first, then steps: the same lock order as step recording and orphan settlement.
+      if ((await this.lockInstance(id)) === undefined) return null;
       const current = await this.workflowSnapshot(id);
       if (!current) return null;
       if (["completed", "failed", "cancelled", "compensated"].includes(current.status))
@@ -413,6 +415,7 @@ class PostgresTransaction implements StorageTransaction {
       return this.workflowSnapshot(id);
     },
     retry: async (id: string, now: string): Promise<WorkflowSnapshot | null> => {
+      if ((await this.lockInstance(id)) === undefined) return null;
       const current = await this.workflowSnapshot(id);
       if (!current) return null;
       if (current.status !== "failed") throw new Error("WORKFLOW_NOT_RETRYABLE");
@@ -446,13 +449,7 @@ class PostgresTransaction implements StorageTransaction {
         `WITH candidates AS (SELECT s.id FROM embody_workflow_steps s JOIN embody_workflow_instances i ON i.id=s.instance_id WHERE ((i.cancel_requested=FALSE AND (((s.status IN ('pending','waiting','blocked')) AND s.scheduled_at<=$1) OR (s.status='running' AND s.claimed_at<=$2)) AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(s.dependencies) AS d(value) LEFT JOIN embody_workflow_steps p ON p.instance_id=s.instance_id AND p.name=d.value WHERE p.status IS NULL OR p.status!='completed')) OR (s.status='compensating' AND s.scheduled_at<=$1 AND (s.claimed_at IS NULL OR s.claimed_at<=$2) AND NOT EXISTS (SELECT 1 FROM embody_workflow_steps later WHERE later.instance_id=s.instance_id AND later.position>s.position AND later.status IN ('compensating','running')))) ORDER BY s.scheduled_at,s.id LIMIT $3 FOR UPDATE OF s SKIP LOCKED) UPDATE embody_workflow_steps s SET status=CASE WHEN s.status='compensating' THEN 'compensating' ELSE 'running' END,claimed_at=$1,claimed_by=$4,attempt=s.attempt+1 FROM candidates WHERE s.id=candidates.id RETURNING s.*`,
         [now, expired, options.limit, options.workerId],
       );
-      for (const value of result.rows) {
-        const row = asRow(value);
-        await this.client.query(
-          "UPDATE embody_workflow_instances SET status=CASE WHEN status='pending' THEN 'running' ELSE status END,updated_at=$1 WHERE id=$2",
-          [now, row["instance_id"]],
-        );
-      }
+      // Claims lock step rows only (SKIP LOCKED); instance status moves when a step is recorded.
       return result.rows.map(workflowStep);
     },
     claimDue: async (options: ClaimOutboxOptions): Promise<readonly WorkflowStepClaim[]> => {
@@ -480,12 +477,18 @@ class PostgresTransaction implements StorageTransaction {
       return result.rows[0] ? workflowStep(result.rows[0]) : null;
     },
     releaseCancelled: async (input: { readonly id: string; readonly now: string }) => {
-      const result = await this.client.query(
-        "UPDATE embody_workflow_steps SET status='cancelled',claimed_at=NULL,claimed_by=NULL WHERE id=$1 AND status='running' RETURNING instance_id",
+      const found = await this.client.query(
+        "SELECT instance_id FROM embody_workflow_steps WHERE id=$1",
         [input.id],
       );
-      if (result.rows[0])
-        await this.reconcileCancelled(String(result.rows[0].instance_id), input.now);
+      if (!found.rows[0]) return;
+      const instanceId = String(found.rows[0].instance_id);
+      await this.lockInstance(instanceId);
+      const result = await this.client.query(
+        "UPDATE embody_workflow_steps SET status='cancelled',claimed_at=NULL,claimed_by=NULL WHERE id=$1 AND status='running'",
+        [input.id],
+      );
+      if (result.rowCount === 1) await this.reconcileCancelled(instanceId, input.now);
     },
     activeVersions: async (): Promise<readonly ActiveWorkflowVersion[]> => {
       const result = await this.client.query(
@@ -508,11 +511,9 @@ class PostgresTransaction implements StorageTransaction {
       ]);
       const row = found.rows[0];
       if (!row) return;
-      const parent = await this.client.query(
-        "SELECT cancel_requested FROM embody_workflow_instances WHERE id=$1",
-        [row.instance_id],
-      );
-      if (parent.rows[0]?.cancel_requested === true && row.status !== "compensating") {
+      // Decide under the instance lock so a concurrent cancel is either seen here or waits.
+      const cancelRequested = await this.lockInstance(String(row.instance_id));
+      if (cancelRequested && row.status !== "compensating") {
         await this.client.query(
           "UPDATE embody_workflow_steps SET status=$2,output=$3::jsonb,scheduled_at=$4,claimed_at=NULL,claimed_by=NULL WHERE id=$1",
           [
@@ -548,7 +549,7 @@ class PostgresTransaction implements StorageTransaction {
         );
       else
         await this.client.query(
-          "UPDATE embody_workflow_instances SET updated_at=$2,optimistic_version=optimistic_version+1 WHERE id=$1",
+          "UPDATE embody_workflow_instances SET status=CASE WHEN status IN ('pending','waiting') THEN 'running' ELSE status END,error=NULL,updated_at=$2,optimistic_version=optimistic_version+1 WHERE id=$1",
           [row.instance_id, input.now],
         );
     },
@@ -564,6 +565,7 @@ class PostgresTransaction implements StorageTransaction {
       ]);
       const row = found.rows[0];
       if (!row) return;
+      const cancelRequested = await this.lockInstance(String(row.instance_id));
       if (row.status === "compensating") {
         await this.client.query(
           "UPDATE embody_workflow_steps SET status='compensation_failed',error=$2,claimed_at=NULL,claimed_by=NULL WHERE id=$1",
@@ -575,11 +577,7 @@ class PostgresTransaction implements StorageTransaction {
         );
         return;
       }
-      const parent = await this.client.query(
-        "SELECT cancel_requested FROM embody_workflow_instances WHERE id=$1",
-        [row.instance_id],
-      );
-      if (parent.rows[0]?.cancel_requested === true) {
+      if (cancelRequested) {
         // A step that fails after cancellation is not retried; it settles as cancelled.
         await this.client.query(
           "UPDATE embody_workflow_steps SET status='cancelled',error=$2,claimed_at=NULL,claimed_by=NULL WHERE id=$1",
@@ -644,6 +642,35 @@ class PostgresTransaction implements StorageTransaction {
     public readonly orgId: string,
     private readonly client: Client,
   ) {}
+  /**
+   * Locks an instance row; returns whether cancellation is requested, or undefined when the
+   * instance is not visible to this tenant. Every workflow write path takes this lock before
+   * touching another step, so cancel, recording and orphan settlement cannot deadlock.
+   */
+  private async lockInstance(instanceId: string): Promise<boolean | undefined> {
+    const result = await this.client.query(
+      "SELECT cancel_requested FROM embody_workflow_instances WHERE id=$1 FOR UPDATE",
+      [instanceId],
+    );
+    const row = result.rows[0] as { cancel_requested: boolean } | undefined;
+    return row === undefined ? undefined : row.cancel_requested;
+  }
+  /** Runs `callback` under a savepoint; its writes roll back if it throws. */
+  public async savepoint<T>(callback: () => Promise<T>): Promise<T> {
+    const name = `embody_step_${++this.savepoints}`;
+    await this.client.query(`SAVEPOINT ${name}`);
+    let value: T;
+    try {
+      value = await callback();
+    } catch (error) {
+      await this.client.query(`ROLLBACK TO SAVEPOINT ${name}`);
+      await this.client.query(`RELEASE SAVEPOINT ${name}`);
+      throw error;
+    }
+    await this.client.query(`RELEASE SAVEPOINT ${name}`);
+    return value;
+  }
+  private savepoints = 0;
   /** Derives a cancelled instance's status from its steps once they settle. */
   private async reconcileCancelled(instanceId: string, now: string): Promise<void> {
     await this.client.query(

@@ -253,5 +253,9 @@ suite("workflow journey through gateway, packed CLI and MCP", () => {
     expect(foreign.code).not.toBe(0);
     expect(foreign.result).toBeUndefined();
     expect((await cli(["orders", "fulfil", "status", id])).result?.status).not.toBe("cancelled");
+    // The same command succeeds for the owner, so the denials above are about authorization.
+    const cancelled = await cli(["orders", "fulfil", "cancel", id]);
+    expect(cancelled.code, cancelled.stderr).toBe(0);
+    expect(cancelled.result?.status).toBe("cancelled");
   });
 });

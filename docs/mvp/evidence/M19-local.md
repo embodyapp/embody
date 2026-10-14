@@ -1,6 +1,6 @@
 # M19 workflow engine gates: local evidence (IN_REVIEW)
 
-Branch `feat/mvp-m19-workflow-gates`, based on `7cf7fcd` (scope change, PR #41). Contract:
+Branch `feat/mvp-m19-workflow-gates` ([#42](https://github.com/embodyapp/embody/pull/42)), based on `7cf7fcd` (scope change, PR #41). Contract:
 [WORKFLOWS](../WORKFLOWS.md). Closes framework P11-02 and P11-03 once accepted. Independent
 review and exact-candidate CI are pending; this file is rebound to the frozen SHA before DONE.
 
@@ -18,7 +18,17 @@ review and exact-candidate CI are pending; this file is rebound to the frozen SH
 | Orphan after cancel | A step left `running` by a dead worker in a cancelled instance never settled | Claim settles it after its lease (compensate if compensatable) |
 | Late writes after timeout or cancel | The worker could commit while the handler kept writing through the released connection | Signal the handler and wait for it to settle before recording |
 | Failed compensation retry | Retry reset cancellation and resumed forward steps | Retry re-runs the compensation |
+| Cancel racing step recording (review B1) | The worker read `cancel_requested` without a lock; a cancel committing in between left the instance non-terminal and uncompensated forever | Lock the instance before deciding, in every recording, cancel, retry and release path |
+| Writes of a failed attempt (review B2) | A timed-out or given-up attempt committed its database writes with the failure record, then the retry wrote them again | Each attempt runs under a savepoint that rolls back on failure |
+| Cancel/claim deadlock (review N1) | Claims locked steps then instances, cancel the reverse: `40P01` under load | One order everywhere (instance, then steps); claims lock step rows only with `SKIP LOCKED`; reference-mode tick errors are caught |
+| Orphan sweep blocking (review N2) | A step processed past its lease blocked every claim for every tenant | Sweep skips locked instances and steps |
+| Trusted worker clock (review N3) | Caller-supplied claim times were not bounded | Rejected beyond ten minutes from the database clock; `search_path = pg_catalog, pg_temp` |
 | CLI action resolution | `embody <app> <workflow> start` was rejected; `embody <app> start` picked an arbitrary workflow | Two-word resolution first, positional ID for status/cancel/retry |
+
+The [initial independent review](./M19-review/initial-review-e5f809b.md) rejected candidate
+`e5f809b` on B1 and B2. Six regression tests (both B1 variants, both B2 variants, the deadlock
+stress and the non-blocking claim) **fail on `e5f809b`** in a separate checkout and database and
+pass on the fix.
 
 ## Acceptance mapping
 
@@ -34,11 +44,11 @@ review and exact-candidate CI are pending; this file is rebound to the frozen SH
 Disposable `postgres:16-alpine` fixture (`docker-compose.postgres-test.yml`, project
 `embody-m19-verification`), image `sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea`.
 
-- `pnpm test:m19`: **38 passed / 0 failed / 0 skipped** on Node **22.23.3** and **24.21.0**;
+- `pnpm test:m19`: **51 passed / 0 failed / 0 skipped** on Node **22.23.3** and **24.21.0**;
   repeated runs stable after the fixes above (the concurrent-join test runs three workers on 20
   diamonds).
 - Node 24: `pnpm test:m08` 122/0/0 plus packed request-only scaffold; `pnpm test:postgres` 16/0/0;
-  `pnpm test` 385 passed / 35 optional DB skips; `pnpm test:verification` 38/0;
+  `pnpm test` 392 passed / 41 optional DB skips; `pnpm test:verification` 38/0;
   lint, typecheck, API report and format pass.
 
 ## Residuals

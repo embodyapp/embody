@@ -28,8 +28,12 @@ interface PgPool {
   ): Promise<{ rows: Record<string, unknown>[]; fields: { name: string }[] }>;
   end(): Promise<void>;
 }
-const { Pool } = createRequire(new URL("../../storage/package.json", import.meta.url))("pg") as {
+type Query = (this: unknown, ...args: unknown[]) => Promise<unknown>;
+const { Pool, Client } = createRequire(new URL("../../storage/package.json", import.meta.url))(
+  "pg",
+) as {
   Pool: new (config: { connectionString?: string | undefined }) => PgPool;
+  Client: { prototype: { query: Query } };
 };
 const LEASE_MS = 30_000;
 const terminal = new Set(["completed", "failed", "cancelled", "compensated"]);
@@ -77,6 +81,18 @@ suite("M19 workflow engine under the PostgreSQL runtime role", () => {
       { id },
       { principal: principal(orgId) },
     )) as Snapshot;
+  const notes = async (workflowId: string) => {
+    const owner = new Pool({ connectionString: migrationUrl });
+    try {
+      const result = await owner.query(
+        "SELECT (data::jsonb->>'attempt')::int AS attempt FROM embody_entities WHERE entity_type LIKE '%note' AND data::jsonb->>'workflowId' = $1 ORDER BY 1",
+        [workflowId],
+      );
+      return result.rows.map((row) => row["attempt"]);
+    } finally {
+      await owner.end();
+    }
+  };
   const settle = async (
     worker: WorkflowWorker,
     kernel: Kernel,
@@ -400,6 +416,145 @@ suite("M19 workflow engine under the PostgreSQL runtime role", () => {
     await at(3_300).tick();
     expect((await control(kernel, orgId, "retrying", "status", id)).status).toBe("completed");
     expect((await effects.ledger(`${id}:`)).attempts).toEqual({ [`${id}:call`]: 1 });
+  });
+
+  it.each([
+    ["completion", "linear", { label: "race" }, "compensated"],
+    ["failure", "retrying", { failures: 1 }, "cancelled"],
+  ])(
+    "a cancel racing the recording of a step %s still settles the instance",
+    async (_label, workflow, input, expected) => {
+      const worker = await boot();
+      const canceller = await boot();
+      const orgId = `m19-cancel-race-${randomUUID()}`;
+      const id = await start(worker.kernel, orgId, workflow, input);
+      // Cancel right after the worker reads the cancellation flag while recording the step. With
+      // the instance locked by that read, the cancel waits; on a plain read it would slip in.
+      const original = Client.prototype.query;
+      let armed = true;
+      let cancelling: Promise<unknown> | undefined;
+      Client.prototype.query = async function (this: unknown, ...args: unknown[]) {
+        const result = await original.apply(this, args);
+        const sql = typeof args[0] === "string" ? args[0] : "";
+        if (armed && sql.startsWith("SELECT cancel_requested FROM embody_workflow_instances")) {
+          armed = false;
+          cancelling = control(canceller.kernel, orgId, workflow, "cancel", id);
+          await Promise.race([cancelling, new Promise((resolve) => setTimeout(resolve, 500))]);
+        }
+        return result;
+      };
+      try {
+        await new WorkflowWorker({
+          storage: worker.storage,
+          kernel: worker.kernel,
+          cancelPollMs: 0,
+        }).tick();
+      } finally {
+        Client.prototype.query = original;
+      }
+      expect(armed).toBe(false);
+      await cancelling;
+      const recovering = new WorkflowWorker({
+        storage: worker.storage,
+        kernel: worker.kernel,
+        cancelPollMs: 0,
+        clock: clockAt(LEASE_MS + 1_000),
+      });
+      const final = await settle(recovering, worker.kernel, orgId, workflow, id);
+      expect(final.status).toBe(expected);
+      if (workflow === "linear")
+        expect((await effects.ledger(`${id}:`)).effects).toEqual([
+          `${id}:start`,
+          `${id}:undo:start`,
+        ]);
+    },
+  );
+
+  it("rolls back the writes of a timed-out attempt before retrying it", async () => {
+    const { storage, kernel } = await boot();
+    const orgId = `m19-timeout-${randomUUID()}`;
+    const id = await start(kernel, orgId, "timed", { slowFirstMs: 600 });
+    const worker = new WorkflowWorker({ storage, kernel, cancelPollMs: 0 });
+    const final = await settle(worker, kernel, orgId, "timed", id);
+    expect(final.status).toBe("completed");
+    expect(await notes(id)).toEqual([2]);
+  });
+
+  it("rolls back the writes of a step that gives up after cancellation", async () => {
+    const { storage, kernel } = await boot();
+    const orgId = `m19-abort-write-${randomUUID()}`;
+    const id = await start(kernel, orgId, "abortWrite", {});
+    const worker = new WorkflowWorker({ storage, kernel, cancelPollMs: 50 });
+    const running = worker.tick();
+    await waitFor(async () =>
+      (await control(kernel, orgId, "abortWrite", "status", id)).steps.some(
+        (step) => step.status === "running",
+      ),
+    );
+    await control(kernel, orgId, "abortWrite", "cancel", id);
+    await running;
+    expect((await settle(worker, kernel, orgId, "abortWrite", id)).status).toBe("cancelled");
+    expect(await notes(id)).toEqual([]);
+  });
+
+  it("cancels and claims concurrently without deadlocks", async () => {
+    const runtimes = [await boot(), await boot(), await boot()];
+    const orgs = [0, 1, 2, 3].map((n) => `m19-deadlock-${n}-${randomUUID()}`);
+    const started = await Promise.all(
+      Array.from({ length: 40 }, async (_, n) => {
+        const orgId = orgs[n % orgs.length]!;
+        return {
+          orgId,
+          id: await start(runtimes[0]!.kernel, orgId, "diamond", { label: String(n) }),
+        };
+      }),
+    );
+    const workers = runtimes.map(
+      ({ storage, kernel }) => new WorkflowWorker({ storage, kernel, cancelPollMs: 0 }),
+    );
+    const outcomes = await Promise.allSettled([
+      ...Array.from({ length: 6 }, (_, round) => workers[round % workers.length]!.tick()),
+      ...started.map(({ orgId, id }, n) =>
+        control(runtimes[n % runtimes.length]!.kernel, orgId, "diamond", "cancel", id),
+      ),
+      ...Array.from({ length: 6 }, (_, round) => workers[(round + 1) % workers.length]!.tick()),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toEqual([]);
+    for (const { orgId, id } of started) {
+      const final = await settle(workers[0]!, runtimes[0]!.kernel, orgId, "diamond", id);
+      expect(["cancelled", "compensated", "completed"]).toContain(final.status);
+    }
+  });
+
+  it("a step still processed past its lease does not block other tenants' claims", async () => {
+    const { storage, kernel } = await boot();
+    const busy = `m19-busy-${randomUUID()}`;
+    const other = `m19-other-${randomUUID()}`;
+    const slowId = await start(kernel, busy, "slow", { ms: 3_000, ignoreSignal: true });
+    const live = new WorkflowWorker({ storage, kernel, cancelPollMs: 0 });
+    await live.tick();
+    const running = live.tick();
+    await waitFor(async () =>
+      (await control(kernel, busy, "slow", "status", slowId)).steps.some(
+        (step) => step.name === "wait" && step.status === "running",
+      ),
+    );
+    await control(kernel, busy, "slow", "cancel", slowId);
+    const otherId = await start(kernel, other, "linear", { label: "unblocked" });
+    const late = new WorkflowWorker({
+      storage,
+      kernel,
+      cancelPollMs: 0,
+      clock: clockAt(LEASE_MS + 1_000),
+    });
+    const before = Date.now();
+    await late.tick();
+    expect(Date.now() - before).toBeLessThan(1_500);
+    expect((await control(kernel, other, "linear", "status", otherId)).steps).toContainEqual(
+      expect.objectContaining({ name: "start", status: "completed" }),
+    );
+    await running;
+    expect((await settle(live, kernel, busy, "slow", slowId)).status).toBe("compensated");
   });
 
   it("lists active definition versions exactly while instances start and finish concurrently", async () => {

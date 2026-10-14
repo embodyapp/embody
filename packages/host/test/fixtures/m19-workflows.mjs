@@ -128,11 +128,55 @@ export function createPlugins(effects, pause = async () => undefined) {
       ship: { dependsOn: ["charge"], handler: effect("ship") },
     },
   });
+  // Writes inside the step transaction, then overruns its timeout on the first attempt.
+  const timed = defineWorkflow(z.object({ slowFirstMs: z.number() }))({
+    version: "1.0.0",
+    steps: {
+      record: {
+        timeoutMs: 300,
+        retry: { maxAttempts: 2, backoffMs: 0 },
+        handler: async (context) => {
+          await context.entities.note.create({
+            workflowId: context.workflowId,
+            attempt: context.attempt,
+          });
+          if (context.attempt === 1)
+            await new Promise((resolve) => setTimeout(resolve, context.input.slowFirstMs));
+          return { attempt: context.attempt };
+        },
+      },
+    },
+  });
+  // Writes, then notices cancellation and gives up.
+  const abortWrite = defineWorkflow(z.object({}))({
+    version: "1.0.0",
+    steps: {
+      record: {
+        handler: async (context) => {
+          await context.entities.note.create({
+            workflowId: context.workflowId,
+            attempt: context.attempt,
+          });
+          await new Promise((resolve) => {
+            const timer = setTimeout(resolve, 20_000);
+            context.signal?.addEventListener("abort", () => {
+              clearTimeout(timer);
+              resolve(undefined);
+            });
+          });
+          throw new Error("cancelled by signal");
+        },
+      },
+    },
+  });
   return [
     definePlugin({
       id: "orders",
       version: "1.0.0",
-      workflows: { linear, diamond, slow, retrying, brokenUndo },
+      entities: {
+        note: { schema: z.object({ workflowId: z.string(), attempt: z.number() }) },
+      },
+      workflows: { linear, diamond, slow, retrying, brokenUndo, timed, abortWrite },
     }),
   ];
 }
