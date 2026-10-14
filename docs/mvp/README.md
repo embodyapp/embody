@@ -26,7 +26,7 @@ An operator initially provisions each workspace and its scoped credentials. Afte
 
 - Node/TypeScript apps based on the supported Embody scaffold and runtime versions.
 - Request-driven CRUD and bounded custom actions with external PostgreSQL persistence.
-- **Events, subscriptions and durable workflows** (scope change 2026-10-14, MD03/MD11–MD14): transactional publish, at-least-once delivery to subscribing apps in the same workspace through the gateway relay, and versioned workflows with persisted delays, retries, cancellation and compensation. Work is woken by an external queue when it is due; nothing polls (M19–M21).
+- **Events, subscriptions and durable workflows** (scope change 2026-10-14, MD03/MD11–MD14, owner-approved): transactional publish, at-least-once delivery to subscribing apps in the same workspace through the gateway relay, and versioned workflows with persisted delays, retries, cancellation and compensation. Work is woken by an external queue when it is due; nothing polls (M19–M21).
 - One launch region, one production environment per app, and a documented app/resource quota.
 - CLI and at least one explicitly tested token-capable MCP client.
 - Separate deployments for each `(workspace, app)`; multiple workspaces can share the gateway.
