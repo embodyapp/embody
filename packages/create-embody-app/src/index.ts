@@ -12,6 +12,8 @@ export interface CreateAppOptions {
   readonly allowEmptyDirectory?: boolean;
   /** Skip dependency installation for CI and offline callers. */
   readonly noInstall?: boolean;
+  /** Hosted production starter; never silently falls back to local SQLite. */
+  readonly profile?: "reference" | "request-only";
 }
 export interface CreatedApp {
   readonly directory: string;
@@ -23,7 +25,11 @@ function assertName(name: string): void {
   if (!namePattern.test(name) || name.length > 63 || name === "." || name === "..")
     throw new Error("Project name must use lowercase letters, digits, and hyphens");
 }
-function template(name: string): Readonly<Record<string, string>> {
+function template(
+  name: string,
+  profile: "reference" | "request-only",
+): Readonly<Record<string, string>> {
+  const hosted = profile === "request-only";
   return {
     "package.json":
       JSON.stringify(
@@ -79,7 +85,9 @@ function template(name: string): Readonly<Record<string, string>> {
     "src/plugin.ts": `export { default } from "../embody.config.js";\n`,
     "src/plugin.test.ts": `import { expect, it } from "vitest";\nimport { createTestHarness } from "@embody/testing";\nimport config from "../embody.config.js";\n\nit("runs the starter action", async () => {\n  const harness = await createTestHarness({ plugins: config.plugins });\n  try { expect(await harness.call("app.ping", {})).toEqual({ ok: true }); } finally { await harness.close(); }\n});\n`,
     "README.md": `# ${name}\n\nRun \`pnpm install\`, \`pnpm test\`, then \`pnpm dev\`. The dev host is loopback-only.\n\nDurable workflows can be added with \`defineWorkflow(inputSchema)({ version, steps })\`; start them through the generated \`<plugin>.<workflow>.start\` action and use idempotent external side effects.\n\nThis generated application belongs to its creator and is UNLICENSED by default. Choose and add your own license before distributing it.\n`,
-    ".env.example": "# Add deployment credentials here; never commit .env\n",
+    ".env.example": hosted
+      ? "NODE_ENV=production\nEMBODY_HOST_PROFILE=hosted\nDATABASE_URL=postgresql://runtime@db/app\nEMBODY_WORKSPACE_ID=ws_replace123\nGATEWAY_JWT_ISSUER=https://gateway.example\nGATEWAY_JWKS_URL=https://gateway.example/.well-known/jwks.json\n# Pre-migrate separately. Never pass migration credentials to this process.\n"
+      : "# Add deployment credentials here; never commit .env\n",
     ".gitignore": "node_modules\ndist\n.embody\n.env\n",
     ".dockerignore": "node_modules\ndist\n.git\n.env\n",
     Dockerfile:
@@ -101,7 +109,22 @@ export async function createApp(options: CreateAppOptions): Promise<CreatedApp> 
   }
   if (entries !== undefined && (entries.length > 0 || !options.allowEmptyDirectory))
     throw new Error("Destination must not exist or must be explicitly allowed and empty");
-  const files = template(options.name);
+  const profile = options.profile ?? "reference";
+  if (profile !== "reference" && profile !== "request-only")
+    throw new Error("Unsupported scaffold profile");
+  const files = { ...template(options.name, profile) };
+  if (profile === "request-only") {
+    files["embody.config.ts"] = files["embody.config.ts"]!.replace(
+      "    actions: {",
+      "    entities: { card: { schema: z.object({ title: z.string().min(1) }) } },\n    actions: {",
+    );
+    files["src/index.ts"] = files["src/index.ts"]!.replace(
+      "const runtime = await createAppHost(config);",
+      'if (process.env.EMBODY_HOST_PROFILE !== "hosted") throw new Error("This starter requires EMBODY_HOST_PROFILE=hosted and pre-migrated PostgreSQL");\nconst runtime = await createAppHost(config);',
+    );
+    files["README.md"] =
+      `# ${options.name}\n\nHosted request-only starter (Node 22/24). Run pnpm install, pnpm test and pnpm build. Supply the settings in .env.example through your deployment environment; pnpm start does not load that file. Do not use pnpm dev as a production verifier.\n\nPre-migrate PostgreSQL with a separate maintenance identity. Runtime credentials must have no DDL privileges. No registration, heartbeat, workflow, event subscription, init or service factory callbacks. Generated CRUD writes and synchronous hooks remain atomic, but notifications have zero retention and no delivery guarantee. Custom event publishing fails. Start on a fresh database; drain legacy outbox work in reference mode before switching. Use /tmp only for disposable scratch; PostgreSQL is the only durable request state.\n\nArbitrary module timers, filesystem writes and external side effects are not statically sandboxed. Action cancellation is cooperative; external effects need idempotency. See docs/mvp/RUNTIME.md in the framework repository for the contract and qualification limits.\n\nThis application belongs to its creator and is UNLICENSED by default.\n`;
+  }
   const created: string[] = [];
   try {
     await mkdir(directory, { recursive: true });

@@ -89,7 +89,7 @@ Deployment response/status carries deployment ID, workspace/app, source digest, 
 | Uploaded source / deployments+key bindings | 7 / 90 days | M16 |
 | Inactive releases / logs | 30 / 14 days | M16 |
 
-Active release retention is indefinite until replaced or deleted; do not collect referenced artifacts/secrets. These metadata/log retention defaults do not decide customer-data backup/deletion policy (MD10 remains open). Outbox behavior and its retention are intentionally not guessed: MD08/M08 must establish a bounded transaction-safe treatment before any request-only app can be admitted. Subscriptions, workflows, schedules, app-to-app RPC, GenUI and local persistence declarations are rejected, not silently ignored. Static declarations supplement rather than replace runtime/isolation controls.
+Active release retention is indefinite until replaced or deleted; do not collect referenced artifacts/secrets. These metadata/log retention defaults do not decide customer-data backup/deletion policy (MD10 remains open). [M08's implemented policy](./RUNTIME.md#outbox-decision-zero-retained-generated-notifications) gives generated CRUD notifications zero retention/no delivery while preserving entity/hook transactions and rejecting custom publishing. MD08/M08 acceptance remains pending; legacy outbox work must be settled before switching profiles. Subscriptions, workflows, schedules, app-to-app RPC, GenUI and local persistence declarations are rejected, not silently ignored. Static declarations supplement rather than replace runtime/isolation controls.
 
 ## Decisions and review ownership
 

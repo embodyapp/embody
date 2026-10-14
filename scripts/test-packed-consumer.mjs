@@ -19,6 +19,9 @@ const packages = JSON.parse(
     entry.path?.includes("/packages/") &&
     (entry.name?.startsWith("@embody/") || entry.name === "create-embody-app"),
 );
+const requestOnly = process.env.EMBODY_PACKED_PROFILE === "request-only";
+if (requestOnly && !process.env.EMBODY_POSTGRES_URL)
+  throw new Error("Request-only packed proof requires pre-migrated EMBODY_POSTGRES_URL");
 const temporary = mkdtempSync(join(tmpdir(), "embody-consumer-"));
 const tarballs = join(temporary, "tarballs");
 const bootstrap = join(temporary, "bootstrap");
@@ -52,7 +55,12 @@ try {
   });
   run(
     process.execPath,
-    [join(bootstrap, "node_modules/create-embody-app/dist/bin.js"), "public-smoke", "--no-install"],
+    [
+      join(bootstrap, "node_modules/create-embody-app/dist/bin.js"),
+      "public-smoke",
+      "--no-install",
+      ...(requestOnly ? ["--request-only"] : []),
+    ],
     { cwd: temporary },
   );
 
@@ -126,7 +134,20 @@ try {
 
   const child = spawn(process.execPath, ["dist/src/index.js"], {
     cwd: app,
-    env: { ...process.env, PORT: "0" },
+    env: {
+      ...process.env,
+      PORT: "0",
+      ...(requestOnly
+        ? {
+            NODE_ENV: "production",
+            EMBODY_HOST_PROFILE: "hosted",
+            DATABASE_URL: process.env.EMBODY_POSTGRES_URL,
+            EMBODY_WORKSPACE_ID: "ws_packed0001",
+            GATEWAY_JWT_ISSUER: "https://gateway.example",
+            GATEWAY_JWKS_URL: "https://gateway.example/jwks",
+          }
+        : {}),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stderr = "";

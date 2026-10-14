@@ -653,6 +653,35 @@ export class PostgresStorage implements StorageConnection {
     private readonly options: { schemaMode?: "migrate" | "verify" } = {},
   ) {
     this.pool = new Pool(config);
+    // Server-side termination of an idle pooled connection must not crash the process;
+    // the pool already discards that client.
+    this.pool.on("error", () => undefined);
+  }
+  /**
+   * Holds a client with an error listener for its whole checkout. Without one, a
+   * server-side termination (for example `idle_in_transaction_session_timeout` while a
+   * handler awaits non-database work) is emitted as an unhandled `error` event.
+   */
+  private async withClient<T>(run: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    let broken: Error | undefined;
+    const onError = (error: Error): void => {
+      broken = error;
+    };
+    client.on("error", onError);
+    try {
+      return await run(client);
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollback) {
+        broken ??= rollback instanceof Error ? rollback : new Error(String(rollback));
+      }
+      throw error;
+    } finally {
+      client.off("error", onError);
+      client.release(broken);
+    }
   }
   public async ensureSchema(): Promise<void> {
     if (this.options.schemaMode === "verify") {
@@ -678,8 +707,7 @@ export class PostgresStorage implements StorageConnection {
         [migration.version],
       );
       if (prior.rowCount !== 0) continue;
-      const client = await this.pool.connect();
-      try {
+      await this.withClient(async (client) => {
         await client.query("BEGIN");
         await client.query(migration.postgres);
         await client.query(
@@ -687,31 +715,20 @@ export class PostgresStorage implements StorageConnection {
           [migration.version, timestamp()],
         );
         await client.query("COMMIT");
-      } catch (error) {
-        await client.query("ROLLBACK");
-        throw error;
-      } finally {
-        client.release();
-      }
+      });
     }
   }
   public async transaction<T>(
     orgId: string,
     callback: (tx: StorageTransaction) => Promise<T>,
   ): Promise<T> {
-    const client = await this.pool.connect();
-    try {
+    return this.withClient(async (client) => {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.current_org', $1, true)", [orgId]);
       const value = await callback(new PostgresTransaction(orgId, client));
       await client.query("COMMIT");
       return value;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
   public async close(): Promise<void> {
     await this.pool.end();

@@ -45,6 +45,24 @@ it("generates the documented safe starter layout", async () => {
   expect(app.files).not.toContain("LICENSE");
 });
 
+it("generates a hosted starter that cannot silently run the reference runtime", async () => {
+  const root = await mkdtemp(join(tmpdir(), "embody-request-only-"));
+  cleanup.push(root);
+  const app = await createApp({
+    name: "hosted-app",
+    destination: join(root, "app"),
+    profile: "request-only",
+    noInstall: true,
+  });
+  expect(await readFile(join(app.directory, "src/index.ts"), "utf8")).toContain(
+    'process.env.EMBODY_HOST_PROFILE !== "hosted"',
+  );
+  expect(await readFile(join(app.directory, ".env.example"), "utf8")).toContain(
+    "EMBODY_HOST_PROFILE=hosted",
+  );
+  expect(await readFile(join(app.directory, "README.md"), "utf8")).toContain("zero retention");
+});
+
 it("rejects traversal and preserves nonempty destinations", async () => {
   const root = await mkdtemp(join(tmpdir(), "embody-scaffold-"));
   cleanup.push(root);

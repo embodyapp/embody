@@ -59,6 +59,8 @@ export interface KernelComponent {
 }
 export interface KernelOptions {
   readonly plugins: readonly EmbodyPlugin[];
+  /** No startup callbacks, background delivery or retained CRUD notifications. */
+  readonly profile?: "reference" | "request-only";
   /** Optional app title, description and agent instructions included in the manifest. */
   readonly app?: AppMetadata;
   readonly storage: KernelStorage;
@@ -77,6 +79,34 @@ export interface HookTrace {
 
 const pluginId = /^[a-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*$/;
 const semver = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+/** Shared build/startup preflight. Does not inspect arbitrary module code or timers. */
+export function assertRequestOnlyPlugins(plugins: readonly EmbodyPlugin[]): void {
+  for (const plugin of plugins) {
+    const declarations = plugin as EmbodyPlugin & Record<string, unknown>;
+    for (const name of [
+      "workflows",
+      "events",
+      "subscriptions",
+      "schedules",
+      "background",
+      "capabilities",
+    ]) {
+      const value = declarations[name];
+      if (
+        value !== undefined &&
+        (typeof value !== "object" || value === null || Object.keys(value).length > 0)
+      )
+        throw new DependencyError(
+          `Request-only plugin ${plugin.id} does not support ${name}; remove the declaration or use reference mode`,
+        );
+    }
+    if (plugin.init || plugin.services)
+      throw new DependencyError(
+        `Request-only plugin ${plugin.id} cannot run init/services startup callbacks; move work into actions`,
+      );
+  }
+}
 
 export function sortPlugins(plugins: readonly EmbodyPlugin[]): readonly EmbodyPlugin[] {
   const byId = new Map<string, EmbodyPlugin>();
@@ -174,6 +204,9 @@ export class Kernel {
   private _manifest: AppManifest | undefined;
 
   public constructor(private readonly options: KernelOptions) {}
+  public get profile(): "reference" | "request-only" {
+    return this.options.profile ?? "reference";
+  }
   public get manifest(): AppManifest {
     if (this._manifest === undefined)
       throw new DependencyError("Kernel manifest is unavailable before boot");
@@ -404,6 +437,11 @@ export class Kernel {
     try {
       this.phase("resolve");
       this.sorted = sortPlugins(this.options.plugins);
+      if (this.options.profile === "request-only") {
+        assertRequestOnlyPlugins(this.sorted);
+        if (this.options.components?.length)
+          throw new DependencyError("Request-only kernels cannot start background components");
+      }
       for (const workflow of compileWorkflows(this.sorted))
         this.workflows.set(workflow.target, workflow);
       this.phase("schema");
@@ -596,8 +634,15 @@ export class Kernel {
           this.runHooks(`${entity.target}.beforeDelete`, payload, context).then(() => undefined),
         afterDelete: (payload: unknown) =>
           this.runHooks(`${entity.target}.afterDelete`, payload, context).then(() => undefined),
-        publish: (eventName: string, payload: unknown) =>
-          context.events.publish(eventName, payload),
+        publish: (eventName: string, payload: unknown) => {
+          if (this.options.profile === "request-only") {
+            // Generated CRUD notifications have explicit zero retention, not delivery semantics.
+            // Entity writes and synchronous hooks still share the original transaction.
+            this.validateEvent(eventName, payload);
+            return Promise.resolve();
+          }
+          return context.events.publish(eventName, payload);
+        },
       };
       entities[entity.entityType] = entity.createStore(principal.orgId, {
         ...tx,
@@ -622,6 +667,10 @@ export class Kernel {
       },
       events: {
         publish: async (eventName: string, payload: unknown) => {
+          if (this.options.profile === "request-only")
+            throw new DependencyError(
+              "Request-only actions cannot publish events requiring delivery; use reference mode",
+            );
           if (tx.outbox === undefined)
             throw new DependencyError("Storage transaction does not support outbox");
           this.validateEvent(eventName, payload);
