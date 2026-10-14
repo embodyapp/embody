@@ -18,7 +18,9 @@ request-only profile still rejects workflows.
   re-check blocked steps, so two branches finishing at the same moment still release their join.
 - **Atomic attempts.** Each attempt runs under a savepoint. If it fails, times out or gives up
   after cancellation, its database writes roll back before the failure is recorded, so a retry
-  never duplicates them. Only a successful attempt's writes commit, together with its result.
+  never duplicates them. An attempt that succeeds commits its writes with its result. One case
+  to know: a step without `compensate` that still finishes after its instance was cancelled is
+  recorded as `cancelled`, but its writes stay, because nothing can undo them.
 - **Retries.** A failing step retries per its `retry` policy, waiting `2^(attempt-1) × backoffMs`
   measured on the worker clock. `NonRetryableWorkflowError` and revoked permissions fail at once.
 - **Start, status, cancel, retry** are generated actions (`<plugin>.<workflow>.start` and so on),

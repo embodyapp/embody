@@ -1,6 +1,6 @@
 # Minimal hosted MVP status
 
-**Last updated: 2026-10-14. M01–M08 are DONE (8/21). Scope change 2026-10-14: events, subscriptions and durable workflows are now in the MVP (M19–M21 added; M09, M11–M18 amended). M05 has accepted live IAM/SQL/ingress/rotation proof and cleanup. M06 has accepted stateless/client/idle proof. M07 has accepted safe dispatch, shared PostgreSQL quotas/durable audit, ambiguity/effect-ledger/failure-injection evidence, independent code/final acceptance and exact-candidate Node22/24 CI. M08 has accepted hosted request-only runtime, zero-retention generated notifications, real-DB boot/atomicity/termination proof, packed request-only scaffold, independent final acceptance and exact-candidate Node22/24 CI. Broader G1/production provider/secure hosted release qualification, billing invoice and M09–M21 remain open.**
+**Last updated: 2026-10-14. M01–M08 and M19 are DONE (9/21). Scope change 2026-10-14: events, subscriptions and durable workflows are now in the MVP (M19–M21 added; M09, M11–M18 amended). M05 has accepted live IAM/SQL/ingress/rotation proof and cleanup. M06 has accepted stateless/client/idle proof. M07 has accepted safe dispatch, shared PostgreSQL quotas/durable audit, ambiguity/effect-ledger/failure-injection evidence, independent code/final acceptance and exact-candidate Node22/24 CI. M08 has accepted hosted request-only runtime, zero-retention generated notifications, real-DB boot/atomicity/termination proof, packed request-only scaffold, independent final acceptance and exact-candidate Node22/24 CI. Broader G1/production provider/secure hosted release qualification, billing invoice and M09–M21 remain open.**
 
 Scope: [README](./README.md). Tasks and acceptance cases: [IMPLEMENTATION](./IMPLEMENTATION.md). Required evidence: [VERIFICATION](./VERIFICATION.md).
 
@@ -37,11 +37,11 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | M16 | Recovery/operations/customer-data readiness | M07, M09, M13, M15 | NOT_STARTED | — | Includes manual accountable approvals |
 | M17 | Real zero-instance and centralized-control proof | M03–M16, M19–M21 | NOT_STARTED | — | Requires actual cloud/client evidence, including event and delayed-step wakes |
 | M18 | Candidate review and controlled release | M01–M17, M19–M21 | NOT_STARTED | — | Owner release decision required |
-| M19 | Workflow engine gates for hosted use | M03, M08 | IN_REVIEW | claude | [Contract](./WORKFLOWS.md), [local evidence](./evidence/M19-local.md): runtime-role claims, crash matrix, fencing, cancellation/compensation fixes, CLI/MCP journey; [#42](https://github.com/embodyapp/embody/pull/42); initial review rejected `e5f809b` (cancel race, failed-attempt writes), fixed with regressions; Node22/24 `test:m19` 51/0 skips. Re-review and exact-candidate CI pending |
+| M19 | Workflow engine gates for hosted use | M03, M08 | DONE | claude | [#42](https://github.com/embodyapp/embody/pull/42); frozen d2d7476 [CI38568267378](https://github.com/embodyapp/embody/actions/runs/38568267378) all9 green; [independent final acceptance](./evidence/M19-d2d7476/independent-final-review.md) after [initial rejection](./evidence/M19-d2d7476/initial-review-e5f809b.md) (cancel race, failed-attempt writes; fixed with regressions failing on e5f809b). Node22/24 m19 51, mandatory320, m08 148, gateway-store43, postgres16 all zero skips. [Contract](./WORKFLOWS.md), [evidence/residuals](./evidence/M19-local.md). Closes framework P11-02/P11-03; accepted/unmerged stack |
 | M20 | Queue-woken durable runtime | M08, M19 (local); M09, M12 (real queue) | NOT_STARTED | — | Durable profile, enqueue-before-commit, platform-only drain endpoint |
 | M21 | Gateway event relay and subscriptions | M04, M05, M07, M12, M13, M20 | NOT_STARTED | — | ADR 0004 relay transport; same-workspace subscriptions |
 
-**Completed implementation tasks: 8 / 21.** Existing framework code is a foundation, not proof these hosted acceptance cases have passed. Update this count when task states change.
+**Completed implementation tasks: 9 / 21.** Existing framework code is a foundation, not proof these hosted acceptance cases have passed. Update this count when task states change.
 
 ## Decision ledger
 
@@ -74,6 +74,8 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | G5: invite-only release approved | M18 | NOT_EVALUATED | — |
 
 ## Activity log
+
+- 2026-10-14 — claude — M19 — IN_REVIEW → DONE — [#42](https://github.com/embodyapp/embody/pull/42). Independent review rejected `e5f809b` (B1 cancel racing step recording left instances stuck; B2 failed attempts committed their writes) and noted a cancel/claim deadlock and a blocking orphan sweep. `d2d7476` locks the instance before every decision, runs attempts under savepoints, uses one lock order with `SKIP LOCKED` claims, and bounds claim times; six regression tests fail on `e5f809b` and pass. [Independent final review](./evidence/M19-d2d7476/independent-final-review.md) accepts M19.a–d (own reproductions plus randomized stress). Exact candidate `d2d74764c1e3f2be5aff7170c13595b1a1817c31` [CI38568267378](https://github.com/embodyapp/embody/actions/runs/38568267378) all9 green; Node22/24 m19 51, mandatory320, m08 148, gateway-store43, postgres16, zero skips ([artifacts](./evidence/M19-d2d7476/)). Owned fixtures removed; shared `embody-local-*` untouched. Closes framework P11-02/P11-03. 9/21 tasks DONE.
 
 - 2026-10-14 — claude — M19 — NOT_STARTED → IN_REVIEW — `feat/mvp-m19-workflow-gates` from `7cf7fcd`. Reproduced that workflows never ran under the PostgreSQL runtime role; added a narrowly granted claim function, claim fencing and fixes for concurrent joins, cancellation, compensation order, orphans, late writes and compensation retry; CLI workflow resolution; hosted limits and active versions. New mandatory `pnpm test:m19` (CI Node 22/24): 38 passed, 0 skips on both majors locally. [Evidence](./evidence/M19-local.md). Independent review and exact-candidate CI pending.
 

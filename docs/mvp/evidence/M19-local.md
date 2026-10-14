@@ -1,8 +1,10 @@
-# M19 workflow engine gates: local evidence (IN_REVIEW)
+# M19 workflow engine gates: evidence (DONE)
 
 Branch `feat/mvp-m19-workflow-gates` ([#42](https://github.com/embodyapp/embody/pull/42)), based on `7cf7fcd` (scope change, PR #41). Contract:
-[WORKFLOWS](../WORKFLOWS.md). Closes framework P11-02 and P11-03 once accepted. Independent
-review and exact-candidate CI are pending; this file is rebound to the frozen SHA before DONE.
+[WORKFLOWS](../WORKFLOWS.md). Closes framework P11-02 and P11-03 once accepted. Accepted
+candidate **`d2d74764c1e3f2be5aff7170c13595b1a1817c31`**; exact-candidate
+[CI 38568267378](https://github.com/embodyapp/embody/actions/runs/38568267378) all 9 checks green.
+Reviews and CI artifacts: [`M19-d2d7476/`](./M19-d2d7476/).
 
 ## Defects found and fixed
 
@@ -25,7 +27,7 @@ review and exact-candidate CI are pending; this file is rebound to the frozen SH
 | Trusted worker clock (review N3) | Caller-supplied claim times were not bounded | Rejected beyond ten minutes from the database clock; `search_path = pg_catalog, pg_temp` |
 | CLI action resolution | `embody <app> <workflow> start` was rejected; `embody <app> start` picked an arbitrary workflow | Two-word resolution first, positional ID for status/cancel/retry |
 
-The [initial independent review](./M19-review/initial-review-e5f809b.md) rejected candidate
+The [initial independent review](./M19-d2d7476/initial-review-e5f809b.md) rejected candidate
 `e5f809b` on B1 and B2. Six regression tests (both B1 variants, both B2 variants, the deadlock
 stress and the non-blocking claim) **fail on `e5f809b`** in a separate checkout and database and
 pass on the fix.
@@ -38,6 +40,13 @@ pass on the fix.
 | M19.b | Runtime role `rolbypassrls=false`; claim function result type is exactly `(step_id, step_org_id, step_attempt)`; another role has no `EXECUTE`; cross-tenant status/cancel and direct repository reads return not found. |
 | M19.c | Limits reject step timeout > 30 s, delay > 30 days and retry backoff > 30 days with actionable messages. Active versions equal the owner-role ground truth after concurrent starts and ticks. |
 | M19.d | Built CLI binary and official MCP client through a real gateway to a real host on PostgreSQL: start (idempotent), status, cancel, retry; unauthorized and cross-workspace control denied. |
+
+## Exact-candidate CI (`d2d7476`, run 38568267378)
+
+All 9 checks green ([metadata](./M19-d2d7476/ci-run.json), [artifacts](./M19-d2d7476/ci/)). Node
+22.23.3 and 24.21.0 each: `test:m19` **51 / 0 / 0**, `test:m08` 148 / 0 / 0, `test:mvp` 320 / 0 / 0,
+gateway-store 43 / 0 / 0, app PostgreSQL 16 / 0 / 0, packed and distributed baselines, quality.
+The [independent final review](./M19-d2d7476/independent-final-review.md) accepts M19.a–d.
 
 ## Local results
 
@@ -52,6 +61,14 @@ Disposable `postgres:16-alpine` fixture (`docker-compose.postgres-test.yml`, pro
   lint, typecheck, API report and format pass.
 
 ## Residuals
+
+From the final review (non-blocking): F1 a non-compensatable step finishing after cancellation is
+recorded `cancelled` while its writes stay (documented in WORKFLOWS); F2 a sibling completing after
+an instance failed clears its `error` text; F3 instance stays `pending` until its first step is
+recorded; F4 PostgreSQL workers with clocks skewed over ten minutes are refused; F5 the
+crash-worker fixture runs without savepoints (harmless for the tested points). Packed CLI tarball
+coverage stays with `test:baseline`/M14.
+
 
 - Cancellation and timeouts are cooperative: a handler that ignores `context.signal` holds its
   step (and its transaction) until it settles. Under the hosted 30 s idle-transaction limit the
