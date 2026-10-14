@@ -7,10 +7,12 @@ Use Node **22 or 24**, pnpm **11.25.0** and the frozen lockfile. PostgreSQL/cont
 | Command | Prerequisites / meaning |
 |---|---|
 | `pnpm verify` | Workspace quality/build/API/package tests and runner negatives. DB cases may explicitly skip in this optional local layer when no URL exists; this is not DB evidence. |
-| `pnpm test:verification` | 36 deterministic runner tests, including intentionally missing DB/cloud config, rejected budgets, normalized credential redaction and false-green JSON reports. No DB or cloud required. |
+| `pnpm test:verification` | 38 deterministic runner tests, including intentionally missing DB/cloud config, rejected budgets, normalized credential redaction and false-green JSON reports. No DB or cloud required. |
 | `pnpm test:postgres` | Required runtime/migration/other-app URLs and actual disposable PostgreSQL container ID; builds, migrates as maintenance, tests runtime isolation plus storage/kernel adapters, rejects **any** required skip or empty report. |
 | `pnpm test:gateway-store` | Separate platform runtime/migration URLs plus app fixture URLs/container; maintenance migrations, real store conformance, fresh-process/two-gateway/MCP and SQL boundary tests, zero required skips. |
 | `pnpm test:mvp` | Both app/platform DB prerequisites; runner regressions + mandatory app/kernel and gateway-store cases + current contract/auth/host/MCP/gateway suites. Extend its explicit suite list as later implementations land. It does not qualify an unimplemented deployment controller or provider. |
+| `pnpm test:m08` | M03 app DB fixture and container; builds, pre-migrates, runs the request-only core/host/scaffold and PostgreSQL suites with zero skips, then the packed request-only scaffold. [Contract](./RUNTIME.md). |
+| `pnpm test:m19` | M03 app DB fixture and container; builds, pre-migrates, runs the workflow engine suites sequentially with zero skips: runtime-role claims, crash matrix (killed worker processes), lease fencing, cancellation/compensation, active versions, limits, and the packed CLI plus official MCP client journey through the gateway. [Contract](./WORKFLOWS.md). |
 | `pnpm test:mvp:client` | Opt-in installed/authenticated Claude Code **2.1.296**; synthetic local hosted gateway/host, direct bearer-auth MCP across replicas/replacement, live 120-second idle observation and plain CLI discovery/action. Model budget `$1`; no cloud resources. [Contract](./MCP.md). Missing client/auth or failed/quiescence check cannot pass. |
 | `pnpm test:baseline` | Docker + npm 11; builds clean packed CLI/scaffold/plugin artifacts and executes the actual distributed E2E. Records app/PostgreSQL image IDs/digests. CI runs this on both Node 22/24. |
 | `pnpm test:mvp:runtime-isolation` / `pnpm test:mvp:private-invocation` | Targeted M05 live metadata/IAM/SQL and private-invocation probes, requiring actual dedicated fixture workloads and approved budget/config. Not yet live-run; [procedure](./M05-PROVIDER-PROOF.md). Their six mocked fail-closed tests are included in `test:verification`, not claimed as provider evidence. |
@@ -23,7 +25,7 @@ The package-level `pnpm --filter @embody/storage test:postgres` also rejects mis
 The fixture uses public **test-only** passwords in `test/postgres/init.sql` and `fixture.env.example`; these are not production secrets. Its bootstrap superuser only creates databases/roles. Migration and runtime execution use separate restricted roles:
 
 - `embody_migrator`: owns app A schema/tables; NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOINHERIT, NOBYPASSRLS.
-- `embody_runtime`: non-owner, same restricted flags; schema usage plus data-table SELECT/INSERT/UPDATE/DELETE only. No schema creation or migration-ledger access.
+- `embody_runtime`: non-owner, same restricted flags; schema usage plus data-table SELECT/INSERT/UPDATE/DELETE and EXECUTE on `STORAGE_RUNTIME_FUNCTIONS` only. No schema creation or migration-ledger access.
 - `embody_other`: owns app B; PUBLIC CONNECT removed from app databases; app A runtime cannot connect to B.
 - `embody_platform_migrator` / `embody_platform_runtime`: separate restricted maintenance/non-owner runtime identities in a **third platform DB**, not app tables. App runtime cannot CONNECT to platform; gateway runtime cannot CONNECT to app A. Runtime cannot migrate/CREATE/ALTER platform tables.
 

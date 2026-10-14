@@ -361,7 +361,7 @@ Steps:
 
 Acceptance:
 - **M19.a:** every crash point yields exactly one completed or compensated logical step; no step runs after cancellation is committed.
-- **M19.b:** claims under the runtime role cannot read or advance another tenant's instances; no RLS bypass is used.
+- **M19.b:** the runtime role has no `BYPASSRLS`; tenant-scoped operations cannot read or advance another tenant's instances; the only cross-tenant path is the narrowly granted claim function, which returns claim identity only and is not executable by other roles.
 - **M19.c:** definitions over the step/delay limits fail validation with actionable errors; running-version listing is exact under concurrency.
 - **M19.d:** packed CLI and the supported MCP client start a workflow, read its status, cancel one and retry a failed one through the gateway; unauthorized callers are denied.
 

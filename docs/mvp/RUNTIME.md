@@ -28,8 +28,10 @@ are forbidden. Static entity/action/hook definitions are supported.
 
 Boot reads the migration version ledger and verifies exact compatibility; it does
 not create tables or migrate. Pre-migrate using a separate maintenance identity.
-Runtime roles must have only schema usage, migration-ledger SELECT and tenant-bound
-DML privileges; no DDL, ownership, superuser or RLS bypass. See the M03 role fixture
+Runtime roles must have only schema usage, migration-ledger SELECT, tenant-bound
+DML privileges and EXECUTE on the storage functions listed in `STORAGE_RUNTIME_FUNCTIONS`
+(the [M19 workflow claim/version functions](./WORKFLOWS.md#runtime-role-claims)); no DDL,
+ownership, superuser or RLS bypass. See the M03 role fixture
 and M05 identity contract. Missing/outdated schemas fail closed and close the pool.
 No registration, heartbeat, workflow, outbox or delivery workers start. Manual
 worker tick/drain methods fail rather than reintroducing delivery. Both JSON

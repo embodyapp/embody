@@ -19,6 +19,8 @@ import type {
   StoredPrincipal,
   WorkflowSnapshot,
   WorkflowStep,
+  WorkflowStepClaim,
+  ActiveWorkflowVersion,
   WorkflowRepository,
   StorageConnection,
   StorageTransaction,
@@ -463,9 +465,10 @@ class SqliteTransaction implements StorageTransaction {
         return instance;
       this.database
         .prepare(
-          "UPDATE embody_workflow_instances SET cancel_requested = 1, status = CASE WHEN EXISTS (SELECT 1 FROM embody_workflow_steps WHERE instance_id = ? AND status = 'completed' AND compensatable = 1) THEN 'compensating' ELSE 'cancelled' END, updated_at = ?, optimistic_version = optimistic_version + 1 WHERE id = ?",
+          // Status is derived by reconcileCancelled once the steps below settle.
+          "UPDATE embody_workflow_instances SET cancel_requested = 1, updated_at = ?, optimistic_version = optimistic_version + 1 WHERE id = ?",
         )
-        .run(id, now, id);
+        .run(now, id);
       this.database
         .prepare(
           "UPDATE embody_workflow_steps SET status = 'cancelled', claimed_at = NULL, claimed_by = NULL WHERE instance_id = ? AND status IN ('pending','blocked','waiting')",
@@ -476,12 +479,27 @@ class SqliteTransaction implements StorageTransaction {
           "UPDATE embody_workflow_steps SET status = 'compensating', scheduled_at = ? WHERE instance_id = ? AND status = 'completed' AND compensatable = 1",
         )
         .run(now, id);
+      this.reconcileCancelled(id, now);
       return this.workflowSnapshot(id);
     },
     retry: async (id: string, now: string): Promise<WorkflowSnapshot | null> => {
       const instance = await this.workflowSnapshot(id);
       if (instance === null) return null;
       if (instance.status !== "failed") throw new Error("WORKFLOW_NOT_RETRYABLE");
+      if (instance.steps.some((step) => step.status === "compensation_failed")) {
+        // A failed compensation is retried as compensation; cancellation stays requested.
+        this.database
+          .prepare(
+            "UPDATE embody_workflow_steps SET status='compensating', error=NULL, scheduled_at=?, claimed_at=NULL, claimed_by=NULL WHERE instance_id=? AND status='compensation_failed'",
+          )
+          .run(now, id);
+        this.database
+          .prepare(
+            "UPDATE embody_workflow_instances SET status='compensating', error=NULL, updated_at=?, optimistic_version=optimistic_version+1 WHERE id=?",
+          )
+          .run(now, id);
+        return this.workflowSnapshot(id);
+      }
       this.database
         .prepare(
           "UPDATE embody_workflow_instances SET status = 'running', error = NULL, cancel_requested = 0, updated_at = ?, optimistic_version = optimistic_version + 1 WHERE id = ?",
@@ -498,25 +516,35 @@ class SqliteTransaction implements StorageTransaction {
       this.assertClaimOptions(options);
       const now = timestamp(options.now);
       const expired = new Date(new Date(now).getTime() - (options.leaseMs ?? 30_000)).toISOString();
+      // A step whose worker died after its instance was cancelled must still settle.
+      const orphaned = this.database
+        .prepare(
+          "SELECT s.id, s.instance_id, s.compensatable FROM embody_workflow_steps s JOIN embody_workflow_instances i ON i.id=s.instance_id WHERE i.cancel_requested=1 AND s.status='running' AND s.claimed_at <= ?",
+        )
+        .all(expired) as Row[];
+      for (const row of orphaned) {
+        this.database
+          .prepare(
+            "UPDATE embody_workflow_steps SET status=?, scheduled_at=?, claimed_at=NULL, claimed_by=NULL WHERE id=?",
+          )
+          .run(Number(row["compensatable"]) === 1 ? "compensating" : "cancelled", now, row["id"]);
+        this.reconcileCancelled(String(row["instance_id"]), now);
+      }
       const rows = this.database
         .prepare(
-          `SELECT s.* FROM embody_workflow_steps s JOIN embody_workflow_instances i ON i.id=s.instance_id WHERE i.cancel_requested=0 AND (((s.status IN ('pending','waiting')) AND s.scheduled_at <= ?) OR (s.status='running' AND s.claimed_at <= ?)) AND NOT EXISTS (SELECT 1 FROM json_each(s.dependencies) d LEFT JOIN embody_workflow_steps p ON p.instance_id=s.instance_id AND p.name=d.value WHERE p.status IS NULL OR p.status != 'completed') UNION ALL SELECT s.* FROM embody_workflow_steps s WHERE s.status='compensating' AND s.scheduled_at <= ? AND NOT EXISTS (SELECT 1 FROM embody_workflow_steps later WHERE later.instance_id=s.instance_id AND later.status='compensating' AND later.position > s.position) ORDER BY scheduled_at, id LIMIT ?`,
+          `SELECT s.* FROM embody_workflow_steps s JOIN embody_workflow_instances i ON i.id=s.instance_id WHERE i.cancel_requested=0 AND (((s.status IN ('pending','waiting','blocked')) AND s.scheduled_at <= ?) OR (s.status='running' AND s.claimed_at <= ?)) AND NOT EXISTS (SELECT 1 FROM json_each(s.dependencies) d LEFT JOIN embody_workflow_steps p ON p.instance_id=s.instance_id AND p.name=d.value WHERE p.status IS NULL OR p.status != 'completed') UNION ALL SELECT s.* FROM embody_workflow_steps s WHERE s.status='compensating' AND s.scheduled_at <= ? AND (s.claimed_at IS NULL OR s.claimed_at <= ?) AND NOT EXISTS (SELECT 1 FROM embody_workflow_steps later WHERE later.instance_id=s.instance_id AND later.position > s.position AND later.status IN ('compensating','running')) ORDER BY scheduled_at, id LIMIT ?`,
         )
-        .all(now, expired, now, options.limit) as Row[];
+        .all(now, expired, now, expired, options.limit) as Row[];
       const claimed: WorkflowStep[] = [];
       for (const row of rows) {
         const next = row["status"] === "compensating" ? "compensating" : "running";
         const changed = this.database
           .prepare(
-            "UPDATE embody_workflow_steps SET status=?, claimed_at=?, claimed_by=?, attempt=attempt+1 WHERE id=? AND (status IN ('pending','waiting','compensating') OR (status='running' AND claimed_at <= ?))",
+            "UPDATE embody_workflow_steps SET status=?, claimed_at=?, claimed_by=?, attempt=attempt+1 WHERE id=? AND (status IN ('pending','waiting','blocked') OR (status='compensating' AND (claimed_at IS NULL OR claimed_at <= ?)) OR (status='running' AND claimed_at <= ?))",
           )
-          .run(next, now, options.workerId, row["id"], expired);
+          .run(next, now, options.workerId, row["id"], expired, expired);
         if (changed.changes === 1) {
-          this.database
-            .prepare(
-              "UPDATE embody_workflow_instances SET status = CASE WHEN status='pending' THEN 'running' ELSE status END, updated_at=? WHERE id=?",
-            )
-            .run(now, row["instance_id"]);
+          // Instance status moves when a step is recorded, as in PostgreSQL.
           claimed.push(
             workflowStepFromRow({
               ...row,
@@ -530,6 +558,45 @@ class SqliteTransaction implements StorageTransaction {
       }
       return claimed;
     },
+    claimDue: async (options: ClaimOutboxOptions): Promise<readonly WorkflowStepClaim[]> =>
+      (await this.workflows.claimBatch(options)).map((step) => ({
+        id: step.id,
+        orgId: step.orgId,
+        attempt: step.attempt,
+        workerId: options.workerId,
+      })),
+    lockClaim: async (claim: WorkflowStepClaim): Promise<WorkflowStep | null> => {
+      const row = this.database
+        .prepare(
+          "SELECT * FROM embody_workflow_steps WHERE id=? AND org_id=? AND claimed_by=? AND attempt=? AND status IN ('running','compensating')",
+        )
+        .get(claim.id, this.orgId, claim.workerId, claim.attempt) as Row | undefined;
+      return row === undefined ? null : workflowStepFromRow(row);
+    },
+    releaseCancelled: async (input: { readonly id: string; readonly now: string }) => {
+      const row = this.database
+        .prepare("SELECT instance_id FROM embody_workflow_steps WHERE id=? AND status='running'")
+        .get(input.id) as Row | undefined;
+      if (row === undefined) return;
+      this.database
+        .prepare(
+          "UPDATE embody_workflow_steps SET status='cancelled', claimed_at=NULL, claimed_by=NULL WHERE id=?",
+        )
+        .run(input.id);
+      this.reconcileCancelled(String(row["instance_id"]), input.now);
+    },
+    activeVersions: async (): Promise<readonly ActiveWorkflowVersion[]> =>
+      (
+        this.database
+          .prepare(
+            "SELECT definition, definition_version, count(*) AS instances FROM embody_workflow_instances WHERE status NOT IN ('completed','cancelled','compensated') GROUP BY definition, definition_version ORDER BY definition, definition_version",
+          )
+          .all() as Row[]
+      ).map((row) => ({
+        definition: String(row["definition"]),
+        definitionVersion: String(row["definition_version"]),
+        instances: Number(row["instances"]),
+      })),
     completeStep: async (input: {
       readonly id: string;
       readonly output: unknown;
@@ -546,20 +613,15 @@ class SqliteTransaction implements StorageTransaction {
       if (Number(parent["cancel_requested"]) === 1 && row["status"] !== "compensating") {
         this.database
           .prepare(
-            "UPDATE embody_workflow_steps SET status=?, output=?, claimed_at=NULL, claimed_by=NULL WHERE id=?",
+            "UPDATE embody_workflow_steps SET status=?, output=?, scheduled_at=?, claimed_at=NULL, claimed_by=NULL WHERE id=?",
           )
           .run(
             Number(row["compensatable"]) === 1 ? "compensating" : "cancelled",
             JSON.stringify(input.output),
+            input.now,
             input.id,
           );
-        this.database
-          .prepare("UPDATE embody_workflow_instances SET status=?, updated_at=? WHERE id=?")
-          .run(
-            Number(row["compensatable"]) === 1 ? "compensating" : "cancelled",
-            input.now,
-            row["instance_id"],
-          );
+        this.reconcileCancelled(String(row["instance_id"]), input.now);
         return;
       }
       if (row["status"] === "compensating") {
@@ -568,17 +630,7 @@ class SqliteTransaction implements StorageTransaction {
             "UPDATE embody_workflow_steps SET status='compensated', claimed_at=NULL, claimed_by=NULL, completed_at=? WHERE id=?",
           )
           .run(input.now, input.id);
-        const remains = this.database
-          .prepare(
-            "SELECT 1 FROM embody_workflow_steps WHERE instance_id=? AND status='compensating'",
-          )
-          .get(row["instance_id"]);
-        if (!remains)
-          this.database
-            .prepare(
-              "UPDATE embody_workflow_instances SET status='compensated', updated_at=?, optimistic_version=optimistic_version+1 WHERE id=?",
-            )
-            .run(input.now, row["instance_id"]);
+        this.reconcileCancelled(String(row["instance_id"]), input.now);
         return;
       }
       this.database
@@ -600,7 +652,7 @@ class SqliteTransaction implements StorageTransaction {
       else
         this.database
           .prepare(
-            "UPDATE embody_workflow_instances SET updated_at=?, optimistic_version=optimistic_version+1 WHERE id=?",
+            "UPDATE embody_workflow_instances SET status=CASE WHEN status IN ('pending','waiting') THEN 'running' ELSE status END, error=NULL, updated_at=?, optimistic_version=optimistic_version+1 WHERE id=?",
           )
           .run(input.now, row["instance_id"]);
     },
@@ -626,6 +678,19 @@ class SqliteTransaction implements StorageTransaction {
             "UPDATE embody_workflow_instances SET status='failed', error=?, updated_at=?, optimistic_version=optimistic_version+1 WHERE id=?",
           )
           .run("Compensation failed", input.now, row["instance_id"]);
+        return;
+      }
+      const parent = this.database
+        .prepare("SELECT cancel_requested FROM embody_workflow_instances WHERE id=?")
+        .get(row["instance_id"]) as Row;
+      if (Number(parent["cancel_requested"]) === 1) {
+        // A step that fails after cancellation is not retried; it settles as cancelled.
+        this.database
+          .prepare(
+            "UPDATE embody_workflow_steps SET status='cancelled', error=?, claimed_at=NULL, claimed_by=NULL WHERE id=?",
+          )
+          .run(input.error, input.id);
+        this.reconcileCancelled(String(row["instance_id"]), input.now);
         return;
       }
       this.database
@@ -686,6 +751,32 @@ class SqliteTransaction implements StorageTransaction {
     public readonly orgId: string,
     private readonly database: SqliteDatabase,
   ) {}
+
+  /** Runs `callback` under a savepoint; its writes roll back if it throws. */
+  public async savepoint<T>(callback: () => Promise<T>): Promise<T> {
+    const name = `embody_step_${++this.savepoints}`;
+    this.database.exec(`SAVEPOINT ${name}`);
+    let value: T;
+    try {
+      value = await callback();
+    } catch (error) {
+      this.database.exec(`ROLLBACK TO SAVEPOINT ${name}`);
+      this.database.exec(`RELEASE SAVEPOINT ${name}`);
+      throw error;
+    }
+    this.database.exec(`RELEASE SAVEPOINT ${name}`);
+    return value;
+  }
+  private savepoints = 0;
+
+  /** Derives a cancelled instance's status from its steps once they settle. */
+  private reconcileCancelled(instanceId: string, now: string): void {
+    this.database
+      .prepare(
+        "UPDATE embody_workflow_instances SET status=CASE WHEN EXISTS (SELECT 1 FROM embody_workflow_steps x WHERE x.instance_id=embody_workflow_instances.id AND x.status='compensating') THEN 'compensating' WHEN EXISTS (SELECT 1 FROM embody_workflow_steps x WHERE x.instance_id=embody_workflow_instances.id AND x.status='running') THEN status WHEN EXISTS (SELECT 1 FROM embody_workflow_steps x WHERE x.instance_id=embody_workflow_instances.id AND x.status='compensated') THEN 'compensated' ELSE 'cancelled' END, updated_at=?, optimistic_version=optimistic_version+1 WHERE id=? AND cancel_requested=1 AND status<>'failed'",
+      )
+      .run(now, instanceId);
+  }
 
   private async workflowSnapshot(id: string): Promise<WorkflowSnapshot | null> {
     const row = this.database

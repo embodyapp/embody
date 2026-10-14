@@ -209,6 +209,9 @@ importers:
       '@embody/auth':
         specifier: workspace:*
         version: link:../auth
+      '@embody/storage':
+        specifier: workspace:*
+        version: link:../storage
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
         version: 1.32.1(supports-color@8.1.1)(zod@4.5.4)

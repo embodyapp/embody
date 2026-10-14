@@ -310,10 +310,15 @@ export class Kernel {
     }
   }
   /** Executes one already-claimed durable step. The worker owns persistence transitions. */
+  /**
+   * Runs one claimed step. `signal` aborts cooperatively (cancellation or worker shutdown) and
+   * `deadlineMs` caps the step together with its own `timeoutMs`; neither kills arbitrary code.
+   */
   public async executeWorkflowStep(
     step: WorkflowStepRecord,
     snapshot: WorkflowSnapshot,
     tx: EntityTransaction,
+    options: { readonly signal?: AbortSignal; readonly deadlineMs?: number } = {},
   ): Promise<unknown> {
     const workflow = this.workflows.get(snapshot.definition);
     if (workflow === undefined || workflow.definition.version !== snapshot.definitionVersion)
@@ -326,7 +331,13 @@ export class Kernel {
     if (!this.scopeAllows(principal.scopes, permission))
       throw new ForbiddenError("Workflow actor permission was revoked");
     const definition = stepDefinition(workflow, step.name);
-    const base = this.executionContext(principal, tx, { principal });
+    // The step sees one signal for cancellation, worker shutdown and its own time limit.
+    const controller = new AbortController();
+    const forward = (): void => controller.abort();
+    if (options.signal?.aborted) controller.abort();
+    else options.signal?.addEventListener("abort", forward, { once: true });
+    const limit = Math.min(definition.timeoutMs ?? Infinity, options.deadlineMs ?? Infinity);
+    const base = this.executionContext(principal, tx, { principal, signal: controller.signal });
     const outputs = Object.fromEntries(
       snapshot.steps
         .filter((item) => item.output !== undefined)
@@ -339,29 +350,18 @@ export class Kernel {
       outputs: freeze(outputs),
       attempt: step.attempt,
     }) as WorkflowStepContext;
-    if (step.status === "compensating") {
-      if (definition.compensate === undefined) return undefined;
-      await definition.compensate(step.output, context);
-      return undefined;
-    }
-    const run = Promise.resolve(definition.handler(context));
     let result: unknown;
-    if (definition.timeoutMs === undefined) result = await run;
-    else {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        result = await Promise.race([
-          run,
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(
-              () => reject(new UnavailableError("Workflow step timed out")),
-              definition.timeoutMs,
-            );
-          }),
-        ]);
-      } finally {
-        if (timer !== undefined) clearTimeout(timer);
+    try {
+      if (step.status === "compensating") {
+        if (definition.compensate === undefined) return undefined;
+        const compensate = definition.compensate;
+        await bounded(() => compensate(step.output, context), limit, controller);
+        return undefined;
       }
+      if (controller.signal.aborted) throw new UnavailableError("Workflow step cancelled");
+      result = await bounded(() => definition.handler(context), limit, controller);
+    } finally {
+      options.signal?.removeEventListener("abort", forward);
     }
     const parsed = definition.output?.safeParse(result);
     if (parsed !== undefined && !parsed.success)
@@ -759,5 +759,57 @@ export class Kernel {
     for (const component of [...this.started].reverse()) await component.stop?.();
     this.started.length = 0;
     await this.options.storage.close();
+  }
+}
+
+/**
+ * Runs a step until it settles. At its time limit or on abort the step is signalled, and this
+ * still waits for it to settle, so a late write can never escape the step's transaction after
+ * the worker records the outcome. A cancelled step that still succeeds returns its result so it
+ * is compensated. Cancellation is cooperative, not a kill.
+ */
+async function bounded<T>(
+  start: () => T | Promise<T>,
+  limit: number,
+  controller: AbortController,
+): Promise<T> {
+  const run = Promise.resolve().then(start);
+  let reason: "timed out" | "cancelled" | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const stopped = new Promise<void>((resolve) => {
+    onAbort = () => {
+      reason ??= "cancelled";
+      resolve();
+    };
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+    if (limit !== Infinity)
+      timer = setTimeout(() => {
+        reason = "timed out";
+        controller.abort();
+      }, limit);
+  });
+  try {
+    const first = await Promise.race([
+      run.then(
+        (value) => ({ settled: true as const, value }),
+        (error: unknown) => ({ settled: true as const, error }),
+      ),
+      stopped.then(() => ({ settled: false as const })),
+    ]);
+    if (first.settled && reason === undefined) {
+      if ("error" in first) throw first.error;
+      return first.value;
+    }
+    const late = await run.then(
+      (value) => ({ ok: true as const, value }),
+      () => ({ ok: false as const }),
+    );
+    // A cancelled step that still finished has done its effect: report it so it is compensated.
+    if (reason === "cancelled" && late.ok) return late.value;
+    throw new UnavailableError(`Workflow step ${reason ?? "cancelled"}`);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (onAbort !== undefined) controller.signal.removeEventListener("abort", onAbort);
   }
 }

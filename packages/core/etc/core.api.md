@@ -195,6 +195,9 @@ export const appMetadataSchema: z.ZodObject<{
 }, z.core.$strict>;
 
 // @public
+export function assertHostedWorkflowLimits(plugins: readonly EmbodyPlugin[]): void;
+
+// @public
 export function assertRequestOnlyPlugins(plugins: readonly EmbodyPlugin[]): void;
 
 // @public (undocumented)
@@ -693,6 +696,12 @@ export class HookVetoError extends EmbodyError {
     constructor(message?: string);
 }
 
+// @public
+export const HOSTED_WORKFLOW_LIMITS: Readonly<{
+    stepTimeoutMs: 30000;
+    maxDelayMs: number;
+}>;
+
 // @public (undocumented)
 export class InternalError extends EmbodyError {
     constructor(message?: string, options?: ErrorOptions);
@@ -712,7 +721,10 @@ export class Kernel {
     // (undocumented)
     boot(): Promise<void>;
     execute(target: string, input: unknown, options: ExecutionOptions | Principal): Promise<unknown>;
-    executeWorkflowStep(step: WorkflowStepRecord, snapshot: WorkflowSnapshot, tx: EntityTransaction): Promise<unknown>;
+    executeWorkflowStep(step: WorkflowStepRecord, snapshot: WorkflowSnapshot, tx: EntityTransaction, options?: {
+        readonly signal?: AbortSignal;
+        readonly deadlineMs?: number;
+    }): Promise<unknown>;
     handleEvent(event: DomainEvent, tx: EntityTransaction): Promise<void>;
     // (undocumented)
     get manifest(): AppManifest;

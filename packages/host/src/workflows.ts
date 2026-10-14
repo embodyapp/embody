@@ -8,7 +8,7 @@ import {
   type WorkflowStepRecord,
 } from "@embody/core";
 import type { Clock } from "./events.js";
-import type { StorageConnection } from "@embody/storage";
+import type { StorageConnection, WorkflowStepClaim } from "@embody/storage";
 
 export interface WorkflowWorkerOptions {
   readonly storage: StorageConnection;
@@ -19,9 +19,18 @@ export interface WorkflowWorkerOptions {
   readonly intervalMs?: number;
   readonly leaseMs?: number;
   readonly clock?: Clock;
+  /** Caps every step together with its own `timeoutMs`. Unbounded by default (reference mode). */
+  readonly stepDeadlineMs?: number;
+  /** How often a running step checks for cancellation; 0 disables. Defaults to one second. */
+  readonly cancelPollMs?: number;
 }
 
-/** Claims persisted DAG steps. Handlers are at-least-once and therefore must make side effects idempotent. */
+/**
+ * Claims persisted DAG steps. Handlers are at-least-once and therefore must make side effects
+ * idempotent. Claims cross tenants through the storage claim function; each step is then locked
+ * and run in its own tenant transaction, fenced by its claim, so a lost lease never runs twice
+ * concurrently and a step never starts after its instance's cancellation commits.
+ */
 export class WorkflowWorker {
   private readonly workerId: string;
   private readonly clock: Clock;
@@ -37,7 +46,11 @@ export class WorkflowWorker {
   public start(): Promise<void> {
     if (this.timer === undefined) {
       this.stopping = false;
-      this.timer = setInterval(() => void this.tick(), this.options.intervalMs ?? 500);
+      // A failed tick (database outage, lost connection) is retried by the next interval.
+      this.timer = setInterval(
+        () => void this.tick().catch(() => undefined),
+        this.options.intervalMs ?? 500,
+      );
     }
     return Promise.resolve();
   }
@@ -50,7 +63,7 @@ export class WorkflowWorker {
   public async tick(): Promise<void> {
     if (this.stopping) return;
     const claimed = await this.options.storage.transaction("system", (tx) =>
-      tx.workflows.claimBatch({
+      tx.workflows.claimDue({
         limit: this.options.batchSize ?? 50,
         workerId: this.workerId,
         now: this.clock.now().toISOString(),
@@ -75,12 +88,31 @@ export class WorkflowWorker {
       this.options.storage.dialect === "sqlite" ? 1 : (this.options.concurrency ?? 4);
     await Promise.all(Array.from({ length: Math.min(concurrency, claimed.length) }, run));
   }
-  private async process(step: WorkflowStepRecord): Promise<void> {
-    await this.options.storage.transaction(step.orgId, async (tx) => {
+  private async process(claim: WorkflowStepClaim): Promise<void> {
+    await this.options.storage.transaction(claim.orgId, async (tx) => {
+      const step = (await tx.workflows.lockClaim(claim)) as WorkflowStepRecord | null;
+      if (step === null) return;
       const snapshot = (await tx.workflows.get(step.instanceId)) as WorkflowSnapshot | null;
       if (snapshot === null) return;
+      if (snapshot.cancelRequested && step.status === "running") {
+        await tx.workflows.releaseCancelled({ id: step.id, now: this.clock.now().toISOString() });
+        return;
+      }
+      const controller = new AbortController();
+      const watch =
+        step.status === "running"
+          ? this.watchCancellation(claim.orgId, snapshot.id, controller)
+          : undefined;
       try {
-        const output = await this.options.kernel.executeWorkflowStep(step, snapshot, tx);
+        const run = () =>
+          this.options.kernel.executeWorkflowStep(step, snapshot, tx, {
+            signal: controller.signal,
+            ...(this.options.stepDeadlineMs === undefined
+              ? {}
+              : { deadlineMs: this.options.stepDeadlineMs }),
+          });
+        // A failed, timed-out or cancelled attempt leaves none of its writes behind.
+        const output = tx.savepoint === undefined ? await run() : await tx.savepoint(run);
         await tx.workflows.completeStep({
           id: step.id,
           output,
@@ -127,8 +159,37 @@ export class WorkflowWorker {
           occurredAt: this.clock.now().toISOString(),
           producerPluginId: snapshot.definition.split(".")[0]!,
         });
+      } finally {
+        watch?.();
       }
     });
+  }
+  /** Aborts a running step once its instance's cancellation commits; returns a stop function. */
+  private watchCancellation(
+    orgId: string,
+    instanceId: string,
+    controller: AbortController,
+  ): (() => void) | undefined {
+    const every = this.options.cancelPollMs ?? 1_000;
+    if (every <= 0) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let stopped = false;
+    const check = async (): Promise<void> => {
+      try {
+        const current = await this.options.storage.transaction(orgId, (tx) =>
+          tx.workflows.get(instanceId),
+        );
+        if (current?.cancelRequested) controller.abort();
+      } catch {
+        // A failed check is retried; it never fails the step.
+      }
+      if (!stopped && !controller.signal.aborted) timer = setTimeout(() => void check(), every);
+    };
+    timer = setTimeout(() => void check(), every);
+    return () => {
+      stopped = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
   }
   private resultStep(snapshot: WorkflowSnapshot, stepName: string): boolean {
     const workflow = this.options.kernel.plugins

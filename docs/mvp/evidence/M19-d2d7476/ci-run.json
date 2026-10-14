@@ -1,0 +1,66 @@
+{
+  "conclusion": "success",
+  "createdAt": "2026-10-14T13:00:38Z",
+  "databaseId": 38568267378,
+  "event": "pull_request",
+  "headBranch": "feat/mvp-m19-workflow-gates",
+  "headSha": "d2d74764c1e3f2be5aff7170c13595b1a1817c31",
+  "jobs": [
+    {
+      "completedAt": "2026-10-14T13:03:58Z",
+      "conclusion": "success",
+      "name": "postgres-matrix (22)",
+      "startedAt": "2026-10-14T13:00:41Z"
+    },
+    {
+      "completedAt": "2026-10-14T13:04:26Z",
+      "conclusion": "success",
+      "name": "e2e-artifacts-matrix (24)",
+      "startedAt": "2026-10-14T13:00:41Z"
+    },
+    {
+      "completedAt": "2026-10-14T13:03:56Z",
+      "conclusion": "success",
+      "name": "postgres-matrix (24)",
+      "startedAt": "2026-10-14T13:00:41Z"
+    },
+    {
+      "completedAt": "2026-10-14T13:02:44Z",
+      "conclusion": "success",
+      "name": "quality (24)",
+      "startedAt": "2026-10-14T13:00:42Z"
+    },
+    {
+      "completedAt": "2026-10-14T13:03:00Z",
+      "conclusion": "success",
+      "name": "quality (22)",
+      "startedAt": "2026-10-14T13:00:41Z"
+    },
+    {
+      "completedAt": "2026-10-14T13:03:05Z",
+      "conclusion": "success",
+      "name": "e2e-artifacts-matrix (22)",
+      "startedAt": "2026-10-14T13:00:41Z"
+    },
+    {
+      "completedAt": "2026-10-14T13:00:48Z",
+      "conclusion": "success",
+      "name": "terraform",
+      "startedAt": "2026-10-14T13:00:41Z"
+    },
+    {
+      "completedAt": "2026-10-14T13:04:05Z",
+      "conclusion": "success",
+      "name": "postgres",
+      "startedAt": "2026-10-14T13:04:01Z"
+    },
+    {
+      "completedAt": "2026-10-14T13:04:33Z",
+      "conclusion": "success",
+      "name": "e2e-artifacts",
+      "startedAt": "2026-10-14T13:04:29Z"
+    }
+  ],
+  "updatedAt": "2026-10-14T13:04:33Z",
+  "url": "https://github.com/embodyapp/embody/actions/runs/38568267378"
+}
