@@ -37,7 +37,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | M16 | Recovery/operations/customer-data readiness | M07, M09, M13, M15 | NOT_STARTED | — | Includes manual accountable approvals |
 | M17 | Real zero-instance and centralized-control proof | M03–M16, M19–M21 | NOT_STARTED | — | Requires actual cloud/client evidence, including event and delayed-step wakes |
 | M18 | Candidate review and controlled release | M01–M17, M19–M21 | NOT_STARTED | — | Owner release decision required |
-| M19 | Workflow engine gates for hosted use | M03, M08 | NOT_STARTED | — | Closes framework P11-02 crash/cancellation matrix and runtime-role claims; can start now |
+| M19 | Workflow engine gates for hosted use | M03, M08 | NOT_STARTED | — | Closes framework P11-02 (crash/cancellation matrix, runtime-role claims) and P11-03 (CLI/MCP workflow journey); can start now |
 | M20 | Queue-woken durable runtime | M08, M19 (local); M09, M12 (real queue) | NOT_STARTED | — | Durable profile, enqueue-before-commit, platform-only drain endpoint |
 | M21 | Gateway event relay and subscriptions | M04, M05, M07, M12, M13, M20 | NOT_STARTED | — | ADR 0004 relay transport; same-workspace subscriptions |
 

@@ -357,11 +357,13 @@ Steps:
 2. Replace the cross-tenant `system` claim with a design that works under the M03 runtime role without RLS bypass (per-org claims or a narrowly granted claim function), and test it.
 3. Expose the set of workflow definition versions with running instances so deployment (M13) can refuse to drop them.
 4. Enforce a step duration limit equal to the action deadline and a maximum delay of 30 days at definition validation.
+5. Complete P11-03: the official CLI and MCP workflow journey (start, status, cancel, retry through the gateway's generated actions) against the real PostgreSQL engine, with docs and scaffold guidance. M19 DONE closes framework P11-02 and P11-03.
 
 Acceptance:
 - **M19.a:** every crash point yields exactly one completed or compensated logical step; no step runs after cancellation is committed.
 - **M19.b:** claims under the runtime role cannot read or advance another tenant's instances; no RLS bypass is used.
 - **M19.c:** definitions over the step/delay limits fail validation with actionable errors; running-version listing is exact under concurrency.
+- **M19.d:** packed CLI and the supported MCP client start a workflow, read its status, cancel one and retry a failed one through the gateway; unauthorized callers are denied.
 
 Docs: workflow contract for hosted apps, limits and idempotency guidance. Evidence: real PostgreSQL crash matrix with zero skips.
 
