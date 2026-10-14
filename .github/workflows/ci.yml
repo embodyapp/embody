@@ -90,6 +90,9 @@ jobs:
         run: pnpm test:mvp
         env:
           EMBODY_POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
+      # The packed scaffold proof uses the same npm major as the packed/distributed baseline.
+      - run: npm install --global npm@11
+      - run: npm --version
       - name: Mandatory request-only runtime and packed hosted scaffold (zero skips)
         run: pnpm test:m08
         env:
