@@ -1,9 +1,41 @@
-# M08 local implementation evidence — IN_REVIEW
+# M08 request-only runtime evidence — DONE
 
-Candidate: uncommitted working tree based on `c4e13fb`, branch
-`feat/mvp-m07-safe-dispatch`. No frozen candidate SHA, PR, remote CI or independent
-acceptance is claimed. M08 remains **IN_REVIEW**, not DONE. Contract:
-[request-only runtime](../RUNTIME.md).
+Frozen candidate: `3e1f2686d0f2600d6c33b10898f97039e3f9b015` on
+`feat/mvp-m08-request-only` ([#40](https://github.com/embodyapp/embody/pull/40), stacked on
+accepted/unmerged [#39](https://github.com/embodyapp/embody/pull/39), base `c4e13fb`).
+Contract: [request-only runtime](../RUNTIME.md). Reviews and CI artifacts:
+[`M08-3e1f268/`](./M08-3e1f268/).
+
+## Candidate history
+
+| Commit | Change | CI |
+|---|---|---|
+| `587d74a` | Initial M08 implementation (the local gates below were first run on this tree) | [38532322030](https://github.com/embodyapp/embody/actions/runs/38532322030) **failed**: 120 tests passed, but the packed request-only scaffold `npm install` crashed under npm 10 (`edgesOut`); Node 24 cancelled by fail-fast. Not counted. |
+| `157d90b` | CI: `postgres-matrix` installs npm@11 before `test:m08`, matching the packed baseline job | [38532984276](https://github.com/embodyapp/embody/actions/runs/38532984276) all9 green |
+| `3e1f268` | Fix independent-review B1 (PostgreSQL session termination crashed the process) and N1 (hosted pool bounds untested) | [38535915385](https://github.com/embodyapp/embody/actions/runs/38535915385) **all9 green — accepted candidate** |
+
+[Initial independent review](./M08-3e1f268/initial-code-review-587d74a.md) rejected `587d74a`
+on B1, reproduced empirically. [Independent final review](./M08-3e1f268/independent-final-review.md)
+accepts M08.a–d on `3e1f268`; the B1 reproduction was re-run independently (old: unhandled
+`error`, exit 1; new: transaction rejects, process survives, exit 0).
+
+## Exact-candidate CI (`3e1f268`, run 38535915385)
+
+All 9 checks green ([run metadata](./M08-3e1f268/ci-run.json), sanitized
+[artifacts](./M08-3e1f268/ci/)). Node 22.23.3 and 24.21.0 each:
+
+- `test:m08`: **122 passed / 0 failed / 0 skipped**, then packed request-only scaffold proof.
+- `test:mvp`: **295 / 0 / 0**; gateway-store **43 / 0 / 0**; app PostgreSQL **16 / 0 / 0**.
+- Packed consumer and distributed baselines: 1 + 1 journeys, 0 failed / 0 skipped.
+- Quality (lint, licenses, typecheck, test, build, api-report, format) passed.
+
+## Local gates on `3e1f268`
+
+Node 24.21.0 and 22.23.3 `pnpm test:m08` against a disposable `postgres:16-alpine`
+fixture: **122 passed / 0 skips** plus packed scaffold, both majors. The new B1 regression
+was first shown to fail on the `587d74a` storage code (`Unhandled 'error' event`). Node 24:
+`pnpm lint`, `typecheck`, `api-report`, `format:check`, `test:verification` passed; plain
+`pnpm test` **380 passed / 16 optional DB skips** (optional skips are not mandatory evidence).
 
 ## Implementation
 
@@ -24,10 +56,14 @@ acceptance is claimed. M08 remains **IN_REVIEW**, not DONE. Contract:
   keepalive intervals; both JSON and SSE deadline paths are tested.
 - `--request-only` packed scaffold includes guarded hosted startup and a CRUD card
   entity. It does not silently select reference mode or a production local verifier.
-- Mandatory `pnpm test:m08` added to both Node 22/24 PostgreSQL CI matrix jobs. Those
-  remote jobs have not been executed for this uncommitted candidate.
+- Mandatory `pnpm test:m08` added to both Node 22/24 PostgreSQL CI matrix jobs (see
+  exact-candidate CI above).
+- Hosted PostgreSQL clients keep an error listener for their whole checkout and broken
+  clients are discarded, so a server-side session termination (for example the 30 s
+  idle-in-transaction timeout while a handler awaits non-database work) fails that request
+  instead of crashing the instance (`3e1f268`).
 
-## Executed local gates
+## Initial local gates (`587d74a` tree, before freeze)
 
 Supported runtimes: **Node 22.23.3** and **Node 24.21.0**. Each final local run:
 
@@ -76,14 +112,32 @@ supported majors after fixing implementation/test issues.
 
 ## Cleanup and limits
 
-The dedicated `embody-m08-verification` Compose container/network were removed with
+After both the initial and the `3e1f268` local runs, the dedicated
+`embody-m08-verification` Compose container/network were removed with
 `docker compose -p embody-m08-verification -f docker-compose.postgres-test.yml down -v`.
 No named data volume was retained. Existing `embody-local-*` containers were left
-untouched. Test subprocesses, scratch directories and packed-consumer temporary
+untouched (verified healthy after teardown). Both independent-review reproductions used
+their own disposable containers, removed afterwards. Test subprocesses, scratch directories and packed-consumer temporary
 applications were removed. No cloud resources were created or changed.
 
-Pending: independent code/acceptance review, candidate freeze/PR and exact-candidate
-Node22/24 CI. No measured provider cold-path latency, actual cloud-zero interval,
-three-instance deployment cap, source sandbox, reliable background delivery or
-production/release qualification is inferred. Arbitrary customer timers, module
-state, external effects and filesystem writes remain outside static preflight.
+Accepted residuals (non-blocking per the [final review](./M08-3e1f268/independent-final-review.md)):
+
+- **N2** No pool-acquire timeout; requests queued behind five stuck handlers still get 503 at
+  the deadline but hold admission slots. Budget-bound acquire is later hardening.
+- **N3** Reference mode: `/execute/stream` now counts toward concurrency (can 429) and
+  reference `/execute` aborts on client close. Intended changes.
+- **N4** Ephemeral scratch is a documented contract, not enforced (no read-only filesystem or
+  tmpfs control); owned by M09/M11/M13.
+- **N5** Abort after handler return but before `COMMIT` can commit while the host answers 503;
+  the documented ambiguous outcome the M07 gateway reports as unknown.
+- **N6** Follow-up coverage: auth-deadline race, `createHost` request-only guards, injected
+  SQLite rejection in hosted `createAppHost`, scaffold CRUD under hosted mode.
+- **N8** The `setInterval` spy proves no business/heartbeat timers, not "no timers whatsoever"
+  (Node-internal unref'd and library timers are not observed).
+- **N9** Terminated-session errors are dropped without sanitized logging/metrics; M09/M13
+  operations hardening.
+
+No measured provider cold-path latency, actual cloud-zero interval, three-instance deployment
+cap, source sandbox, reliable background delivery or production/release qualification is
+inferred (M09/M11/M13/M17). Arbitrary customer timers, module state, external effects and
+filesystem writes remain outside static preflight.
