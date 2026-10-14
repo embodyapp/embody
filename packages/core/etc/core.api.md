@@ -194,6 +194,9 @@ export const appMetadataSchema: z.ZodObject<{
     instructions: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 
+// @public
+export function assertRequestOnlyPlugins(plugins: readonly EmbodyPlugin[]): void;
+
 // @public (undocumented)
 export function assertUniqueMappedTargets(targets: readonly string[]): void;
 
@@ -716,6 +719,8 @@ export class Kernel {
     // (undocumented)
     get plugins(): readonly EmbodyPlugin[];
     // (undocumented)
+    get profile(): "reference" | "request-only";
+    // (undocumented)
     runHooks(key: string, payload: unknown, context: KernelContext, now?: () => number): Promise<readonly HookTrace[]>;
     // (undocumented)
     state: KernelState;
@@ -776,6 +781,7 @@ export interface KernelOptions {
     readonly plugins: readonly EmbodyPlugin[];
     // (undocumented)
     readonly principal?: Principal;
+    readonly profile?: "reference" | "request-only";
     // (undocumented)
     readonly storage: KernelStorage;
 }

@@ -1,5 +1,10 @@
 # create-embody-app
 
+For a hosted request-only starter, run `pnpm dlx create-embody-app my-app --request-only`.
+It includes a CRUD card entity and fails closed unless the hosted production profile
+and pre-migrated PostgreSQL are configured. See the [runtime and migration contract](https://github.com/embodyapp/embody/blob/main/docs/mvp/RUNTIME.md).
+The default scaffold remains the local/reference starter.
+
 Create a ready-to-run Embody TypeScript application.
 
 ```sh

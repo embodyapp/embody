@@ -29,7 +29,7 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:postgres": "node ../../scripts/postgres-prerequisites.mjs && EMBODY_POSTGRES_REQUIRED=true EMBODY_POSTGRES_SKIP_SCHEMA=true vitest run test/postgres.test.ts test/kernel-adapters.test.ts"
+    "test:postgres": "node ../../scripts/postgres-prerequisites.mjs && EMBODY_POSTGRES_REQUIRED=true EMBODY_POSTGRES_SKIP_SCHEMA=true vitest run test/postgres.test.ts test/kernel-adapters.test.ts test/request-only.postgres.test.ts"
   },
   "engines": {
     "node": "^22.0.0 || ^24.0.0"

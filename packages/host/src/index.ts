@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
+  assertRequestOnlyPlugins,
   BadRequestError,
   RateLimitedError,
   UnauthenticatedError,
@@ -56,6 +57,7 @@ export interface HostOptions {
   readonly environment?: "development" | "production";
   readonly bodyLimit?: number;
   readonly requestTimeoutMs?: number;
+  readonly profile?: "reference" | "request-only";
   readonly concurrency?: number;
   readonly sseBufferBytes?: number;
   readonly sseKeepaliveMs?: number;
@@ -170,14 +172,25 @@ function bearer(value: string | undefined): string {
 /** Creates the remote application HTTP surface. It accepts only gateway-authenticated requests. */
 export function createHost(options: HostOptions): EmbodyHost {
   const environment = options.environment ?? "production";
+  const requestOnly = options.profile === "request-only";
+  if (requestOnly) {
+    if (options.kernel.profile !== "request-only")
+      throw new Error("Request-only hosts require a request-only kernel");
+    assertRequestOnlyPlugins(options.kernel.plugins);
+    if (options.eventDelivery) throw new Error("Request-only hosts cannot expose event ingress");
+  }
   if (environment === "production" && options.verifier.localDevelopmentOnly)
     throw new Error("Local development verifier cannot run in production");
   const app = Fastify({
     bodyLimit: options.bodyLimit ?? 1_048_576,
-    requestTimeout: options.requestTimeoutMs ?? 30_000,
+    requestTimeout: requestOnly ? 60_000 : (options.requestTimeoutMs ?? 30_000),
+    connectionTimeout: requestOnly ? 60_000 : 0,
   });
   let accepting = false;
   let active = 0;
+  const requestStarted = new WeakMap<object, number>();
+  const remaining = (request: object) =>
+    Math.max(0, 60_000 - (Date.now() - (requestStarted.get(request) ?? Date.now())));
   const maximum = options.concurrency ?? 100;
   app.addHook("onSend", async (_request, reply, payload) => {
     reply.header("x-content-type-options", "nosniff");
@@ -187,6 +200,7 @@ export function createHost(options: HostOptions): EmbodyHost {
     return payload;
   });
   app.addHook("onRequest", async (request, reply) => {
+    requestStarted.set(request, Date.now());
     const requestId =
       typeof request.headers["x-request-id"] === "string"
         ? request.headers["x-request-id"]
@@ -208,9 +222,24 @@ export function createHost(options: HostOptions): EmbodyHost {
     headers: Record<string, string | string[] | undefined>;
   }) => {
     const gatewayAuth = request.headers["x-gateway-auth"];
-    return options.verifier.verify(
+    const verification = options.verifier.verify(
       bearer(typeof gatewayAuth === "string" ? gatewayAuth : undefined),
     );
+    if (!requestOnly) return verification;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        verification,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new UnavailableError("Authentication deadline exceeded")),
+            Math.min(30_000, remaining(request)),
+          );
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   };
   app.post("/execute", async (request, reply) => {
     if (!accepting || options.kernel.state !== "ready") throw new UnavailableError();
@@ -220,21 +249,49 @@ export function createHost(options: HostOptions): EmbodyHost {
     }
     const parsed = executionRequestSchema.safeParse(request.body);
     if (!parsed.success) throw new BadRequestError();
-    const principal = await authenticateExecution(request);
-    const controller = new AbortController();
-    request.raw.once("aborted", () => controller.abort());
     active++;
+    let principal: Principal;
     try {
-      return await options.kernel.execute(parsed.data.target, parsed.data.input, {
-        principal,
-        requestId: String(reply.getHeader("x-request-id")),
-        ...(typeof request.headers["traceparent"] === "string"
-          ? { traceparent: request.headers["traceparent"] }
-          : {}),
-        signal: controller.signal,
-      });
-    } finally {
+      principal = await authenticateExecution(request);
+    } catch (error) {
       active--;
+      throw error;
+    }
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const close = () => {
+      if (!reply.raw.writableEnded) abort();
+    };
+    request.raw.once("aborted", abort);
+    reply.raw.once("close", close);
+    if (request.raw.aborted || reply.raw.destroyed || (requestOnly && remaining(request) === 0))
+      abort();
+    const timer = requestOnly ? setTimeout(abort, Math.min(30_000, remaining(request))) : undefined;
+    try {
+      const execution = options.kernel
+        .execute(parsed.data.target, parsed.data.input, {
+          principal,
+          requestId: String(reply.getHeader("x-request-id")),
+          ...(typeof request.headers["traceparent"] === "string"
+            ? { traceparent: request.headers["traceparent"] }
+            : {}),
+          signal: controller.signal,
+        })
+        .finally(() => {
+          active--;
+        });
+      if (!requestOnly) return await execution;
+      const cancelled = new Promise<never>((_resolve, reject) => {
+        const fail = () =>
+          reject(new UnavailableError("Execution cancelled or action deadline exceeded"));
+        if (controller.signal.aborted) fail();
+        else controller.signal.addEventListener("abort", fail, { once: true });
+      });
+      return await Promise.race([execution, cancelled]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      request.raw.removeListener("aborted", abort);
+      reply.raw.removeListener("close", close);
     }
   });
   const eventDelivery = options.eventDelivery;
@@ -260,11 +317,25 @@ export function createHost(options: HostOptions): EmbodyHost {
     });
   app.post("/execute/stream", async (request, reply) => {
     if (!accepting || options.kernel.state !== "ready") throw new UnavailableError();
+    if (active >= maximum) {
+      reply.header("retry-after", "1");
+      throw new RateLimitedError();
+    }
     const parsed = executionRequestSchema.safeParse(request.body);
     if (!parsed.success) throw new BadRequestError();
-    const principal = await authenticateExecution(request);
+    active++;
+    let principal: Principal;
+    try {
+      principal = await authenticateExecution(request);
+    } catch (error) {
+      active--;
+      throw error;
+    }
     const controller = new AbortController();
-    request.raw.once("aborted", () => controller.abort());
+    const abort = () => controller.abort();
+    request.raw.once("aborted", abort);
+    if (request.raw.aborted || reply.raw.destroyed || (requestOnly && remaining(request) === 0))
+      abort();
     reply.hijack();
     reply.raw.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
@@ -314,33 +385,50 @@ export function createHost(options: HostOptions): EmbodyHost {
     };
     const write = (event: string, data: unknown): void =>
       enqueue(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    reply.raw.once("close", () => {
+    const close = () => {
       if (!terminal) controller.abort();
-    });
-    const keepalive = setInterval(
-      () => enqueue(": keepalive\n\n"),
-      options.sseKeepaliveMs ?? 15_000,
-    );
+    };
+    reply.raw.once("close", close);
+    const keepalive = requestOnly
+      ? undefined
+      : setInterval(() => enqueue(": keepalive\n\n"), options.sseKeepaliveMs ?? 15_000);
+    const timer = requestOnly ? setTimeout(abort, Math.min(30_000, remaining(request))) : undefined;
     try {
-      const result = await options.kernel.execute(parsed.data.target, parsed.data.input, {
-        principal,
-        requestId: String(reply.getHeader("x-request-id")),
-        signal: controller.signal,
-        progress: (update) => {
-          if (update.percent !== undefined && update.percent < percent)
-            throw new BadRequestError("Progress percent must not decrease");
-          if (update.percent !== undefined) percent = update.percent;
-          write("progress", update);
-        },
-      });
+      const execution = options.kernel
+        .execute(parsed.data.target, parsed.data.input, {
+          principal,
+          requestId: String(reply.getHeader("x-request-id")),
+          signal: controller.signal,
+          progress: (update) => {
+            if (update.percent !== undefined && update.percent < percent)
+              throw new BadRequestError("Progress percent must not decrease");
+            if (update.percent !== undefined) percent = update.percent;
+            write("progress", update);
+          },
+        })
+        .finally(() => {
+          active--;
+        });
+      const cancelled = requestOnly
+        ? new Promise<never>((_resolve, reject) => {
+            const fail = () =>
+              reject(new UnavailableError("Execution cancelled or action deadline exceeded"));
+            if (controller.signal.aborted) fail();
+            else controller.signal.addEventListener("abort", fail, { once: true });
+          })
+        : undefined;
+      const result = await (cancelled ? Promise.race([execution, cancelled]) : execution);
       write("result", result);
     } catch (error) {
       const response = toErrorEnvelope(error, String(reply.getHeader("x-request-id")), environment);
       write("error", response.body);
     } finally {
-      clearInterval(keepalive);
+      if (keepalive !== undefined) clearInterval(keepalive);
+      if (timer !== undefined) clearTimeout(timer);
       await flush();
       terminal = true;
+      request.raw.removeListener("aborted", abort);
+      reply.raw.removeListener("close", close);
       reply.raw.end();
     }
   });
@@ -453,6 +541,16 @@ export function parseAppEnvironment(input: NodeJS.ProcessEnv = process.env): App
         "Hosted apps require production, workspace, issuer and public JWKS; no signing secret",
       );
     if (!env.GATEWAY_JWKS_URL.startsWith("https:")) throw new Error("Hosted JWKS requires HTTPS");
+    if (!env.DATABASE_URL || !/^postgres(?:ql)?:\/\//.test(env.DATABASE_URL))
+      throw new Error("Hosted request-only apps require PostgreSQL DATABASE_URL");
+    if (env.GATEWAY_URL || env.PUBLIC_URL || env.GATEWAY_REGISTRATION_SECRET)
+      throw new Error(
+        "Hosted request-only apps cannot register or heartbeat; remove reference gateway registration settings",
+      );
+    if (input["DATABASE_FILE"])
+      throw new Error(
+        "Hosted request-only apps cannot use SQLite/local persistence; remove DATABASE_FILE",
+      );
     if (env.EMBODY_EVENT_SECRET || env.EMBODY_EVENT_DESTINATIONS)
       throw new Error("Hosted apps do not expose legacy shared-secret event ingress");
   }
@@ -543,12 +641,29 @@ export async function createAppHost(
   options: AppHostRuntimeOptions = {},
 ): Promise<AppHostRuntime> {
   const environment = parseAppEnvironment(options.env);
-  if (environment.EMBODY_HOST_PROFILE === "hosted" && options.verifier)
-    throw new Error("Hosted authentication cannot be overridden");
+  const hosted = environment.EMBODY_HOST_PROFILE === "hosted";
+  if (hosted) {
+    if (options.verifier) throw new Error("Hosted authentication cannot be overridden");
+    if (![22, 24].includes(Number(process.versions.node.split(".")[0])))
+      throw new Error("Hosted request-only runtime requires Node 22.x or 24.x");
+    assertRequestOnlyPlugins(definition.plugins);
+    if (options.storage)
+      throw new Error("Hosted storage cannot be overridden; use runtime PostgreSQL credentials");
+  }
   let storage = options.storage;
   if (storage === undefined && environment.DATABASE_URL)
     storage = new PostgresStorage(
-      { connectionString: environment.DATABASE_URL },
+      {
+        connectionString: environment.DATABASE_URL,
+        ...(hosted
+          ? {
+              max: 5,
+              statement_timeout: 30_000,
+              idle_in_transaction_session_timeout: 30_000,
+              idleTimeoutMillis: 1_000,
+            }
+          : {}),
+      },
       { schemaMode: environment.EMBODY_HOST_PROFILE === "hosted" ? "verify" : "migrate" },
     );
   if (storage === undefined) {
@@ -562,6 +677,7 @@ export async function createAppHost(
   const app = appMetadataOf(definition);
   const kernel = new Kernel({
     plugins: definition.plugins,
+    profile: hosted ? "request-only" : "reference",
     storage,
     ...(app === undefined ? {} : { app }),
   });
@@ -612,18 +728,22 @@ export async function createAppHost(
     appId: definition.appId,
     version: definition.version,
     environment: environment.NODE_ENV,
+    profile: hosted ? "request-only" : "reference",
+    requestTimeoutMs: hosted ? 60_000 : 30_000,
     ...(environment.EMBODY_EVENT_SECRET
       ? { eventDelivery: { storage, secret: environment.EMBODY_EVENT_SECRET } }
       : {}),
   });
-  const workflowWorker = new WorkflowWorker({ storage, kernel });
-  const outboxWorker = new OutboxWorker({
-    storage,
-    kernel,
-    producerAppId: definition.appId,
-    ...(eventTransport ? { transport: eventTransport } : {}),
-    maxAttempts: 5,
-  });
+  const workflowWorker = hosted ? undefined : new WorkflowWorker({ storage, kernel });
+  const outboxWorker = hosted
+    ? undefined
+    : new OutboxWorker({
+        storage,
+        kernel,
+        producerAppId: definition.appId,
+        ...(eventTransport ? { transport: eventTransport } : {}),
+        maxAttempts: 5,
+      });
   const deliveryWorker = eventTransport
     ? new DeliveryWorker({ storage, transport: eventTransport, maxAttempts: 5 })
     : undefined;
@@ -646,8 +766,8 @@ export async function createAppHost(
     if (stopped) return;
     stopped = true;
     registration?.stop();
-    await workflowWorker.stop();
-    await outboxWorker.stop();
+    await workflowWorker?.stop();
+    await outboxWorker?.stop();
     await deliveryWorker?.stop();
     try {
       await host.stop();
@@ -664,11 +784,13 @@ export async function createAppHost(
       return address;
     },
     async tickEvents(): Promise<void> {
-      await outboxWorker.tick();
+      if (hosted) throw new Error("Request-only mode has no event delivery/drain");
+      await outboxWorker?.tick();
       await deliveryWorker?.tick();
     },
     async tickWorkflows(): Promise<void> {
-      await workflowWorker.tick();
+      if (hosted) throw new Error("Request-only mode has no workflow worker");
+      await workflowWorker?.tick();
     },
     async start(): Promise<string> {
       if (address !== undefined) return address;
@@ -679,8 +801,8 @@ export async function createAppHost(
           host: options.host ?? (environment.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
         });
         await registration?.start();
-        await workflowWorker.start();
-        await outboxWorker.start();
+        await workflowWorker?.start();
+        await outboxWorker?.start();
         await deliveryWorker?.start();
         return address;
       } catch (error) {

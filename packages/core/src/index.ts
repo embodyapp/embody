@@ -122,6 +122,7 @@ export {
 export { assertUniqueMappedTargets, formatTarget, parseTarget, targetToMcpName } from "./target.js";
 export {
   Kernel,
+  assertRequestOnlyPlugins,
   sortPlugins,
   type BootPhase,
   type HookTrace,
