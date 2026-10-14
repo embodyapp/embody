@@ -79,6 +79,33 @@ suite("request-only PostgreSQL runtime", () => {
     }
   });
 
+  it("server idle-in-transaction termination rejects the request without crashing the process", async () => {
+    const orgId = `m08-idle-${randomUUID()}`;
+    const source = `import { PostgresStorage } from './dist/index.js';
+const storage = new PostgresStorage({ connectionString: process.env.EMBODY_POSTGRES_URL, max: 1, idle_in_transaction_session_timeout: 300 });
+const outcome = await storage.transaction(${JSON.stringify(orgId)}, async tx => {
+  await tx.entities.create(${JSON.stringify(orgId)}, 'card', { data: { title: 'lost' } });
+  await new Promise(resolve => setTimeout(resolve, 1500));
+}).then(() => 'committed', error => 'rejected:' + error.message);
+const rows = await storage.transaction(${JSON.stringify(orgId)}, tx => tx.entities.list(${JSON.stringify(orgId)}, 'card', {}));
+await storage.close();
+process.stdout.write(JSON.stringify({ outcome, rows: rows.length }));`;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    const [code] = (await once(child, "exit")) as [number | null];
+    expect(stderr).toBe("");
+    expect(code).toBe(0);
+    const result = JSON.parse(stdout) as { outcome: string; rows: number };
+    expect(result.outcome).toMatch(/^rejected:/);
+    expect(result.rows).toBe(0);
+  });
+
   it("process/scratch replacement after SIGKILL preserves committed data but no partial transaction", async () => {
     const scratch = await mkdtemp(join(tmpdir(), "embody-m08-scratch-"));
     const orgId = `m08-kill-${randomUUID()}`;
