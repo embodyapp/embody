@@ -37,7 +37,7 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | M16 | Recovery/operations/customer-data readiness | M07, M09, M13, M15 | NOT_STARTED | — | Includes manual accountable approvals |
 | M17 | Real zero-instance and centralized-control proof | M03–M16, M19–M21 | NOT_STARTED | — | Requires actual cloud/client evidence, including event and delayed-step wakes |
 | M18 | Candidate review and controlled release | M01–M17, M19–M21 | NOT_STARTED | — | Owner release decision required |
-| M19 | Workflow engine gates for hosted use | M03, M08 | NOT_STARTED | — | Closes framework P11-02 (crash/cancellation matrix, runtime-role claims) and P11-03 (CLI/MCP workflow journey); can start now |
+| M19 | Workflow engine gates for hosted use | M03, M08 | IN_REVIEW | claude | [Contract](./WORKFLOWS.md), [local evidence](./evidence/M19-local.md): runtime-role claims, crash matrix, fencing, cancellation/compensation fixes, CLI/MCP journey; Node22/24 `test:m19` 38/0 skips. Independent review and exact-candidate CI pending |
 | M20 | Queue-woken durable runtime | M08, M19 (local); M09, M12 (real queue) | NOT_STARTED | — | Durable profile, enqueue-before-commit, platform-only drain endpoint |
 | M21 | Gateway event relay and subscriptions | M04, M05, M07, M12, M13, M20 | NOT_STARTED | — | ADR 0004 relay transport; same-workspace subscriptions |
 
@@ -74,6 +74,8 @@ States: `NOT_STARTED`, `BLOCKED` (explain why), `IN_PROGRESS`, `IN_REVIEW`, `DON
 | G5: invite-only release approved | M18 | NOT_EVALUATED | — |
 
 ## Activity log
+
+- 2026-10-14 — claude — M19 — NOT_STARTED → IN_REVIEW — `feat/mvp-m19-workflow-gates` from `7cf7fcd`. Reproduced that workflows never ran under the PostgreSQL runtime role; added a narrowly granted claim function, claim fencing and fixes for concurrent joins, cancellation, compensation order, orphans, late writes and compensation retry; CLI workflow resolution; hosted limits and active versions. New mandatory `pnpm test:m19` (CI Node 22/24): 38 passed, 0 skips on both majors locally. [Evidence](./evidence/M19-local.md). Independent review and exact-candidate CI pending.
 
 - 2026-10-14 — claude — Scope change — owner decided events, subscriptions and durable workflows are part of the MVP. MD03 revised; MD11–MD14 recorded with recommended defaults, then approved by the owner the same day. Added M19 (workflow engine gates), M20 (queue-woken durable runtime) and M21 (gateway event relay); amended M09 (wake-queue qualification), M11 (manifest), M12 (shared queue), M13 (workflow version retention, subscription binding), M14–M17 and M18 dependencies; added V19–V22. README promise, exclusions and scale-to-zero rule 13 updated. M08 stays DONE: its request-only profile remains supported and the durable profile extends it. No code changed. Task count 8/21.
 

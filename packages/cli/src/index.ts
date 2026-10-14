@@ -177,12 +177,24 @@ function usage(io: CliIo, code: number = EXIT.usage): number {
     code,
   );
 }
-function actionFor(app: CatalogApp, words: string[]): string | undefined {
-  if (words.length >= 2 && ["create", "get", "list", "update", "delete"].includes(words[1] ?? ""))
-    return Object.keys(app.manifest.actions).find((target) =>
-      target.endsWith(`.${words[0]}.${words[1]}`),
-    );
-  return Object.keys(app.manifest.actions).find((target) => target.endsWith(`.${words[0]}`));
+/** Commands that take the record or workflow instance ID as a positional argument. */
+const POSITIONAL_ID = ["get", "update", "delete", "status", "cancel", "retry"];
+
+/**
+ * Resolves `<name> <operation>` (entity CRUD, workflow start/status/cancel/retry) before a
+ * single-word action, so `orders fulfil start` cannot match another workflow's `start`.
+ */
+function actionFor(
+  app: CatalogApp,
+  words: string[],
+): { readonly target: string; readonly words: 1 | 2 } | undefined {
+  const targets = Object.keys(app.manifest.actions);
+  if (words.length >= 2) {
+    const target = targets.find((candidate) => candidate.endsWith(`.${words[0]}.${words[1]}`));
+    if (target) return { target, words: 2 };
+  }
+  const target = targets.find((candidate) => candidate.endsWith(`.${words[0]}`));
+  return target ? { target, words: 1 } : undefined;
 }
 export async function runCli(argv: readonly string[], options: CliOptions = {}): Promise<number> {
   const io = options.io ?? { stdin: input, stdout, stderr };
@@ -274,21 +286,21 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
   }
   const app = catalog.find((candidate) => candidate.appId === args[0]);
   if (!app || !args[1]) return usage(io);
-  const target = actionFor(app, args.slice(1, 3));
-  if (!target) return fail(io, "Action not found", EXIT.notFound);
+  const resolved = actionFor(app, args.slice(1, 3));
+  if (!resolved) return fail(io, "Action not found", EXIT.notFound);
+  const target = resolved.target;
   const action = app.manifest.actions[target];
   if (!action) return fail(io, "Action not found", EXIT.notFound);
   if (args.includes("--help")) {
     io.stdout.write(`${target}\n${JSON.stringify(action.inputSchema, null, 2)}\n`);
     return 0;
   }
-  const operation = args[2];
-  const positional = ["get", "update", "delete"].includes(operation ?? "")
-    ? args.splice(3, 1)[0]
-    : undefined;
-  const rest = args.slice(
-    operation && ["create", "get", "list", "update", "delete"].includes(operation) ? 3 : 2,
-  );
+  const operation = resolved.words === 2 ? args[2] : undefined;
+  const positional =
+    POSITIONAL_ID.includes(operation ?? "") && args[3] !== undefined && !args[3].startsWith("--")
+      ? args.splice(3, 1)[0]
+      : undefined;
+  const rest = args.slice(1 + resolved.words);
   let body: unknown;
   try {
     if (json) {

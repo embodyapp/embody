@@ -39,6 +39,7 @@ for (const script of [
   "postgres-prerequisites.mjs",
   "test-mvp.mjs",
   "test-m08.mjs",
+  "test-m19.mjs",
 ]) {
   test(`M03.a ${script} fails when DB configuration is intentionally omitted`, async () => {
     const directory = await mkdtemp(join(tmpdir(), "embody-gate-negative-"));

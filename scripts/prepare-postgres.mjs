@@ -7,7 +7,8 @@ await main("postgres-prepare", async () => {
   const { Pool } = createRequire(new URL("../packages/storage/package.json", import.meta.url))(
     "pg",
   );
-  const { PostgresStorage } = await import("../packages/storage/dist/index.js");
+  const { PostgresStorage, STORAGE_RUNTIME_FUNCTIONS } =
+    await import("../packages/storage/dist/index.js");
   const pool = new Pool({ connectionString: migration.href });
   const storage = new PostgresStorage({ connectionString: migration.href });
   const quote = (value) => `"${value.replaceAll('"', '""')}"`;
@@ -33,6 +34,10 @@ await main("postgres-prepare", async () => {
         `GRANT ${tablename === "embody_schema_migrations" ? "SELECT" : "SELECT, INSERT, UPDATE, DELETE"} ON TABLE public.${quote(tablename)} TO ${quote(decodeURIComponent(runtime.username))}`,
       );
     }
+    for (const signature of STORAGE_RUNTIME_FUNCTIONS)
+      await pool.query(
+        `GRANT EXECUTE ON FUNCTION public.${signature} TO ${quote(decodeURIComponent(runtime.username))}`,
+      );
     console.log("Test schema migrated by maintenance role; runtime DML privileges granted");
   } finally {
     await storage.close();

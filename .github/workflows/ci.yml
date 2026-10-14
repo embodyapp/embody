@@ -97,6 +97,10 @@ jobs:
         run: pnpm test:m08
         env:
           EMBODY_POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
+      - name: Mandatory workflow engine crash matrix, runtime-role claims and CLI/MCP journey (zero skips)
+        run: pnpm test:m19
+        env:
+          EMBODY_POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:

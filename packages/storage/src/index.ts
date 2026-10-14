@@ -224,6 +224,19 @@ export interface WorkflowStep {
 export interface WorkflowSnapshot extends WorkflowInstance {
   readonly steps: readonly WorkflowStep[];
 }
+/** Identity of a claimed step; the fencing token for later processing. */
+export interface WorkflowStepClaim {
+  readonly id: string;
+  readonly orgId: string;
+  readonly attempt: number;
+  readonly workerId: string;
+}
+/** A workflow definition version that still has running or retryable instances. */
+export interface ActiveWorkflowVersion {
+  readonly definition: string;
+  readonly definitionVersion: string;
+  readonly instances: number;
+}
 export interface WorkflowRepository {
   start(input: {
     readonly id: string;
@@ -246,7 +259,19 @@ export interface WorkflowRepository {
   get(id: string): Promise<WorkflowSnapshot | null>;
   cancel(id: string, now: string): Promise<WorkflowSnapshot | null>;
   retry(id: string, now: string): Promise<WorkflowSnapshot | null>;
+  /** Claims due steps visible to the current tenant only. */
   claimBatch(options: ClaimOutboxOptions): Promise<readonly WorkflowStep[]>;
+  /**
+   * Claims due steps across tenants for the trusted workflow worker. Returns claim identity only;
+   * process each claim in its own tenant transaction via {@link WorkflowRepository.lockClaim}.
+   */
+  claimDue(options: ClaimOutboxOptions): Promise<readonly WorkflowStepClaim[]>;
+  /** Locks a claimed step for processing; null when the claim was lost to another worker. */
+  lockClaim(claim: WorkflowStepClaim): Promise<WorkflowStep | null>;
+  /** Releases a claimed step, without running it, because its instance was cancelled. */
+  releaseCancelled(input: { readonly id: string; readonly now: string }): Promise<void>;
+  /** Definition versions with running or retryable instances, across tenants. */
+  activeVersions(): Promise<readonly ActiveWorkflowVersion[]>;
   completeStep(input: {
     readonly id: string;
     readonly output: unknown;
@@ -482,6 +507,83 @@ export const STORAGE_MIGRATIONS: readonly SchemaMigration[] = [
       CREATE POLICY embody_workflow_steps_tenant_isolation ON embody_workflow_steps USING (org_id = current_setting('app.current_org', true)) WITH CHECK (org_id = current_setting('app.current_org', true));
     `.trim(),
   },
+  {
+    version: 5,
+    description: "Runtime-role workflow claims and active version listing without RLS bypass",
+    sqlite: "SELECT 1;",
+    postgres: `
+      CREATE FUNCTION embody_claim_workflow_steps(p_now TIMESTAMPTZ, p_expired TIMESTAMPTZ, p_limit INTEGER, p_worker TEXT)
+      RETURNS TABLE (step_id UUID, step_org_id TEXT, step_attempt INTEGER)
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+      DECLARE orphaned UUID[];
+      BEGIN
+        IF p_limit IS NULL OR p_limit < 1 OR p_limit > 100 THEN RAISE EXCEPTION 'Invalid claim limit'; END IF;
+        IF p_worker IS NULL OR length(p_worker) = 0 OR length(p_worker) > 200 THEN RAISE EXCEPTION 'Invalid worker'; END IF;
+        -- A step whose worker died after its instance was cancelled must still settle.
+        WITH settled AS (
+          UPDATE public.embody_workflow_steps s
+          SET status = CASE WHEN s.compensatable THEN 'compensating' ELSE 'cancelled' END,
+              scheduled_at = p_now, claimed_at = NULL, claimed_by = NULL
+          FROM public.embody_workflow_instances i
+          WHERE i.id = s.instance_id AND i.cancel_requested AND s.status = 'running' AND s.claimed_at <= p_expired
+          RETURNING s.instance_id)
+        SELECT array_agg(DISTINCT settled.instance_id) INTO orphaned FROM settled;
+        IF orphaned IS NOT NULL THEN
+          UPDATE public.embody_workflow_instances i SET status = CASE
+              WHEN EXISTS (SELECT 1 FROM public.embody_workflow_steps x WHERE x.instance_id = i.id AND x.status = 'compensating') THEN 'compensating'
+              WHEN EXISTS (SELECT 1 FROM public.embody_workflow_steps x WHERE x.instance_id = i.id AND x.status = 'running') THEN i.status
+              WHEN EXISTS (SELECT 1 FROM public.embody_workflow_steps x WHERE x.instance_id = i.id AND x.status = 'compensated') THEN 'compensated'
+              ELSE 'cancelled' END,
+            updated_at = p_now, optimistic_version = i.optimistic_version + 1
+          WHERE i.id = ANY(orphaned) AND i.status <> 'failed';
+        END IF;
+        RETURN QUERY
+        WITH candidates AS (
+          SELECT s.id FROM public.embody_workflow_steps s
+          JOIN public.embody_workflow_instances i ON i.id = s.instance_id
+          WHERE (i.cancel_requested = FALSE
+              AND ((s.status IN ('pending','waiting','blocked') AND s.scheduled_at <= p_now) OR (s.status = 'running' AND s.claimed_at <= p_expired))
+              AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(s.dependencies) AS d(value)
+                LEFT JOIN public.embody_workflow_steps p ON p.instance_id = s.instance_id AND p.name = d.value
+                WHERE p.status IS NULL OR p.status != 'completed'))
+            OR (s.status = 'compensating' AND s.scheduled_at <= p_now
+              AND (s.claimed_at IS NULL OR s.claimed_at <= p_expired)
+              AND NOT EXISTS (SELECT 1 FROM public.embody_workflow_steps later
+                WHERE later.instance_id = s.instance_id AND later.position > s.position
+                  AND later.status IN ('compensating','running')))
+          ORDER BY s.scheduled_at, s.id LIMIT p_limit FOR UPDATE OF s SKIP LOCKED),
+        claimed AS (
+          UPDATE public.embody_workflow_steps s
+          SET status = CASE WHEN s.status = 'compensating' THEN 'compensating' ELSE 'running' END,
+              claimed_at = p_now, claimed_by = p_worker, attempt = s.attempt + 1
+          FROM candidates WHERE s.id = candidates.id
+          RETURNING s.id, s.org_id, s.attempt, s.instance_id),
+        touched AS (
+          UPDATE public.embody_workflow_instances i
+          SET status = CASE WHEN i.status = 'pending' THEN 'running' ELSE i.status END, updated_at = p_now
+          WHERE i.id IN (SELECT claimed.instance_id FROM claimed))
+        SELECT claimed.id, claimed.org_id, claimed.attempt FROM claimed;
+      END $$;
+      REVOKE ALL ON FUNCTION embody_claim_workflow_steps(TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, TEXT) FROM PUBLIC;
+      CREATE FUNCTION embody_active_workflow_versions()
+      RETURNS TABLE (workflow_definition TEXT, workflow_version TEXT, running_instances BIGINT)
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+        SELECT definition, definition_version, count(*) FROM public.embody_workflow_instances
+        WHERE status NOT IN ('completed','cancelled','compensated')
+        GROUP BY definition, definition_version ORDER BY definition, definition_version
+      $$;
+      REVOKE ALL ON FUNCTION embody_active_workflow_versions() FROM PUBLIC;
+    `.trim(),
+  },
+];
+
+/**
+ * Functions the runtime role must be granted EXECUTE on, in addition to table DML. They are
+ * SECURITY DEFINER, so they run as the migration owner and expose only the narrow operation.
+ */
+export const STORAGE_RUNTIME_FUNCTIONS: readonly string[] = [
+  "embody_claim_workflow_steps(timestamptz, timestamptz, integer, text)",
+  "embody_active_workflow_versions()",
 ];
 
 export function normalizeTimestamp(value: Date | string): string {

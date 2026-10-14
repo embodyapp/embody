@@ -9,7 +9,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import { readFile, writeFile, mkdir, chmod } from "node:fs/promises";
 import { createCloudRunAppProvisioner } from "../provider/cloud-run.mjs";
 import { PostgresGatewayStore } from "../../../packages/gateway/dist/index.js";
-import { PostgresStorage } from "../../../packages/storage/dist/index.js";
+import {
+  PostgresStorage,
+  STORAGE_RUNTIME_FUNCTIONS,
+} from "../../../packages/storage/dist/index.js";
 const { fetch, AbortSignal } = globalThis;
 const exec = promisify(execFile);
 const project = "embody-cloud",
@@ -204,6 +207,10 @@ async function main() {
       for (const { tablename } of tables)
         await client.query(
           `GRANT ${tablename === "embody_schema_migrations" ? "SELECT" : "SELECT,INSERT,UPDATE,DELETE"} ON TABLE public.${tablename} TO embody_test_${runtime}`,
+        );
+      for (const signature of STORAGE_RUNTIME_FUNCTIONS)
+        await client.query(
+          `GRANT EXECUTE ON FUNCTION public.${signature} TO embody_test_${runtime}`,
         );
     } finally {
       await client.end();

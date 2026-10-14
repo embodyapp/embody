@@ -30,6 +30,7 @@
     "test:verification": "node --test test/verification/*.test.mjs",
     "test:mvp": "node scripts/test-mvp.mjs",
     "test:m08": "node scripts/test-m08.mjs",
+    "test:m19": "node scripts/test-m19.mjs",
     "test:gateway-store": "node scripts/test-gateway-store.mjs",
     "test:mvp:cloud": "node scripts/test-mvp-cloud.mjs",
     "test:mvp:client": "pnpm build && node scripts/test-mvp-client.mjs",

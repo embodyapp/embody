@@ -109,7 +109,9 @@ export {
 } from "./protocol.js";
 export {
   compileWorkflow,
+  assertHostedWorkflowLimits,
   compileWorkflows,
+  HOSTED_WORKFLOW_LIMITS,
   safeWorkflowValue,
   workflowInputHash,
   WORKFLOW_VALUE_LIMIT,

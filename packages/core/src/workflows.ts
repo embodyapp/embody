@@ -185,6 +185,42 @@ export function compileWorkflows(plugins: readonly EmbodyPlugin[]): readonly Com
   return result.sort((left, right) => left.target.localeCompare(right.target));
 }
 
+/** Hosted workflow limits: a step fits one bounded request; a delay fits one queue task. */
+export const HOSTED_WORKFLOW_LIMITS = Object.freeze({
+  stepTimeoutMs: 30_000,
+  maxDelayMs: 30 * 24 * 60 * 60 * 1_000,
+});
+
+/**
+ * Rejects workflow definitions the hosted profile cannot run: step timeouts above the action
+ * deadline, delays beyond the queue limit, and retry backoff that would wait longer than it.
+ * Steps without `timeoutMs` are capped at the step limit by the hosted worker.
+ */
+export function assertHostedWorkflowLimits(plugins: readonly EmbodyPlugin[]): void {
+  const { stepTimeoutMs, maxDelayMs } = HOSTED_WORKFLOW_LIMITS;
+  for (const plugin of plugins)
+    for (const [name, workflow] of Object.entries(plugin.workflows ?? {}))
+      for (const [stepName, step] of Object.entries(workflow.steps)) {
+        const where = `Workflow ${plugin.id}.${name} step ${stepName}`;
+        if (step.timeoutMs !== undefined && step.timeoutMs > stepTimeoutMs)
+          throw new ValidationError(
+            `${where} has timeoutMs ${step.timeoutMs}; hosted steps must finish within ${stepTimeoutMs} ms. Split the step or start long work elsewhere and poll it from later steps`,
+          );
+        if (step.delayMs !== undefined && step.delayMs > maxDelayMs)
+          throw new ValidationError(
+            `${where} has delayMs ${step.delayMs}; hosted delays are limited to ${maxDelayMs} ms (30 days). Chain shorter delayed steps`,
+          );
+        const retry = step.retry;
+        if (retry !== undefined && retry.maxAttempts > 1) {
+          const longest = 2 ** (retry.maxAttempts - 2) * (retry.backoffMs ?? 1_000);
+          if (longest > maxDelayMs)
+            throw new ValidationError(
+              `${where} retry backoff reaches ${longest} ms before its last attempt; hosted retries are limited to ${maxDelayMs} ms (30 days). Lower maxAttempts or backoffMs`,
+            );
+        }
+      }
+}
+
 export function safeWorkflowValue(value: unknown, label: string): unknown {
   let encoded: string;
   try {
