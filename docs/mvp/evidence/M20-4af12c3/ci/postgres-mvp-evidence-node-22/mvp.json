@@ -1,0 +1,65 @@
+{
+  "gate": "mvp",
+  "status": "passed",
+  "timestamp": "2026-10-15T08:15:54.648Z",
+  "commit": "ef80b6c610f08ec8ccc87aa2e30da7c13c0d33dd",
+  "dirty": false,
+  "node": "v22.23.3",
+  "lockfileSha256": "aa67ff682647ae33b335b30062494199194e6f17844f1585c25b9cd47ed27cf5",
+  "schemaSourceSha256": "502cad9d92abe0d084394520c931a51d80f1bfa9b6378c6e9e38b69c6a714bb7",
+  "platformSchemaSourceSha256": "283dacac66f21a1cde30350a349cbe6dc47cee29003454a1ed45ba7d9f17e0e5",
+  "postgresFixtureSha256": "5ee505a6ae07b9b1bfbb9a98493fa0495081732cf2ca423a42311e69f5dea580",
+  "counts": {
+    "passed": 371,
+    "failed": 0,
+    "skipped": 0
+  },
+  "images": [
+    {
+      "name": "postgres-service",
+      "id": "sha256:275447c94b11b151decd1f29877965301d5a77032037c46de93d990f739f00a9",
+      "repoDigests": [
+        "postgres@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d"
+      ],
+      "containerId": "d9554da531ea8d6502ec2247cec4471a04a6f36b63c3980ed06d5c9ffc823e11"
+    }
+  ],
+  "suites": {
+    "cloud-contracts": {
+      "passed": 38,
+      "failed": 0,
+      "skipped": 0
+    },
+    "auth": {
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    },
+    "host": {
+      "passed": 109,
+      "failed": 0,
+      "skipped": 0
+    },
+    "mcp": {
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0
+    },
+    "gateway": {
+      "passed": 141,
+      "failed": 0,
+      "skipped": 0
+    },
+    "gateway-store": {
+      "passed": 43,
+      "failed": 0,
+      "skipped": 0
+    },
+    "postgres": {
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "postgresVersion": 160015
+}
