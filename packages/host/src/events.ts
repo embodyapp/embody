@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { drain } from "./drain.js";
+import { drain, settleAll } from "./drain.js";
 import type { Kernel } from "@embody/core";
 import {
   eventDeliveryRequestSchema,
@@ -194,17 +194,24 @@ export class OutboxWorker {
     this.timer = undefined;
     await drain(this.active, deadlineMs);
   }
-  public async tick(): Promise<void> {
-    if (this.stopping) return;
-    const claimed = await this.options.storage.transaction("system", (tx) =>
+  /**
+   * Claims and processes one batch; returns how many events were claimed. Pass the tenant when
+   * the storage role is subject to row-level security, as hosted runtime roles are.
+   */
+  public async tick(
+    options: { readonly orgId?: string; readonly limit?: number } = {},
+  ): Promise<number> {
+    if (this.stopping) return 0;
+    const claimed = await this.options.storage.transaction(options.orgId ?? "system", (tx) =>
       tx.outbox.claimBatch({
-        limit: this.values.batchSize,
+        limit: options.limit ?? this.values.batchSize,
         workerId: this.values.workerId,
         now: this.values.clock.now().toISOString(),
         ...(this.options.leaseMs === undefined ? {} : { leaseMs: this.options.leaseMs }),
       }),
     );
     await this.concurrent(claimed, (event) => this.process(event));
+    return claimed.length;
   }
   private async concurrent<T>(
     items: readonly T[],
@@ -225,7 +232,7 @@ export class OutboxWorker {
       }
     };
     const concurrency = this.options.storage.dialect === "sqlite" ? 1 : this.values.concurrency;
-    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
+    await settleAll(Array.from({ length: Math.min(concurrency, items.length) }, run));
   }
   private async process(row: OutboxEvent): Promise<void> {
     try {
@@ -309,7 +316,7 @@ export class DeliveryWorker {
       }
     };
     const concurrency = this.options.storage.dialect === "sqlite" ? 1 : this.values.concurrency;
-    await Promise.all(Array.from({ length: Math.min(concurrency, claimed.length) }, run));
+    await settleAll(Array.from({ length: Math.min(concurrency, claimed.length) }, run));
   }
   private async process(delivery: EventDelivery): Promise<void> {
     try {

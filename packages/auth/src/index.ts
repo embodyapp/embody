@@ -125,3 +125,67 @@ export function localDevVerifier(options: LocalDevVerifierOptions): AppAuthVerif
     verify: () => Promise.resolve(options.principal),
   };
 }
+
+export interface PlatformInvokerVerifierOptions {
+  /** The exact audience the platform requests for this app's drain endpoint. */
+  readonly audience: string;
+  /** The platform invoker service account. Tokens of any other identity are rejected. */
+  readonly invokerEmail: string;
+  /** Google's public keys by default. */
+  readonly jwksUrl?: string | URL;
+  /** Accepted issuers; Google's by default. */
+  readonly issuers?: readonly string[];
+  /** Test seam for local keys; production uses the remote key set. */
+  readonly key?: Parameters<typeof jwtVerify>[1];
+  readonly algorithms?: readonly string[];
+}
+export interface PlatformInvokerVerifier {
+  readonly id: string;
+  /** Resolves when the token is a current platform invoker token for this app; rejects otherwise. */
+  verify(token: string): Promise<void>;
+}
+
+const GOOGLE_ISSUERS = ["https://accounts.google.com", "accounts.google.com"];
+const GOOGLE_JWKS = "https://www.googleapis.com/oauth2/v3/certs";
+
+/**
+ * Verifies the provider OIDC token a queue task carries (Cloud Tasks `oidcToken`): issuer,
+ * signature, exact app audience, verified invoker email and a short lifetime. It authorizes waking
+ * this app's drain only, never an Embody action: it is not an Embody principal.
+ */
+export function platformInvokerVerifier(
+  options: PlatformInvokerVerifierOptions,
+): PlatformInvokerVerifier {
+  if (!options.audience || !options.invokerEmail.includes("@"))
+    throw new TypeError("Platform invoker verification needs an audience and invoker email");
+  const key =
+    options.key ??
+    createRemoteJWKSet(new URL(options.jwksUrl ?? GOOGLE_JWKS), {
+      cacheMaxAge: 60 * 60_000,
+      cooldownDuration: 1000,
+      timeoutDuration: 5000,
+    });
+  return {
+    id: "platform-invoker",
+    async verify(token: string): Promise<void> {
+      try {
+        const { payload } = await jwtVerify(token, key, {
+          issuer: [...(options.issuers ?? GOOGLE_ISSUERS)],
+          audience: options.audience,
+          algorithms: [...(options.algorithms ?? ["RS256"])],
+        });
+        if (
+          payload["email"] !== options.invokerEmail ||
+          payload["email_verified"] !== true ||
+          typeof payload.exp !== "number" ||
+          typeof payload.iat !== "number" ||
+          payload.exp - payload.iat > 3600
+        )
+          throw new UnauthenticatedError("Platform invoker identity is invalid");
+      } catch (error) {
+        if (error instanceof UnauthenticatedError) throw error;
+        throw new UnauthenticatedError("Platform invoker token is invalid");
+      }
+    },
+  };
+}

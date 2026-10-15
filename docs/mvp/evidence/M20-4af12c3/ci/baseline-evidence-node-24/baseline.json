@@ -1,0 +1,32 @@
+{
+  "gate": "baseline",
+  "status": "passed",
+  "timestamp": "2026-10-15T08:16:21.047Z",
+  "commit": "ef80b6c610f08ec8ccc87aa2e30da7c13c0d33dd",
+  "dirty": false,
+  "node": "v24.21.0",
+  "lockfileSha256": "aa67ff682647ae33b335b30062494199194e6f17844f1585c25b9cd47ed27cf5",
+  "schemaSourceSha256": "502cad9d92abe0d084394520c931a51d80f1bfa9b6378c6e9e38b69c6a714bb7",
+  "platformSchemaSourceSha256": "283dacac66f21a1cde30350a349cbe6dc47cee29003454a1ed45ba7d9f17e0e5",
+  "postgresFixtureSha256": "5ee505a6ae07b9b1bfbb9a98493fa0495081732cf2ca423a42311e69f5dea580",
+  "counts": {
+    "packedConsumerJourneys": 1,
+    "distributedJourneys": 1,
+    "failed": 0,
+    "skipped": 0
+  },
+  "images": [
+    {
+      "name": "embody-e2e-apps",
+      "id": "sha256:e9d1eb1ec30d8c94194aeab7486fad64cafee641f406b395306a32115c93c53f",
+      "repoDigests": []
+    },
+    {
+      "name": "postgres:16-alpine",
+      "id": "sha256:81bd698b4594e751a3269e4dcd3e03a4a0ec0daf7b72e7aa1abd43cce9887542",
+      "repoDigests": [
+        "postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea"
+      ]
+    }
+  ]
+}

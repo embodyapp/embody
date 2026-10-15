@@ -63,6 +63,33 @@ it("generates a hosted starter that cannot silently run the reference runtime", 
   expect(await readFile(join(app.directory, "README.md"), "utf8")).toContain("zero retention");
 });
 
+it("generates a durable starter with an event, a delayed step and queue settings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "embody-durable-"));
+  cleanup.push(root);
+  const app = await createApp({
+    name: "durable-app",
+    destination: join(root, "app"),
+    profile: "durable",
+    noInstall: true,
+  });
+  const config = await readFile(join(app.directory, "embody.config.ts"), "utf8");
+  expect(config).toContain('ctx.events.publish("app.submitted"');
+  expect(config).toContain("delayMs: 60 * 60_000");
+  expect(await readFile(join(app.directory, "src/index.ts"), "utf8")).toContain(
+    'process.env.EMBODY_HOSTED_PROFILE !== "durable"',
+  );
+  const env = await readFile(join(app.directory, ".env.example"), "utf8");
+  for (const name of [
+    "EMBODY_HOSTED_PROFILE=durable",
+    "EMBODY_WAKE_QUEUE=",
+    "EMBODY_DRAIN_URL=https://",
+    "EMBODY_DRAIN_AUDIENCE=https://",
+    "EMBODY_DRAIN_INVOKER_EMAIL=",
+  ])
+    expect(env).toContain(name);
+  expect(await readFile(join(app.directory, "README.md"), "utf8")).toContain("at least once");
+});
+
 it("rejects traversal and preserves nonempty destinations", async () => {
   const root = await mkdtemp(join(tmpdir(), "embody-scaffold-"));
   cleanup.push(root);

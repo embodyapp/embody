@@ -124,12 +124,15 @@ export {
 export { assertUniqueMappedTargets, formatTarget, parseTarget, targetToMcpName } from "./target.js";
 export {
   Kernel,
+  assertDurablePlugins,
   assertRequestOnlyPlugins,
+  DURABLE_WORKFLOW_MAX_STEPS,
   sortPlugins,
   type BootPhase,
   type HookTrace,
   type KernelComponent,
   type KernelOptions,
+  type KernelProfile,
   type KernelState,
   type KernelStorage,
 } from "./kernel.js";

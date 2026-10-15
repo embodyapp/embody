@@ -1,11 +1,10 @@
 # Hosted request-only runtime (M08)
 
 > **Scope change 2026-10-14:** events, subscriptions and durable workflows are now part
-> of the hosted MVP. They will run in a separate hosted *durable* profile (M20, with
-> M19 and M21) that is woken by queue tasks instead of workers. This request-only
-> profile stays supported unchanged. Where this page says such apps "must use reference
-> mode", read that as "until the durable profile lands". See
-> [README](./README.md) and [IMPLEMENTATION](./IMPLEMENTATION.md#m20--queue-woken-durable-runtime).
+> of the hosted MVP. They run in the separate hosted [durable profile](./DURABLE.md)
+> (M20; cross-app subscriptions with M21), woken by queue tasks instead of workers. This
+> request-only profile stays supported unchanged. Where this page says such apps "must use
+> reference mode", use the durable profile instead.
 
 `EMBODY_HOST_PROFILE=hosted` selects the request-only host; the default `reference`
 profile retains the existing self-hosted registration, heartbeat, event and workflow

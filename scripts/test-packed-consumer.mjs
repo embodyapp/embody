@@ -19,9 +19,10 @@ const packages = JSON.parse(
     entry.path?.includes("/packages/") &&
     (entry.name?.startsWith("@embody/") || entry.name === "create-embody-app"),
 );
-const requestOnly = process.env.EMBODY_PACKED_PROFILE === "request-only";
+const durable = process.env.EMBODY_PACKED_PROFILE === "durable";
+const requestOnly = process.env.EMBODY_PACKED_PROFILE === "request-only" || durable;
 if (requestOnly && !process.env.EMBODY_POSTGRES_URL)
-  throw new Error("Request-only packed proof requires pre-migrated EMBODY_POSTGRES_URL");
+  throw new Error("Hosted packed proof requires pre-migrated EMBODY_POSTGRES_URL");
 const temporary = mkdtempSync(join(tmpdir(), "embody-consumer-"));
 const tarballs = join(temporary, "tarballs");
 const bootstrap = join(temporary, "bootstrap");
@@ -59,7 +60,7 @@ try {
       join(bootstrap, "node_modules/create-embody-app/dist/bin.js"),
       "public-smoke",
       "--no-install",
-      ...(requestOnly ? ["--request-only"] : []),
+      ...(durable ? ["--durable"] : requestOnly ? ["--request-only"] : []),
     ],
     { cwd: temporary },
   );
@@ -145,6 +146,16 @@ try {
             EMBODY_WORKSPACE_ID: "ws_packed0001",
             GATEWAY_JWT_ISSUER: "https://gateway.example",
             GATEWAY_JWKS_URL: "https://gateway.example/jwks",
+            ...(durable
+              ? {
+                  EMBODY_HOSTED_PROFILE: "durable",
+                  EMBODY_WAKE_QUEUE: "projects/embody-packed/locations/us-central1/queues/smoke",
+                  EMBODY_DRAIN_URL: "https://public-smoke.example.run.app/_embody/drain",
+                  EMBODY_DRAIN_AUDIENCE: "https://public-smoke.example.run.app",
+                  EMBODY_DRAIN_INVOKER_EMAIL:
+                    "embody-invoker@embody-packed.iam.gserviceaccount.com",
+                }
+              : {}),
           }
         : {}),
     },
@@ -174,6 +185,18 @@ try {
   try {
     const health = await globalThis.fetch(new URL("/health", url));
     if (!health.ok) throw new Error(`Generated app health check returned ${health.status}`);
+    if (durable) {
+      // The drain is platform-only: without the queue's invoker token it must refuse.
+      const drain = await globalThis.fetch(new URL("/_embody/drain", url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      if (drain.status !== 401)
+        throw new Error(
+          `Generated durable drain accepted an unauthenticated call (${drain.status})`,
+        );
+    }
   } finally {
     child.kill("SIGTERM");
     await once(child, "exit");

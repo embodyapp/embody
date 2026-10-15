@@ -237,11 +237,11 @@ class Harness<TPlugins extends readonly EmbodyPlugin[]> implements TestHarness<T
     }
     throw new Error("Expected operation to be vetoed");
   }
-  public tickOutbox(): Promise<void> {
-    return this.worker.tick();
+  public async tickOutbox(): Promise<void> {
+    await this.worker.tick();
   }
-  public tickWorkflows(): Promise<void> {
-    return this.workflowWorker.tick();
+  public async tickWorkflows(): Promise<void> {
+    await this.workflowWorker.tick();
   }
   public workflow(id: string): Promise<WorkflowSnapshot | null> {
     return this.storage.transaction(

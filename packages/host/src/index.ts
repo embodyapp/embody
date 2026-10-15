@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
+  assertDurablePlugins,
   assertRequestOnlyPlugins,
   BadRequestError,
   RateLimitedError,
@@ -18,9 +19,22 @@ import {
   type Principal,
 } from "@embody/core";
 import type { EventEnvelope } from "@embody/core";
-import { gatewayJwtVerifier, localDevVerifier, type AppAuthVerifier } from "@embody/auth";
+import {
+  gatewayJwtVerifier,
+  localDevVerifier,
+  platformInvokerVerifier,
+  type AppAuthVerifier,
+  type PlatformInvokerVerifier,
+} from "@embody/auth";
 import { PostgresStorage, SqliteStorage, type StorageConnection } from "@embody/storage";
 import { WorkflowWorker } from "./workflows.js";
+import {
+  cloudTasksWakeQueue,
+  createDurableDrain,
+  wakingStorage,
+  type DrainResult,
+  type WakeQueue,
+} from "./durable.js";
 import {
   DeliveryWorker,
   DirectEventTransport,
@@ -31,6 +45,25 @@ import {
 } from "./events.js";
 
 export { WorkflowWorker, type WorkflowWorkerOptions } from "./workflows.js";
+export {
+  cloudTasksWakeQueue,
+  createDurableDrain,
+  drainRequestSchema,
+  DurableDrain,
+  DURABLE_LIMITS,
+  MemoryWakeQueue,
+  metadataAccessToken,
+  wakingStorage,
+  type CloudTasksWakeQueueOptions,
+  type CreateDurableDrainOptions,
+  type DrainAuditRecord,
+  type DrainRequest,
+  type DrainResult,
+  type DurableDrainOptions,
+  type WakeQueue,
+  type WakeTask,
+  type WakingStorageOptions,
+} from "./durable.js";
 export {
   DeliveryWorker,
   DirectEventTransport,
@@ -57,10 +90,19 @@ export interface HostOptions {
   readonly environment?: "development" | "production";
   readonly bodyLimit?: number;
   readonly requestTimeoutMs?: number;
-  readonly profile?: "reference" | "request-only";
+  readonly profile?: "reference" | "request-only" | "durable";
   readonly concurrency?: number;
   readonly sseBufferBytes?: number;
   readonly sseKeepaliveMs?: number;
+  /**
+   * Durable profile: the platform-only drain endpoint and recovery after inbound requests.
+   * The verifier accepts the queue's platform invoker token, never a gateway principal token.
+   */
+  readonly durable?: {
+    readonly verifier: PlatformInvokerVerifier;
+    readonly drain: (body: unknown) => Promise<DrainResult>;
+    readonly recover: (orgId: string) => Promise<unknown>;
+  };
   /** Enables authenticated direct event reception. The shared secret is per producer deployment. */
   readonly eventDelivery?: {
     readonly storage: StorageConnection;
@@ -172,13 +214,42 @@ function bearer(value: string | undefined): string {
 /** Creates the remote application HTTP surface. It accepts only gateway-authenticated requests. */
 export function createHost(options: HostOptions): EmbodyHost {
   const environment = options.environment ?? "production";
-  const requestOnly = options.profile === "request-only";
-  if (requestOnly) {
+  // Both hosted profiles share deadlines and have no keepalive or background timers.
+  const requestOnly = options.profile === "request-only" || options.profile === "durable";
+  if (options.profile === "request-only") {
     if (options.kernel.profile !== "request-only")
       throw new Error("Request-only hosts require a request-only kernel");
     assertRequestOnlyPlugins(options.kernel.plugins);
     if (options.eventDelivery) throw new Error("Request-only hosts cannot expose event ingress");
   }
+  if (options.profile === "durable") {
+    if (options.kernel.profile !== "durable")
+      throw new Error("Durable hosts require a durable kernel");
+    assertDurablePlugins(options.kernel.plugins);
+    if (options.eventDelivery) throw new Error("Durable hosts cannot expose legacy event ingress");
+    if (options.durable === undefined)
+      throw new Error("Durable hosts require a drain verifier and runtime");
+  } else if (options.durable !== undefined)
+    throw new Error("Only durable hosts expose the drain endpoint");
+  const durable = options.durable;
+  // MD12: after any inbound request, re-enqueue overdue work this tenant can see. Bounded and
+  // best effort; a failure never fails the request.
+  const recover = async (orgId: string): Promise<void> => {
+    if (durable === undefined) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        durable.recover(orgId),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, 2_000);
+        }),
+      ]);
+    } catch {
+      // The next request retries.
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  };
   if (environment === "production" && options.verifier.localDevelopmentOnly)
     throw new Error("Local development verifier cannot run in production");
   const app = Fastify({
@@ -289,6 +360,7 @@ export function createHost(options: HostOptions): EmbodyHost {
       });
       return await Promise.race([execution, cancelled]);
     } finally {
+      await recover(principal.orgId);
       if (timer !== undefined) clearTimeout(timer);
       request.raw.removeListener("aborted", abort);
       reply.raw.removeListener("close", close);
@@ -314,6 +386,32 @@ export function createHost(options: HostOptions): EmbodyHost {
         options.kernel.handleEvent(delivery.event, tx),
       );
       return { accepted: true };
+    });
+  if (durable !== undefined)
+    app.post("/_embody/drain", async (request, reply) => {
+      // Only the queue's platform invoker token is accepted here; gateway principal tokens
+      // (X-Gateway-Auth) are ignored and never authorize a drain. Callers learn nothing else
+      // about this host before they authenticate.
+      const authorization = request.headers.authorization;
+      await durable.verifier.verify(
+        bearer(typeof authorization === "string" ? authorization : undefined),
+      );
+      if (!accepting || options.kernel.state !== "ready") throw new UnavailableError();
+      if (active >= maximum) {
+        reply.header("retry-after", "1");
+        throw new RateLimitedError();
+      }
+      active++;
+      try {
+        const result = await durable.drain(request.body);
+        if (result.retry) {
+          reply.header("retry-after", "5");
+          void reply.status(503);
+        }
+        return result;
+      } finally {
+        active--;
+      }
     });
   app.post("/execute/stream", async (request, reply) => {
     if (!accepting || options.kernel.state !== "ready") throw new UnavailableError();
@@ -425,6 +523,7 @@ export function createHost(options: HostOptions): EmbodyHost {
     } finally {
       if (keepalive !== undefined) clearInterval(keepalive);
       if (timer !== undefined) clearTimeout(timer);
+      await recover(principal.orgId);
       await flush();
       terminal = true;
       request.raw.removeListener("aborted", abort);
@@ -488,6 +587,12 @@ const appEnvironmentSchema = z.object({
   GATEWAY_JWT_ISSUER: z.string().min(1).optional(),
   GATEWAY_JWT_SECRET: z.string().min(32).optional(),
   EMBODY_HOST_PROFILE: z.enum(["reference", "hosted"]).default("reference"),
+  /** Hosted only: `durable` adds queue-woken events and workflows (M20). */
+  EMBODY_HOSTED_PROFILE: z.enum(["request-only", "durable"]).default("request-only"),
+  EMBODY_WAKE_QUEUE: z.string().min(1).optional(),
+  EMBODY_DRAIN_URL: z.url().optional(),
+  EMBODY_DRAIN_AUDIENCE: z.url().optional(),
+  EMBODY_DRAIN_INVOKER_EMAIL: z.email().optional(),
   EMBODY_WORKSPACE_ID: z
     .string()
     .regex(/^ws_[a-z0-9]{8,64}$/)
@@ -502,6 +607,11 @@ export type AppEnvironment = z.output<typeof appEnvironmentSchema>;
 
 export interface AppHostRuntimeOptions {
   readonly env?: NodeJS.ProcessEnv;
+  /**
+   * Durable profile only: replaces the Cloud Tasks queue built from the environment, for tests
+   * and local development. Production uses the environment's queue.
+   */
+  readonly wakeQueue?: WakeQueue;
   readonly storage?: StorageConnection;
   readonly verifier?: AppAuthVerifier;
   readonly developmentPrincipal?: Principal;
@@ -554,6 +664,28 @@ export function parseAppEnvironment(input: NodeJS.ProcessEnv = process.env): App
     if (env.EMBODY_EVENT_SECRET || env.EMBODY_EVENT_DESTINATIONS)
       throw new Error("Hosted apps do not expose legacy shared-secret event ingress");
   }
+  const drainSettings = [
+    env.EMBODY_WAKE_QUEUE,
+    env.EMBODY_DRAIN_URL,
+    env.EMBODY_DRAIN_AUDIENCE,
+    env.EMBODY_DRAIN_INVOKER_EMAIL,
+  ];
+  if (env.EMBODY_HOST_PROFILE === "hosted" && env.EMBODY_HOSTED_PROFILE === "durable") {
+    if (drainSettings.some((value) => value === undefined))
+      throw new Error(
+        "Durable apps require EMBODY_WAKE_QUEUE, EMBODY_DRAIN_URL, EMBODY_DRAIN_AUDIENCE and EMBODY_DRAIN_INVOKER_EMAIL",
+      );
+    if (
+      ![env.EMBODY_DRAIN_URL, env.EMBODY_DRAIN_AUDIENCE].every((url) => url!.startsWith("https:"))
+    )
+      throw new Error("Durable drain URL and audience require HTTPS");
+  } else if (
+    drainSettings.some((value) => value !== undefined) ||
+    input["EMBODY_HOSTED_PROFILE"] === "durable"
+  )
+    throw new Error(
+      "Wake queue and drain settings require EMBODY_HOST_PROFILE=hosted and EMBODY_HOSTED_PROFILE=durable",
+    );
   if (env.NODE_ENV === "production") {
     const secrets = [
       env.GATEWAY_REGISTRATION_SECRET,
@@ -642,14 +774,18 @@ export async function createAppHost(
 ): Promise<AppHostRuntime> {
   const environment = parseAppEnvironment(options.env);
   const hosted = environment.EMBODY_HOST_PROFILE === "hosted";
+  const durable = hosted && environment.EMBODY_HOSTED_PROFILE === "durable";
   if (hosted) {
     if (options.verifier) throw new Error("Hosted authentication cannot be overridden");
     if (![22, 24].includes(Number(process.versions.node.split(".")[0])))
-      throw new Error("Hosted request-only runtime requires Node 22.x or 24.x");
-    assertRequestOnlyPlugins(definition.plugins);
+      throw new Error("Hosted runtime requires Node 22.x or 24.x");
+    if (durable) assertDurablePlugins(definition.plugins);
+    else assertRequestOnlyPlugins(definition.plugins);
     if (options.storage)
       throw new Error("Hosted storage cannot be overridden; use runtime PostgreSQL credentials");
   }
+  if (options.wakeQueue !== undefined && !durable)
+    throw new Error("A wake queue applies only to the hosted durable profile");
   let storage = options.storage;
   if (storage === undefined && environment.DATABASE_URL)
     storage = new PostgresStorage(
@@ -666,6 +802,17 @@ export async function createAppHost(
       },
       { schemaMode: environment.EMBODY_HOST_PROFILE === "hosted" ? "verify" : "migrate" },
     );
+  const wakeQueue = durable
+    ? (options.wakeQueue ??
+      cloudTasksWakeQueue({
+        queue: environment.EMBODY_WAKE_QUEUE!,
+        url: environment.EMBODY_DRAIN_URL!,
+        audience: environment.EMBODY_DRAIN_AUDIENCE!,
+        invokerEmail: environment.EMBODY_DRAIN_INVOKER_EMAIL!,
+      }))
+    : undefined;
+  if (storage !== undefined && wakeQueue !== undefined)
+    storage = wakingStorage(storage, { appId: definition.appId, queue: wakeQueue });
   if (storage === undefined) {
     const filename =
       environment.DATABASE_FILE === ":memory:"
@@ -677,7 +824,7 @@ export async function createAppHost(
   const app = appMetadataOf(definition);
   const kernel = new Kernel({
     plugins: definition.plugins,
-    profile: hosted ? "request-only" : "reference",
+    profile: durable ? "durable" : hosted ? "request-only" : "reference",
     storage,
     ...(app === undefined ? {} : { app }),
   });
@@ -722,13 +869,38 @@ export async function createAppHost(
         secret: environment.EMBODY_EVENT_SECRET,
       })
     : undefined;
+  // Durable workers never start: a drain runs one bounded batch when a wake task arrives.
+  const drain =
+    wakeQueue === undefined
+      ? undefined
+      : createDurableDrain({
+          appId: definition.appId,
+          storage,
+          kernel,
+          queue: wakeQueue,
+          audit: (record) => {
+            process.stdout.write(`${JSON.stringify({ type: "embody.drain", ...record })}\n`);
+          },
+        });
   const host = createHost({
     kernel,
     verifier,
     appId: definition.appId,
     version: definition.version,
     environment: environment.NODE_ENV,
-    profile: hosted ? "request-only" : "reference",
+    profile: durable ? "durable" : hosted ? "request-only" : "reference",
+    ...(drain === undefined
+      ? {}
+      : {
+          durable: {
+            verifier: platformInvokerVerifier({
+              audience: environment.EMBODY_DRAIN_AUDIENCE!,
+              invokerEmail: environment.EMBODY_DRAIN_INVOKER_EMAIL!,
+            }),
+            drain: (body: unknown) => drain.drain(body),
+            recover: (orgId: string) => drain.recover(orgId),
+          },
+        }),
     requestTimeoutMs: hosted ? 60_000 : 30_000,
     ...(environment.EMBODY_EVENT_SECRET
       ? { eventDelivery: { storage, secret: environment.EMBODY_EVENT_SECRET } }
@@ -784,11 +956,13 @@ export async function createAppHost(
       return address;
     },
     async tickEvents(): Promise<void> {
+      if (durable) throw new Error("Durable mode drains only when a wake task arrives");
       if (hosted) throw new Error("Request-only mode has no event delivery/drain");
       await outboxWorker?.tick();
       await deliveryWorker?.tick();
     },
     async tickWorkflows(): Promise<void> {
+      if (durable) throw new Error("Durable mode drains only when a wake task arrives");
       if (hosted) throw new Error("Request-only mode has no workflow worker");
       await workflowWorker?.tick();
     },
