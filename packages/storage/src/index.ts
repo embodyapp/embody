@@ -295,6 +295,31 @@ export interface TransactionRepositories {
   readonly workflows: WorkflowRepository;
 }
 
+/** Queue-woken durable runtime support (M20). PostgreSQL only. */
+export interface DurableRepository {
+  /** This transaction's ID, assigned now if it has none. Wake tasks carry it. */
+  transactionId(): Promise<string>;
+  /** One outbox event of the current tenant. */
+  event(id: string): Promise<OutboxEvent | null>;
+  /**
+   * Whether the current tenant has work due before `before`, or claimed work whose claim is
+   * older than `expired` (a lost lease).
+   */
+  overdue(options: { readonly before: string; readonly expired: string }): Promise<boolean>;
+  /**
+   * Deletes up to `limit` completed outbox, delivery and inbox records completed before
+   * `before`. Dead letters are kept. Returns how many were deleted and, when completed records
+   * remain, the oldest remaining completion time.
+   */
+  purge(options: {
+    readonly before: string;
+    readonly limit: number;
+  }): Promise<{ readonly deleted: number; readonly oldest?: string }>;
+}
+
+/** Outcome of a transaction, by ID. `null` when the ID is unknown or too old to tell. */
+export type TransactionStatus = "committed" | "aborted" | "in progress" | null;
+
 export interface StorageTransaction extends TransactionRepositories {
   readonly orgId: string;
   /**
@@ -302,6 +327,7 @@ export interface StorageTransaction extends TransactionRepositories {
    * continues. Workflow workers use it so a failed or timed-out step leaves no writes behind.
    */
   savepoint?<T>(callback: () => Promise<T>): Promise<T>;
+  readonly durable?: DurableRepository;
 }
 
 export interface StorageConnection {
@@ -309,6 +335,8 @@ export interface StorageConnection {
   /** Applies all missing numbered infrastructure migrations. Safe to call repeatedly. */
   ensureSchema(): Promise<void>;
   transaction<T>(orgId: string, callback: (tx: StorageTransaction) => Promise<T>): Promise<T>;
+  /** Whether a transaction committed, rolled back or is still open. PostgreSQL only. */
+  transactionStatus?(transactionId: string): Promise<TransactionStatus>;
   close(): Promise<void>;
 }
 
@@ -587,6 +615,22 @@ export const STORAGE_MIGRATIONS: readonly SchemaMigration[] = [
         GROUP BY definition, definition_version ORDER BY definition, definition_version
       $$;
       REVOKE ALL ON FUNCTION embody_active_workflow_versions() FROM PUBLIC;
+    `.trim(),
+  },
+  {
+    version: 6,
+    description: "Outbox completion time for 30-day retention cleanup",
+    sqlite: `
+      ALTER TABLE embody_outbox ADD COLUMN completed_at TEXT;
+      UPDATE embody_outbox SET completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE status = 'completed';
+    `.trim(),
+    postgres: `
+      ALTER TABLE embody_outbox ADD COLUMN completed_at TIMESTAMPTZ;
+      -- Records completed before this migration are kept for 30 days from now.
+      UPDATE embody_outbox SET completed_at = now() WHERE status = 'completed';
+      CREATE INDEX idx_outbox_retention ON embody_outbox (completed_at) WHERE status = 'completed';
+      CREATE INDEX idx_event_deliveries_retention ON embody_event_deliveries (completed_at) WHERE status = 'completed';
+      CREATE INDEX idx_inbox_retention ON embody_inbox (updated_at) WHERE status = 'completed';
     `.trim(),
   },
 ];

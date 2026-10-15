@@ -195,6 +195,9 @@ export const appMetadataSchema: z.ZodObject<{
 }, z.core.$strict>;
 
 // @public
+export function assertDurablePlugins(plugins: readonly EmbodyPlugin[]): void;
+
+// @public
 export function assertHostedWorkflowLimits(plugins: readonly EmbodyPlugin[]): void;
 
 // @public
@@ -731,7 +734,8 @@ export class Kernel {
     // (undocumented)
     get plugins(): readonly EmbodyPlugin[];
     // (undocumented)
-    get profile(): "reference" | "request-only";
+    get profile(): KernelProfile;
+    retainsGeneratedEvent(eventName: string): boolean;
     // (undocumented)
     runHooks(key: string, payload: unknown, context: KernelContext, now?: () => number): Promise<readonly HookTrace[]>;
     // (undocumented)
@@ -793,10 +797,13 @@ export interface KernelOptions {
     readonly plugins: readonly EmbodyPlugin[];
     // (undocumented)
     readonly principal?: Principal;
-    readonly profile?: "reference" | "request-only";
+    readonly profile?: KernelProfile;
     // (undocumented)
     readonly storage: KernelStorage;
 }
+
+// @public (undocumented)
+export type KernelProfile = "reference" | "request-only" | "durable";
 
 // @public (undocumented)
 export interface KernelServices {

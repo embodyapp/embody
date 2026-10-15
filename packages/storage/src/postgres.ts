@@ -22,6 +22,8 @@ import type {
   WorkflowRepository,
   StorageConnection,
   StorageTransaction,
+  DurableRepository,
+  TransactionStatus,
 } from "./index.js";
 import { normalizeTimestamp, STORAGE_MIGRATIONS } from "./index.js";
 
@@ -265,8 +267,8 @@ class PostgresTransaction implements StorageTransaction {
     claimBatch: async (options: ClaimOutboxOptions) => this.claim(options),
     complete: async (id: string) => {
       await this.client.query(
-        "UPDATE embody_outbox SET status = 'completed', claimed_at = NULL, claimed_by = NULL WHERE id = $1",
-        [id],
+        "UPDATE embody_outbox SET status = 'completed', completed_at = $2, claimed_at = NULL, claimed_by = NULL WHERE id = $1",
+        [id, timestamp()],
       );
     },
     fail: async (id: string, error: string, retryAt?: string) =>
@@ -598,6 +600,51 @@ class PostgresTransaction implements StorageTransaction {
   };
 
   /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+  public readonly durable: DurableRepository = {
+    transactionId: async () => {
+      const result = await this.client.query("SELECT txid_current()::text AS id");
+      return String(asRow(result.rows[0])["id"]);
+    },
+    event: async (id: string) => {
+      const result = await this.client.query("SELECT * FROM embody_outbox WHERE id = $1", [id]);
+      return result.rows[0] === undefined ? null : outbox(result.rows[0]);
+    },
+    overdue: async (options: { readonly before: string; readonly expired: string }) => {
+      // Row-level security limits both checks to the current tenant.
+      const result = await this.client.query(
+        `SELECT EXISTS (SELECT 1 FROM embody_outbox WHERE (status IN ('pending', 'failed') AND scheduled_at < $1) OR (status = 'processing' AND claimed_at < $2))
+            OR EXISTS (SELECT 1 FROM embody_workflow_steps s JOIN embody_workflow_instances i ON i.id = s.instance_id
+              WHERE i.status NOT IN ('completed', 'failed', 'cancelled', 'compensated')
+                AND ((s.status IN ('pending', 'waiting', 'compensating') AND s.scheduled_at < $1) OR (s.status = 'running' AND s.claimed_at < $2))) AS overdue`,
+        [timestamp(options.before), timestamp(options.expired)],
+      );
+      return asRow(result.rows[0])["overdue"] === true;
+    },
+    purge: async (options: { readonly before: string; readonly limit: number }) => {
+      if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 10_000)
+        throw new RangeError("Invalid purge limit");
+      const before = timestamp(options.before);
+      let deleted = 0;
+      for (const sql of [
+        "DELETE FROM embody_outbox WHERE id IN (SELECT id FROM embody_outbox WHERE status = 'completed' AND completed_at < $1 ORDER BY completed_at LIMIT $2)",
+        "DELETE FROM embody_event_deliveries WHERE id IN (SELECT id FROM embody_event_deliveries WHERE status = 'completed' AND completed_at < $1 ORDER BY completed_at LIMIT $2)",
+        "DELETE FROM embody_inbox WHERE (event_id, handler_id) IN (SELECT event_id, handler_id FROM embody_inbox WHERE status = 'completed' AND updated_at < $1 ORDER BY updated_at LIMIT $2)",
+      ]) {
+        const remaining = options.limit - deleted;
+        if (remaining <= 0) break;
+        deleted += (await this.client.query(sql, [before, remaining])).rowCount ?? 0;
+      }
+      const oldest = await this.client.query(
+        `SELECT min(at) AS oldest FROM (SELECT min(completed_at) AS at FROM embody_outbox WHERE status = 'completed'
+           UNION ALL SELECT min(completed_at) FROM embody_event_deliveries WHERE status = 'completed'
+           UNION ALL SELECT min(updated_at) FROM embody_inbox WHERE status = 'completed') AS remaining`,
+      );
+      const value = asRow(oldest.rows[0])["oldest"];
+      return value instanceof Date || typeof value === "string"
+        ? { deleted, oldest: normalizeTimestamp(value) }
+        : { deleted };
+    },
+  };
   public readonly inbox = {
     reserve: async (eventId: string, handlerId: string): Promise<InboxReservation> => {
       const now = timestamp();
@@ -824,6 +871,17 @@ export class PostgresStorage implements StorageConnection {
       await client.query("COMMIT");
       return value;
     });
+  }
+  public async transactionStatus(transactionId: string): Promise<TransactionStatus> {
+    if (!/^\d{1,20}$/.test(transactionId)) throw new RangeError("Invalid transaction ID");
+    const result = await this.pool.query<{ status: string | null }>(
+      "SELECT txid_status($1::bigint) AS status",
+      [transactionId],
+    );
+    const status = result.rows[0]?.status ?? null;
+    return status === "committed" || status === "aborted" || status === "in progress"
+      ? status
+      : null;
   }
   public async close(): Promise<void> {
     await this.pool.end();

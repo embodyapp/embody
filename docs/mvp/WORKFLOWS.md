@@ -3,8 +3,8 @@
 Workflows follow [ADR 0003](../adr/0003-durable-workflows.md): versioned step graphs whose
 inputs, outputs, attempts and schedules live in PostgreSQL. M19 closes the framework engine
 gates (P11-02, P11-03) so workflows run correctly under the least-privilege runtime role.
-Queue-woken hosted execution is M20; until then the reference-mode worker drives steps and the
-request-only profile still rejects workflows.
+Hosted apps run them in the queue-woken [durable profile](./DURABLE.md) (M20); the reference-mode
+worker still drives steps elsewhere, and the request-only profile still rejects workflows.
 
 ## Contract
 
@@ -81,7 +81,8 @@ cannot run, with a message saying what to change:
 | Step `delayMs` | ≤ 30 days | One queue task can wait at most 30 days. |
 | Retry backoff before the last attempt | ≤ 30 days | Same queue limit. |
 
-The hosted durable profile (M20) will call this check at preflight and set `stepDeadlineMs`.
+The hosted durable profile (M20) calls this check at preflight (`assertDurablePlugins`) and sets
+`stepDeadlineMs` to 30 seconds with a 60-second lease.
 
 ## CLI and MCP
 

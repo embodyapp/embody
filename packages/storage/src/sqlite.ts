@@ -294,9 +294,9 @@ class SqliteTransaction implements StorageTransaction {
     complete: async (id: string) => {
       this.database
         .prepare(
-          "UPDATE embody_outbox SET status = 'completed', claimed_at = NULL, claimed_by = NULL WHERE id = ?",
+          "UPDATE embody_outbox SET status = 'completed', completed_at = ?, claimed_at = NULL, claimed_by = NULL WHERE id = ?",
         )
-        .run(id);
+        .run(timestamp(), id);
     },
     fail: async (id: string, error: string, retryAt?: string) =>
       this.transitionFailure(id, error, retryAt, false),

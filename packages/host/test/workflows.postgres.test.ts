@@ -8,6 +8,7 @@ import { Kernel, type Principal } from "@embody/core";
 import { PostgresStorage, type StorageConnection } from "@embody/storage";
 import { WorkflowWorker } from "../src/workflows.js";
 import { createEffects, createPlugins } from "./fixtures/m19-workflows.mjs";
+import { holdClaimLock } from "./fixtures/claim-lock.mjs";
 
 type Effects = ReturnType<typeof createEffects>;
 interface Snapshot {
@@ -108,7 +109,9 @@ suite("M19 workflow engine under the PostgreSQL runtime role", () => {
     return control(kernel, orgId, workflow, "status", id);
   };
 
+  let releaseClaimLock: () => Promise<void> = () => Promise.resolve();
   beforeAll(async () => {
+    releaseClaimLock = await holdClaimLock(migrationUrl!);
     const owner = new Pool({ connectionString: migrationUrl });
     const runtimeRole = decodeURIComponent(new URL(runtimeUrl!).username);
     try {
@@ -124,10 +127,14 @@ suite("M19 workflow engine under the PostgreSQL runtime role", () => {
       await owner.end();
     }
     effects = createEffects(runtimeUrl!);
-  });
+  }, 300_000);
   afterAll(async () => {
-    await Promise.all(runtimes.map(({ kernel }) => kernel.stop()));
-    await effects.close();
+    try {
+      await Promise.all(runtimes.map(({ kernel }) => kernel.stop()));
+      await effects.close();
+    } finally {
+      await releaseClaimLock();
+    }
   });
 
   it("claims across tenants without RLS bypass, exposing claim identity only", async () => {

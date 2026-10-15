@@ -40,6 +40,7 @@ for (const script of [
   "test-mvp.mjs",
   "test-m08.mjs",
   "test-m19.mjs",
+  "test-m20.mjs",
 ]) {
   test(`M03.a ${script} fails when DB configuration is intentionally omitted`, async () => {
     const directory = await mkdtemp(join(tmpdir(), "embody-gate-negative-"));

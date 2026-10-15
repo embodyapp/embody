@@ -35,6 +35,7 @@ import { compileManifest, type AppManifest, type AppMetadata } from "./manifest.
 import { formatTarget } from "./target.js";
 import { progressUpdateSchema } from "./protocol.js";
 import {
+  assertHostedWorkflowLimits,
   compileWorkflows,
   safeWorkflowValue,
   stepDefinition,
@@ -59,8 +60,12 @@ export interface KernelComponent {
 }
 export interface KernelOptions {
   readonly plugins: readonly EmbodyPlugin[];
-  /** No startup callbacks, background delivery or retained CRUD notifications. */
-  readonly profile?: "reference" | "request-only";
+  /**
+   * `request-only`: no startup callbacks, background delivery or retained CRUD notifications.
+   * `durable`: no startup callbacks or background components; events and workflows are woken by
+   * queue tasks, and generated notifications are retained only when something handles them.
+   */
+  readonly profile?: KernelProfile;
   /** Optional app title, description and agent instructions included in the manifest. */
   readonly app?: AppMetadata;
   readonly storage: KernelStorage;
@@ -70,6 +75,7 @@ export interface KernelOptions {
   readonly eventId?: () => string;
   readonly now?: () => Date;
 }
+export type KernelProfile = "reference" | "request-only" | "durable";
 export interface HookTrace {
   readonly handlerId: string;
   readonly startedAt: number;
@@ -106,6 +112,31 @@ export function assertRequestOnlyPlugins(plugins: readonly EmbodyPlugin[]): void
         `Request-only plugin ${plugin.id} cannot run init/services startup callbacks; move work into actions`,
       );
   }
+}
+
+/**
+ * Preflight for the hosted durable profile: workflows, event handlers and subscriptions are
+ * allowed and must fit hosted limits; always-on declarations and startup callbacks are not.
+ */
+export function assertDurablePlugins(plugins: readonly EmbodyPlugin[]): void {
+  for (const plugin of plugins) {
+    const declarations = plugin as EmbodyPlugin & Record<string, unknown>;
+    for (const name of ["schedules", "background", "capabilities"]) {
+      const value = declarations[name];
+      if (
+        value !== undefined &&
+        (typeof value !== "object" || value === null || Object.keys(value).length > 0)
+      )
+        throw new DependencyError(
+          `Durable plugin ${plugin.id} does not support ${name}; use events or delayed workflow steps instead`,
+        );
+    }
+    if (plugin.init || plugin.services)
+      throw new DependencyError(
+        `Durable plugin ${plugin.id} cannot run init/services startup callbacks; move work into actions`,
+      );
+  }
+  assertHostedWorkflowLimits(plugins);
 }
 
 export function sortPlugins(plugins: readonly EmbodyPlugin[]): readonly EmbodyPlugin[] {
@@ -204,7 +235,7 @@ export class Kernel {
   private _manifest: AppManifest | undefined;
 
   public constructor(private readonly options: KernelOptions) {}
-  public get profile(): "reference" | "request-only" {
+  public get profile(): KernelProfile {
     return this.options.profile ?? "reference";
   }
   public get manifest(): AppManifest {
@@ -220,6 +251,16 @@ export class Kernel {
   }
   public get actionTargets(): readonly string[] {
     return [...this.actions.keys()].sort();
+  }
+  /**
+   * Whether a framework-generated event (CRUD or workflow lifecycle) is written to the outbox.
+   * The durable profile writes one only when this app handles it, so writes nobody listens to
+   * never wake the app. Events published by actions are always written.
+   */
+  public retainsGeneratedEvent(eventName: string): boolean {
+    if (this.profile === "request-only") return false;
+    if (this.profile === "durable") return this.eventHandlers.has(eventName);
+    return true;
   }
 
   public boot(): Promise<void> {
@@ -442,6 +483,11 @@ export class Kernel {
         if (this.options.components?.length)
           throw new DependencyError("Request-only kernels cannot start background components");
       }
+      if (this.options.profile === "durable") {
+        assertDurablePlugins(this.sorted);
+        if (this.options.components?.length)
+          throw new DependencyError("Durable kernels cannot start background components");
+      }
       for (const workflow of compileWorkflows(this.sorted))
         this.workflows.set(workflow.target, workflow);
       this.phase("schema");
@@ -571,7 +617,7 @@ export class Kernel {
               };
             }),
           });
-          if (started.created)
+          if (started.created && this.retainsGeneratedEvent(`${target}.started`))
             await ctx.events.publish(`${target}.started`, { workflowId: started.instance.id });
           return repository(tx).get(started.instance.id);
         } catch (error) {
@@ -596,10 +642,9 @@ export class Kernel {
               ? await repo.cancel(request.id, now)
               : await repo.retry(request.id, now);
         if (value === null) throw new NotFoundError("Workflow was not found");
-        await ctx.events.publish(
-          `${target}.${operation === "get" ? "statused" : operation + "led"}`,
-          { workflowId: request.id },
-        );
+        const eventName = `${target}.${operation === "get" ? "statused" : operation + "led"}`;
+        if (this.retainsGeneratedEvent(eventName))
+          await ctx.events.publish(eventName, { workflowId: request.id });
         return value;
       };
     this.registerAction(`${target}.status`, { input: z.object({ id }), handler: control("get") });
@@ -635,9 +680,9 @@ export class Kernel {
         afterDelete: (payload: unknown) =>
           this.runHooks(`${entity.target}.afterDelete`, payload, context).then(() => undefined),
         publish: (eventName: string, payload: unknown) => {
-          if (this.options.profile === "request-only") {
-            // Generated CRUD notifications have explicit zero retention, not delivery semantics.
-            // Entity writes and synchronous hooks still share the original transaction.
+          if (!this.retainsGeneratedEvent(eventName)) {
+            // Generated CRUD notifications nobody handles have zero retention, not delivery
+            // semantics. Entity writes and synchronous hooks still share the original transaction.
             this.validateEvent(eventName, payload);
             return Promise.resolve();
           }

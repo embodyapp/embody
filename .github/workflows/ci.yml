@@ -101,6 +101,10 @@ jobs:
         run: pnpm test:m19
         env:
           EMBODY_POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
+      - name: Mandatory queue-woken durable runtime, crash matrix and packed durable scaffold (zero skips)
+        run: pnpm test:m20
+        env:
+          EMBODY_POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:

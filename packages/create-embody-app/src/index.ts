@@ -12,24 +12,26 @@ export interface CreateAppOptions {
   readonly allowEmptyDirectory?: boolean;
   /** Skip dependency installation for CI and offline callers. */
   readonly noInstall?: boolean;
-  /** Hosted production starter; never silently falls back to local SQLite. */
-  readonly profile?: "reference" | "request-only";
+  /**
+   * Hosted production starters; never silently fall back to local SQLite. `durable` adds
+   * queue-woken events and workflows.
+   */
+  readonly profile?: ScaffoldProfile;
 }
 export interface CreatedApp {
   readonly directory: string;
   readonly files: readonly string[];
 }
 
+export type ScaffoldProfile = "reference" | "request-only" | "durable";
+
 const namePattern = /^[a-z][a-z0-9-]*$/;
 function assertName(name: string): void {
   if (!namePattern.test(name) || name.length > 63 || name === "." || name === "..")
     throw new Error("Project name must use lowercase letters, digits, and hyphens");
 }
-function template(
-  name: string,
-  profile: "reference" | "request-only",
-): Readonly<Record<string, string>> {
-  const hosted = profile === "request-only";
+function template(name: string, profile: ScaffoldProfile): Readonly<Record<string, string>> {
+  const hosted = profile !== "reference";
   return {
     "package.json":
       JSON.stringify(
@@ -110,7 +112,7 @@ export async function createApp(options: CreateAppOptions): Promise<CreatedApp> 
   if (entries !== undefined && (entries.length > 0 || !options.allowEmptyDirectory))
     throw new Error("Destination must not exist or must be explicitly allowed and empty");
   const profile = options.profile ?? "reference";
-  if (profile !== "reference" && profile !== "request-only")
+  if (profile !== "reference" && profile !== "request-only" && profile !== "durable")
     throw new Error("Unsupported scaffold profile");
   const files = { ...template(options.name, profile) };
   if (profile === "request-only") {
@@ -124,6 +126,22 @@ export async function createApp(options: CreateAppOptions): Promise<CreatedApp> 
     );
     files["README.md"] =
       `# ${options.name}\n\nHosted request-only starter (Node 22/24). Run pnpm install, pnpm test and pnpm build. Supply the settings in .env.example through your deployment environment; pnpm start does not load that file. Do not use pnpm dev as a production verifier.\n\nPre-migrate PostgreSQL with a separate maintenance identity. Runtime credentials must have no DDL privileges. No registration, heartbeat, workflow, event subscription, init or service factory callbacks. Generated CRUD writes and synchronous hooks remain atomic, but notifications have zero retention and no delivery guarantee. Custom event publishing fails. Start on a fresh database; drain legacy outbox work in reference mode before switching. Use /tmp only for disposable scratch; PostgreSQL is the only durable request state.\n\nArbitrary module timers, filesystem writes and external side effects are not statically sandboxed. Action cancellation is cooperative; external effects need idempotency. See docs/mvp/RUNTIME.md in the framework repository for the contract and qualification limits.\n\nThis application belongs to its creator and is UNLICENSED by default.\n`;
+  }
+  if (profile === "durable") {
+    files["embody.config.ts"] =
+      `import { definePlugin, defineWorkflow, z } from "@embody/core";\nimport { defineApp } from "@embody/host";\n\n// A delayed step wakes the app through its queue when due; nothing polls in between.\nconst followUp = defineWorkflow(z.object({ title: z.string().min(1) }))({\n  version: "0.1.0",\n  steps: {\n    remind: {\n      delayMs: 60 * 60_000,\n      timeoutMs: 10_000,\n      handler: (context) => ({ reminded: context.input.title }),\n    },\n  },\n});\n\nexport default defineApp({\n  appId: "${options.name}",\n  version: "0.1.0",\n  title: "${options.name}",\n  description: "Describe what this app does for people and agents.",\n  plugins: [\n    definePlugin(\n      {\n        id: "app",\n        version: "0.1.0",\n        entities: { card: { schema: z.object({ title: z.string().min(1) }) } },\n        events: {\n          // At least once: make external effects idempotent, for example keyed by event.id.\n          "app.submitted": () => undefined,\n        },\n        workflows: { followUp },\n      },\n      (define) => ({\n        actions: {\n          ping: define.action({ effect: "read", input: z.object({}), handler: () => ({ ok: true }) }),\n          submit: define.action({\n            effect: "write",\n            input: z.object({ title: z.string().min(1) }),\n            handler: async (input, ctx) => {\n              // Written with the action's transaction; a queue task delivers it after commit.\n              await ctx.events.publish("app.submitted", { title: input.title });\n              return { accepted: true };\n            },\n          }),\n        },\n      }),\n    ),\n  ],\n});\n`;
+    files["src/plugin.test.ts"] =
+      `import { expect, it } from "vitest";\nimport { createTestHarness } from "@embody/testing";\nimport config from "../embody.config.js";\n\nit("accepts a submission and starts the follow-up", async () => {\n  const harness = await createTestHarness({ plugins: config.plugins });\n  try {\n    expect(await harness.call("app.submit", { title: "Hello" })).toEqual({ accepted: true });\n    await harness.tickOutbox();\n    const started = (await harness.call("app.followUp.start", {\n      input: { title: "Hello" },\n      idempotencyKey: "hello",\n    })) as { status: string };\n    expect(started.status).toBe("pending");\n  } finally {\n    await harness.close();\n  }\n});\n`;
+    files["src/index.ts"] = files["src/index.ts"]!.replace(
+      "const runtime = await createAppHost(config);",
+      'if (process.env.EMBODY_HOST_PROFILE !== "hosted" || process.env.EMBODY_HOSTED_PROFILE !== "durable") throw new Error("This starter requires EMBODY_HOST_PROFILE=hosted, EMBODY_HOSTED_PROFILE=durable and pre-migrated PostgreSQL");\nconst runtime = await createAppHost(config);',
+    );
+    files[".env.example"] = files[".env.example"]!.replace(
+      "# Pre-migrate",
+      "EMBODY_HOSTED_PROFILE=durable\n# Cloud Tasks queue, this app's drain URL, and the platform invoker identity it trusts.\nEMBODY_WAKE_QUEUE=projects/replace-project/locations/us-central1/queues/replace-app\nEMBODY_DRAIN_URL=https://replace-app.run.app/_embody/drain\nEMBODY_DRAIN_AUDIENCE=https://replace-app.run.app\nEMBODY_DRAIN_INVOKER_EMAIL=embody-invoker@replace-project.iam.gserviceaccount.com\n# Pre-migrate",
+    );
+    files["README.md"] =
+      `# ${options.name}\n\nHosted durable starter (Node 22/24). Run pnpm install, pnpm test and pnpm build. Supply the settings in .env.example through your deployment environment; pnpm start does not load that file. Do not use pnpm dev as a production verifier.\n\nEvents and workflows run without background processes. Every write that publishes an event or makes a workflow step runnable creates a queue task before it commits; if the queue is unavailable the write fails. The task calls this app's platform-only drain endpoint when the work is due, so the app can scale to zero between requests. Handlers and steps run at least once: make external effects idempotent. Steps finish within 30 seconds and delays are at most 30 days. No schedules, init or service factory callbacks.\n\nPre-migrate PostgreSQL with a separate maintenance identity. Runtime credentials must have no DDL privileges. See docs/mvp/DURABLE.md in the framework repository for the contract and qualification limits.\n\nThis application belongs to its creator and is UNLICENSED by default.\n`;
   }
   const created: string[] = [];
   try {

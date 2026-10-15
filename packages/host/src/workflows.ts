@@ -8,7 +8,12 @@ import {
   type WorkflowStepRecord,
 } from "@embody/core";
 import type { Clock } from "./events.js";
-import type { StorageConnection, WorkflowStepClaim } from "@embody/storage";
+import type {
+  EnqueueOutboxInput,
+  StorageConnection,
+  StorageTransaction,
+  WorkflowStepClaim,
+} from "@embody/storage";
 
 export interface WorkflowWorkerOptions {
   readonly storage: StorageConnection;
@@ -60,11 +65,12 @@ export class WorkflowWorker {
     this.timer = undefined;
     await drain(this.active, deadlineMs);
   }
-  public async tick(): Promise<void> {
-    if (this.stopping) return;
+  /** Claims and runs one batch of due steps; returns how many were claimed. */
+  public async tick(options: { readonly limit?: number } = {}): Promise<number> {
+    if (this.stopping) return 0;
     const claimed = await this.options.storage.transaction("system", (tx) =>
       tx.workflows.claimDue({
-        limit: this.options.batchSize ?? 50,
+        limit: options.limit ?? this.options.batchSize ?? 50,
         workerId: this.workerId,
         now: this.clock.now().toISOString(),
         ...(this.options.leaseMs === undefined ? {} : { leaseMs: this.options.leaseMs }),
@@ -87,6 +93,7 @@ export class WorkflowWorker {
     const concurrency =
       this.options.storage.dialect === "sqlite" ? 1 : (this.options.concurrency ?? 4);
     await Promise.all(Array.from({ length: Math.min(concurrency, claimed.length) }, run));
+    return claimed.length;
   }
   private async process(claim: WorkflowStepClaim): Promise<void> {
     await this.options.storage.transaction(claim.orgId, async (tx) => {
@@ -119,7 +126,7 @@ export class WorkflowWorker {
           now: this.clock.now().toISOString(),
           resultStep: this.resultStep(snapshot, step.name),
         });
-        await tx.outbox.enqueue(step.orgId, {
+        await this.publish(tx, step.orgId, {
           eventName: `${snapshot.definition}.${step.status === "compensating" ? "compensated" : "progress"}`,
           payload: { workflowId: snapshot.id, step: step.name, attempt: step.attempt },
           occurredAt: this.clock.now().toISOString(),
@@ -153,7 +160,7 @@ export class WorkflowWorker {
           terminal,
           now: this.clock.now().toISOString(),
         });
-        await tx.outbox.enqueue(step.orgId, {
+        await this.publish(tx, step.orgId, {
           eventName: `${snapshot.definition}.failed`,
           payload: { workflowId: snapshot.id, step: step.name, attempt: step.attempt, terminal },
           occurredAt: this.clock.now().toISOString(),
@@ -163,6 +170,15 @@ export class WorkflowWorker {
         watch?.();
       }
     });
+  }
+  /** Writes a lifecycle event unless the kernel's profile drops events nobody handles. */
+  private async publish(
+    tx: StorageTransaction,
+    orgId: string,
+    event: EnqueueOutboxInput & { readonly eventName: string },
+  ): Promise<void> {
+    if (this.options.kernel.retainsGeneratedEvent(event.eventName))
+      await tx.outbox.enqueue(orgId, event);
   }
   /** Aborts a running step once its instance's cancellation commits; returns a stop function. */
   private watchCancellation(
