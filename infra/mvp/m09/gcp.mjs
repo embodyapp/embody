@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { setTimeout as delay } from "node:timers/promises";
+import { setTimeout, clearTimeout } from "node:timers";
 import { URL, URLSearchParams } from "node:url";
 import { performance } from "node:perf_hooks";
 import { createCloudRunAppProvisioner } from "../provider/cloud-run.mjs";
@@ -26,7 +27,7 @@ import {
   latencySummary,
 } from "./sql.mjs";
 const exec = promisify(execFile);
-const { fetch, AbortSignal } = globalThis;
+const { fetch, AbortSignal, AbortController, Response } = globalThis;
 const MARKER = "embody-m09-qualification";
 const PRIVATE = join(tmpdir(), "embody-m09-private");
 
@@ -40,12 +41,48 @@ export async function operatorToken(credentials = "adc") {
   return stdout.trim();
 }
 
+/**
+ * fetch with a hard deadline that covers the whole body. A live run hung for hours on one
+ * provider call even with AbortSignal.timeout, so this races a referenced timer as well and
+ * returns a fully buffered Response.
+ */
+export function deadlineFetch(fetcher = fetch, deadlineMs = 60_000) {
+  return async (url, options = {}) => {
+    const controller = new AbortController();
+    let timer;
+    const expired = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error(
+          `Provider ${options.method ?? "GET"} ${new URL(url).host} failed (0); details suppressed`,
+        );
+        controller.abort(error);
+        reject(error);
+      }, deadlineMs);
+    });
+    try {
+      return await Promise.race([
+        (async () => {
+          const response = await fetcher(url, { ...options, signal: controller.signal });
+          const body = await response.arrayBuffer();
+          return new Response(response.status === 204 ? null : body, {
+            status: response.status,
+            headers: response.headers,
+          });
+        })(),
+        expired,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
 export function createGcpProvider({
   baseline,
   image,
   credentials = "adc",
   token = () => operatorToken(credentials),
-  fetcher = fetch,
+  fetcher: rawFetch = fetch,
   now = () => new Date(),
 }) {
   const { project, region, prefix } = baseline;
@@ -54,6 +91,7 @@ export function createGcpProvider({
     !/^[a-z0-9-]+-docker\.pkg\.dev\/.+@sha256:[a-f0-9]{64}$/.test(image ?? "")
   )
     throw new Error("M09 provider needs the baseline output and an immutable fixture image digest");
+  const fetcher = deadlineFetch(rawFetch);
   const run = `https://run.googleapis.com/v2/projects/${project}/locations/${region}`;
   const tasksApi = `https://cloudtasks.googleapis.com/v2/projects/${project}/locations/${region}/queues`;
   const sqlApi = `https://sqladmin.googleapis.com/v1/projects/${project}/instances/${prefix}-postgres`;
@@ -63,17 +101,35 @@ export function createGcpProvider({
       cached = { value: await token(), until: Date.now() + 30 * 60_000 };
     return cached.value;
   };
-  async function api(url, method = "GET", body, { allow = [] } = {}) {
-    const response = await fetcher(url, {
-      method,
-      redirect: "error",
-      signal: AbortSignal.timeout(60_000),
-      headers: {
-        authorization: `Bearer ${await accessToken()}`,
-        "content-type": "application/json",
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
+  // Reads (GET, IAM policy reads, log/metric listing) are retried on timeouts and 5xx.
+  async function api(url, method = "GET", body, options = {}) {
+    const idempotent =
+      method === "GET" || /:getIamPolicy$|entries:list$/.test(new URL(url).pathname);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await apiOnce(url, method, body, options);
+      } catch (error) {
+        const transient = /failed \((0|5\d\d)\)/.test(error.message);
+        if (!idempotent || !transient || attempt === 2) throw error;
+        await delay(5000 * (attempt + 1));
+      }
+    }
+  }
+  async function apiOnce(url, method, body, { allow = [] } = {}) {
+    let response;
+    try {
+      response = await fetcher(url, {
+        method,
+        redirect: "error",
+        headers: {
+          authorization: `Bearer ${await accessToken()}`,
+          "content-type": "application/json",
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    } catch {
+      throw new Error(`Provider ${method} ${new URL(url).host} failed (0); details suppressed`);
+    }
     if (allow.includes(response.status)) return { status: response.status };
     if (response.status === 404 && ["GET", "DELETE"].includes(method)) return null;
     if (!response.ok)
@@ -97,8 +153,16 @@ export function createGcpProvider({
     prefix,
     gatewayEmail: `${prefix}-gateway@${project}.iam.gserviceaccount.com`,
     accessToken,
+    fetcher,
   });
-  const wake = createWakeQueueProvisioner({ project, region, prefix, accessToken, logSampling: 1 });
+  const wake = createWakeQueueProvisioner({
+    project,
+    region,
+    prefix,
+    accessToken,
+    logSampling: 1,
+    fetcher,
+  });
   const scopes = (runId) => ({
     own: { workspaceId: `ws_m09${runId}a`, appId: "wake" },
     other: { workspaceId: `ws_m09${runId}b`, appId: "wake" },
@@ -312,8 +376,9 @@ export function createGcpProvider({
         `https://monitoring.googleapis.com/v3/projects/${project}/timeSeries?${query}`,
       );
       return (result.timeSeries ?? []).flatMap((series) =>
+        // Gauge points are instants; each aligned point stands for the minute ending at it.
         (series.points ?? []).map((point) => ({
-          start: point.interval.startTime ?? point.interval.endTime,
+          start: new Date(Date.parse(point.interval.endTime) - 60_000).toISOString(),
           end: point.interval.endTime,
           value: Number(point.value.int64Value ?? point.value.doubleValue ?? NaN),
         })),

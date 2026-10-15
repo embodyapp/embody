@@ -5,10 +5,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+const { Response } = globalThis;
 import { root, databaseServiceIdentity } from "../../scripts/verification.mjs";
 import {
   M09_LIMITS,
   SUITE_PROVIDER_METHODS,
+  safeError,
   m09Approval,
   runM09Suite,
   evaluateScaling,
@@ -287,7 +289,8 @@ test("a failed setUp still tears down by run ID and never passes", async () => {
   });
   const result = await runM09Suite(env, provider);
   assert.equal(result.pass, false);
-  assert.equal(result.error, "suite aborted; provider details suppressed");
+  // Only the step and the error class: the provider's message carried a secret-looking value.
+  assert.equal(result.error, "suite aborted at setUp: Error");
   assert.doesNotMatch(JSON.stringify(result), /secret-token-value/);
   assert.deepEqual(provider.calls, ["tearDown:a1b2c3d4"]);
 });
@@ -596,4 +599,27 @@ test("suite refuses a provider missing any method before creating anything", asy
   delete provider.wait;
   await assert.rejects(runM09Suite(env, provider), /missing wait; nothing created/);
   assert.deepEqual(provider.calls, []);
+});
+
+test("suite errors keep our sanitized provider messages and drop anything else", () => {
+  assert.equal(
+    safeError(new Error("Provider GET run.googleapis.com failed (503); body suppressed")),
+    "Provider GET run.googleapis.com failed (503); body suppressed",
+  );
+  assert.equal(safeError(new Error("password authentication failed for user x")), "Error");
+  assert.equal(safeError(new TypeError("postgresql://u:p@h/db refused")), "TypeError");
+});
+test("deadline fetch fails a provider call that never answers", async () => {
+  const { deadlineFetch } = await import("../../infra/mvp/m09/gcp.mjs");
+  const hanging = () => new Promise(() => undefined);
+  await assert.rejects(
+    deadlineFetch(hanging, 20)("https://run.googleapis.com/v2/x", { method: "GET" }),
+    /Provider GET run.googleapis.com failed \(0\); details suppressed/,
+  );
+  const ok = await deadlineFetch(async () => Response.json({ a: 1 }), 1000)("https://x.example/");
+  assert.deepEqual(await ok.json(), { a: 1 });
+});
+test("gauge-style one-minute zero points merge into an interval", () => {
+  const minute = (m, value) => ({ start: iso(m * 60 - 60), end: iso(m * 60), value });
+  assert.equal(zeroIntervals([minute(1, 0), minute(2, 0), minute(3, 1)]).length, 1);
 });

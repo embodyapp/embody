@@ -16,7 +16,19 @@ export const M09_LIMITS = Object.freeze({
   minZeroSeconds: 60,
   // Retries must outlast the longest transaction: 30 s action deadline plus margin.
   longestTransactionSeconds: 35,
+  // Live run: a pause took seconds to stop dispatch, so the check waits before enqueueing.
+  pausePropagationMs: 60_000,
 });
+
+/** Our own provider errors carry only a method, host and status; anything else is reduced to its class. */
+export function safeError(error) {
+  const message = error instanceof Error ? error.message : "";
+  return /^(Provider [A-Z]+ [a-z0-9.-]+ failed \(\d{1,3}\); (body|details) suppressed|[A-Za-z ,;/.()-]{1,120})$/.test(
+    message,
+  ) && !/token|password|secret|postgres(ql)?:/i.test(message)
+    ? message
+    : (error?.name ?? "Error");
+}
 
 /** Every provider method the suite calls; the real provider must implement them all. */
 export const SUITE_PROVIDER_METHODS = Object.freeze([
@@ -281,6 +293,10 @@ export async function runM09Suite(env, provider) {
   };
   let fixture;
   let failure;
+  let step = "setUp";
+  const at = (name) => {
+    step = name;
+  };
   try {
     record("M09.a.baseline", { ...baseline.checks, pass: baseline.pass === true });
     fixture = await provider.setUp({ ...approval, runId });
@@ -290,11 +306,13 @@ export async function runM09Suite(env, provider) {
       fail503: M09_LIMITS.fail503,
       ...fixture.probe,
     };
+    at("runQueueProbe");
     const report = await provider.runQueueProbe(fixture, probeConfig);
     record("M09.e.queue-probe", evaluateQueueProbe(report));
     const scheduleAt = report?.results?.find((result) => result.case === "own-delayed")?.scheduleAt;
     const executed = report?.results?.find((result) => result.case === "own-now")?.task;
 
+    at("dedup");
     // Duplicate names stay rejected after the task executed (de-duplication window).
     const ran = await until(provider, 10 * 60_000, async () =>
       (await provider.wakes(fixture, "own")).some(
@@ -308,6 +326,7 @@ export async function runM09Suite(env, provider) {
       pass: recreated === 409,
     });
 
+    at("retry");
     await until(provider, 15 * 60_000, async () =>
       (await provider.wakes(fixture, "own")).some(
         (wake) => wake.probe === "own-retry" && wake.status === 200,
@@ -319,8 +338,10 @@ export async function runM09Suite(env, provider) {
     );
 
     // Emergency stop: a paused queue keeps tasks and dispatches none until resumed.
+    at("emergency-stop");
     const pausedAt = provider.now();
     await provider.pause(fixture);
+    await provider.wait(M09_LIMITS.pausePropagationMs);
     await provider.enqueueOperatorTask(fixture, "pause-check");
     await provider.wait(120_000);
     const duringPause = (await provider.wakes(fixture, "own")).filter(
@@ -337,11 +358,13 @@ export async function runM09Suite(env, provider) {
       pass: duringPause.length === 0 && Boolean(afterResume),
     });
 
+    at("externalCalls");
     record("M09.e.unauthenticated", await provider.externalCalls(fixture));
 
     // Wait for the delayed wake, then judge it from logs and provider metrics.
     const due = Date.parse(scheduleAt ?? "");
     if (Number.isFinite(due)) await provider.wait(Math.max(0, due - +provider.now() + 5 * 60_000));
+    at("delayed-wake");
     const wakes = await provider.wakes(fixture, "own");
     const points = await provider.instanceSeries(fixture, "own", startedAt);
     record(
@@ -368,7 +391,9 @@ export async function runM09Suite(env, provider) {
         since: fixture.settledAt ?? startedAt,
       }),
     );
+    at("iamInventory");
     record("M09.b.builder", evaluateBuilder(await provider.iamInventory(fixture)));
+    at("sql");
     const sql = await provider.sql(fixture);
     for (const [id, result] of Object.entries(sql)) record(`M09.c.${id}`, result);
   } catch (error) {
@@ -376,15 +401,24 @@ export async function runM09Suite(env, provider) {
   } finally {
     // setUp may fail part-way, so tear down by run ID whether or not it returned.
     {
-      try {
-        await provider.tearDown(fixture ?? { runId });
-        record("M09.a.teardown", evaluateCleanup(await provider.inventory({ ...approval, runId })));
-      } catch {
-        record("M09.a.teardown", {
-          pass: false,
-          error: "teardown failed; reconcile by owned names",
-        });
+      // One retry: teardown is repeatable and a transient provider error must not strand resources.
+      let lastError;
+      for (let attempt = 0; attempt < 2 && !cases["M09.a.teardown"]?.pass; attempt++) {
+        try {
+          await provider.tearDown(fixture ?? { runId });
+          record(
+            "M09.a.teardown",
+            evaluateCleanup(await provider.inventory({ ...approval, runId })),
+          );
+        } catch (error) {
+          lastError = error;
+          record("M09.a.teardown", {
+            pass: false,
+            error: `teardown failed (${safeError(error)}); reconcile by owned names`,
+          });
+        }
       }
+      void lastError;
     }
   }
   const measured = await provider.measuredUsage(fixture).catch(() => null);
@@ -400,7 +434,7 @@ export async function runM09Suite(env, provider) {
     projectedUsd: projected,
     cost,
     cases,
-    error: failure ? "suite aborted; provider details suppressed" : null,
+    error: failure ? `suite aborted at ${step}: ${safeError(failure)}` : null,
     pass: pass && cost !== null && cost.estimatedUpperUsd <= approval.budgetUsd,
   };
 }
