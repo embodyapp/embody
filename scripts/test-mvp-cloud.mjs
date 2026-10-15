@@ -13,13 +13,16 @@ await main("mvp-cloud", async () => {
     "EMBODY_MVP_CLOUD_RESOURCE_PREFIX",
     "EMBODY_MVP_CLOUD_BUDGET_USD",
     "EMBODY_MVP_CLOUD_BUDGET_APPROVED",
-    "GOOGLE_APPLICATION_CREDENTIALS",
   ]);
   m09Approval(process.env);
-  try {
-    await access(process.env.GOOGLE_APPLICATION_CREDENTIALS);
-  } catch {
-    throw new Error("Cloud credential file unavailable (path redacted)");
+  // Either the operator's own gcloud login (no key file, as in M05) or a credential file.
+  if (process.env.EMBODY_MVP_CLOUD_CREDENTIALS !== "gcloud") {
+    requireVariables(["GOOGLE_APPLICATION_CREDENTIALS"]);
+    try {
+      await access(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    } catch {
+      throw new Error("Cloud credential file unavailable (path redacted)");
+    }
   }
   const suites = (process.env.EMBODY_MVP_CLOUD_SUITES ?? "m09")
     .split(",")
@@ -35,6 +38,7 @@ await main("mvp-cloud", async () => {
   const provider = createGcpProvider({
     baseline: await loadBaseline(process.env.EMBODY_M09_BASELINE),
     image: process.env.EMBODY_M09_IMAGE,
+    credentials: process.env.EMBODY_MVP_CLOUD_CREDENTIALS === "gcloud" ? "gcloud" : "adc",
   });
   const result = await runM09Suite(process.env, provider);
   const outcomes = Object.values(result.cases);

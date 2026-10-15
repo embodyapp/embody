@@ -572,3 +572,14 @@ test("GCP provider module loads and refuses mutable images or other regions", as
   );
   assert.equal(typeof loadBaseline, "function");
 });
+
+test("cloud gate needs a credential file unless the operator gcloud login is chosen", async () => {
+  const { result } = await gate({ GOOGLE_APPLICATION_CREDENTIALS: "" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Missing required configuration: GOOGLE_APPLICATION_CREDENTIALS/);
+  const operator = await gate({
+    GOOGLE_APPLICATION_CREDENTIALS: "",
+    EMBODY_MVP_CLOUD_CREDENTIALS: "gcloud",
+  });
+  assert.match(operator.result.stderr, /Missing required configuration: EMBODY_M09_BASELINE/);
+});

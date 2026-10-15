@@ -30,16 +30,21 @@ const { fetch, AbortSignal } = globalThis;
 const MARKER = "embody-m09-qualification";
 const PRIVATE = join(tmpdir(), "embody-m09-private");
 
-/** Operator access token from ADC (GOOGLE_APPLICATION_CREDENTIALS); never printed or stored. */
-export async function operatorToken() {
-  const { stdout } = await exec("gcloud", ["auth", "application-default", "print-access-token"]);
+/** Operator access token from the gcloud login or ADC; never printed or stored. */
+export async function operatorToken(credentials = "adc") {
+  const args =
+    credentials === "gcloud"
+      ? ["auth", "print-access-token"]
+      : ["auth", "application-default", "print-access-token"];
+  const { stdout } = await exec("gcloud", args);
   return stdout.trim();
 }
 
 export function createGcpProvider({
   baseline,
   image,
-  token = operatorToken,
+  credentials = "adc",
+  token = () => operatorToken(credentials),
   fetcher = fetch,
   now = () => new Date(),
 }) {
@@ -485,7 +490,12 @@ export function createGcpProvider({
     const port = 55000 + (Number.parseInt(fixture.runId.slice(0, 4), 16) % 900);
     const proxy = spawn(
       proxyBinary,
-      [`--port=${port}`, "--address=127.0.0.1", `${project}:${region}:${prefix}-postgres`],
+      [
+        `--port=${port}`,
+        "--address=127.0.0.1",
+        ...(credentials === "gcloud" ? ["--gcloud-auth"] : []),
+        `${project}:${region}:${prefix}-postgres`,
+      ],
       { stdio: "ignore" },
     );
     const { Client } = createRequire(
