@@ -96,7 +96,8 @@ Executable metadata/IAM/SQL and private-invocation probes are provided in
 constitute live provider evidence.
 M09/M17 must prove each runtime identity cannot access platform SQL, another secret,
 deployment APIs or signing keys, and unauthenticated external invocation fails even with
-a leaked valid Embody token. Separate PostgreSQL roles are tested locally, not proof of
+a leaked valid Embody token. The M09 suite runs these negatives as an app runtime identity
+([runbook](./M09-QUALIFICATION.md)); not yet live-run. Separate PostgreSQL roles are tested locally, not proof of
 provider IAM. Management/log/source/secret APIs not yet delivered by their milestones
 must remain absent, not be treated as authorized by this token work.
 

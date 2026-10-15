@@ -344,3 +344,22 @@ test("M05 state bootstrap fails closed on inaccessible buckets and create confli
     );
   }
 });
+test("M09 reuses the state bucket under its own prefix with the $25 qualification ceiling", async () => {
+  const never = {
+    command: () => {
+      throw new Error("Must not run");
+    },
+  };
+  await assert.rejects(bootstrapState({ ...approval, budget: "25" }, never), /at most \$10/);
+  await assert.rejects(
+    bootstrapState({ ...approval, budget: "26", statePrefix: "mvp/m09/baseline" }, never),
+    /at most \$25/,
+  );
+  await assert.rejects(bootstrapState({ ...approval, statePrefix: "other" }, never), /Unknown/);
+  const result = await bootstrapState(
+    { ...approval, budget: "25", statePrefix: "mvp/m09/baseline" },
+    { command, fetcher: () => Promise.resolve(Response.json(bucket)) },
+  );
+  assert.equal(result.prefix, "mvp/m09/baseline");
+  assert.equal(result.bucket, "embody-cloud-tfstate-123456");
+});

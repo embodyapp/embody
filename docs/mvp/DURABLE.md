@@ -178,7 +178,7 @@ fails once instead of looping.
 
 ## Not yet proven
 
-- **Real queue (M09).** The Cloud Tasks adapter is unit-tested only. M09 must qualify the
+- **Real queue (M09).** The Cloud Tasks adapter is unit-tested only. The M09 suite that qualifies it live is written ([runbook](./M09-QUALIFICATION.md)) but not yet run. M09 must qualify the
   de-duplication window, 30-day schedule limit, retry ceilings for `503` (uncommitted) answers,
   whether OIDC tokens carry `email` and `email_verified` for the invoker, audience and IAM. The app
   runtime needs `cloudtasks.tasks.create` on its own queue and `actAs` on the invoker identity;

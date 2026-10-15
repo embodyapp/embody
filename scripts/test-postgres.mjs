@@ -6,17 +6,15 @@ import { join } from "node:path";
 import {
   command,
   evidence,
-  containerImageIdentity,
+  databaseServiceIdentity,
   main,
-  requireVariables,
   runVitest,
   postgresConfiguration,
 } from "./verification.mjs";
 
 await main("postgres", async () => {
   const config = postgresConfiguration(); // Fail before builds or child tests when required config is absent.
-  requireVariables(["EMBODY_POSTGRES_TEST_CONTAINER"]);
-  const image = containerImageIdentity(process.env.EMBODY_POSTGRES_TEST_CONTAINER);
+  const image = databaseServiceIdentity();
   const directory = await mkdtemp(join(tmpdir(), "embody-postgres-report-"));
   const report = join(directory, "tests.json");
   try {

@@ -4,16 +4,14 @@ import { join } from "node:path";
 import {
   main,
   platformConfiguration,
-  requireVariables,
-  containerImageIdentity,
+  databaseServiceIdentity,
   command,
   runVitest,
   evidence,
 } from "./verification.mjs";
 await main("gateway-store", async () => {
   platformConfiguration();
-  requireVariables(["EMBODY_POSTGRES_TEST_CONTAINER"]);
-  const image = containerImageIdentity(process.env.EMBODY_POSTGRES_TEST_CONTAINER);
+  const image = databaseServiceIdentity();
   const directory = await mkdtemp(join(tmpdir(), "embody-platform-report-"));
   try {
     command("pnpm", ["build"]);
