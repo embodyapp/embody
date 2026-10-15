@@ -18,6 +18,31 @@ export const M09_LIMITS = Object.freeze({
   longestTransactionSeconds: 35,
 });
 
+/** Every provider method the suite calls; the real provider must implement them all. */
+export const SUITE_PROVIDER_METHODS = Object.freeze([
+  "now",
+  "wait",
+  "projectedCostUsd",
+  "preflight",
+  "setUp",
+  "runQueueProbe",
+  "wakes",
+  "starts",
+  "requests",
+  "instanceSeries",
+  "serviceConfig",
+  "recreateTask",
+  "pause",
+  "resume",
+  "enqueueOperatorTask",
+  "externalCalls",
+  "iamInventory",
+  "sql",
+  "tearDown",
+  "inventory",
+  "measuredUsage",
+]);
+
 /** Guards shared by `test:mvp:cloud` and the operator CLI. Throws before any cloud call. */
 export function m09Approval(env) {
   const budget = Number(env.EMBODY_MVP_CLOUD_BUDGET_USD);
@@ -242,6 +267,8 @@ async function until(provider, deadlineMs, check, everyMs = 15_000) {
  */
 export async function runM09Suite(env, provider) {
   const approval = m09Approval(env);
+  const missing = SUITE_PROVIDER_METHODS.filter((name) => typeof provider[name] !== "function");
+  if (missing.length) throw new Error(`Provider is missing ${missing.join(", ")}; nothing created`);
   const runId = env.EMBODY_M09_RUN_ID ?? randomBytes(4).toString("hex");
   const projected = await provider.projectedCostUsd();
   if (!(projected > 0) || projected > approval.budgetUsd)

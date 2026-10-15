@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { root, databaseServiceIdentity } from "../../scripts/verification.mjs";
 import {
   M09_LIMITS,
+  SUITE_PROVIDER_METHODS,
   m09Approval,
   runM09Suite,
   evaluateScaling,
@@ -571,6 +572,12 @@ test("GCP provider module loads and refuses mutable images or other regions", as
     /immutable fixture image digest/,
   );
   assert.equal(typeof loadBaseline, "function");
+  const provider = createGcpProvider({
+    baseline,
+    image: `us-central1-docker.pkg.dev/p/r/fixture@sha256:${"a".repeat(64)}`,
+    token,
+  });
+  for (const name of SUITE_PROVIDER_METHODS) assert.equal(typeof provider[name], "function", name);
 });
 
 test("cloud gate needs a credential file unless the operator gcloud login is chosen", async () => {
@@ -582,4 +589,11 @@ test("cloud gate needs a credential file unless the operator gcloud login is cho
     EMBODY_MVP_CLOUD_CREDENTIALS: "gcloud",
   });
   assert.match(operator.result.stderr, /Missing required configuration: EMBODY_M09_BASELINE/);
+});
+
+test("suite refuses a provider missing any method before creating anything", async () => {
+  const provider = fakeProvider();
+  delete provider.wait;
+  await assert.rejects(runM09Suite(env, provider), /missing wait; nothing created/);
+  assert.deepEqual(provider.calls, []);
 });

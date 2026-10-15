@@ -169,6 +169,8 @@ export function createGcpProvider({
   }
 
   return {
+    now,
+    wait: (ms) => delay(ms),
     async projectedCostUsd() {
       return qualificationEstimate({
         sqlHours: 24,
