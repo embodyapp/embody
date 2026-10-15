@@ -211,8 +211,9 @@ export function createGcpProvider({
       for (const scope of [own, other]) await deployTarget(scope, runId);
       const ownWake = await wake.prepare(own);
       const otherWake = await wake.prepare(other);
-      // Deployment readiness checks may start an instance; isolation is judged after settling.
-      await delay(120_000);
+      // IAM grants can take minutes to apply, and deployment readiness checks may start an
+      // instance; the probe and isolation are judged after settling.
+      await delay(300_000);
       fixture.settledAt = now().toISOString();
       fixture.probe = {
         ownQueue: ownWake.queue,
@@ -623,7 +624,7 @@ export function createGcpProvider({
     return results;
   }
   async function waitSqlOperations() {
-    for (let attempt = 0; attempt < 120; attempt++) {
+    for (let attempt = 0; attempt < 240; attempt++) {
       const { items = [] } = await api(
         `https://sqladmin.googleapis.com/v1/projects/${project}/operations?instance=${prefix}-postgres&maxResults=5`,
       );
