@@ -336,6 +336,9 @@ export class DuplicateRegistrationError extends EmbodyError {
     constructor(message?: string);
 }
 
+// @public
+export const DURABLE_WORKFLOW_MAX_STEPS = 50;
+
 // @public (undocumented)
 export class EmbodyError extends Error {
     constructor(code: EmbodyErrorCode, message: string, status: number, details?: readonly ValidationIssue[] | undefined, options?: ErrorOptions);

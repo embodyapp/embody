@@ -8,7 +8,6 @@ import {
   Kernel,
   RateLimitedError,
   UnavailableError,
-  ValidationError,
   z,
 } from "@embody/core";
 import { gatewayJwtVerifier, platformInvokerVerifier } from "@embody/auth";
@@ -85,6 +84,20 @@ describe("durable profile preflight", () => {
       ).toThrow(/Durable plugin app/);
     },
   );
+  it("caps durable workflows at 50 steps", () => {
+    const steps = Object.fromEntries(
+      Array.from({ length: 51 }, (_, index) => [`s${index}`, { handler: () => undefined }]),
+    );
+    expect(() =>
+      assertDurablePlugins([
+        {
+          id: "app",
+          version: "1.0.0",
+          workflows: { wide: defineWorkflow(z.object({}))({ version: "1.0.0", steps }) },
+        },
+      ]),
+    ).toThrow(/more than 50 steps/);
+  });
   it("applies hosted workflow limits", () => {
     expect(() =>
       assertDurablePlugins([
@@ -476,17 +489,26 @@ describe("wake tasks are enqueued before commit", () => {
     await expect(publish(storage, 1, now)).rejects.toBeInstanceOf(UnavailableError);
     expect(log).toEqual(["commit", "rollback"]);
   });
-  it("fails closed above the per-transaction quota and the 30-day schedule limit", async () => {
+  it("fails closed above the per-transaction quota", async () => {
     const log: string[] = [];
     const queue = new MemoryWakeQueue();
     const storage = wakingStorage(fakeStorage(log), { appId: "shop", queue });
     await expect(publish(storage, 101, new Date().toISOString())).rejects.toBeInstanceOf(
       RateLimitedError,
     );
-    const late = new Date(Date.now() + 31 * 24 * 60 * 60_000).toISOString();
-    await expect(publish(storage, 1, late)).rejects.toBeInstanceOf(ValidationError);
     expect(queue.tasks).toEqual([]);
-    expect(log).toEqual(["rollback", "rollback"]);
+    expect(log).toEqual(["rollback"]);
+  });
+  it("schedules work beyond the queue's 30-day horizon at the horizon", async () => {
+    const queue = new MemoryWakeQueue();
+    const storage = wakingStorage(fakeStorage([]), { appId: "shop", queue });
+    const late = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
+    await publish(storage, 1, late);
+    const [task] = queue.tasks;
+    expect(task!.body.due).toBe(late);
+    const ahead = Date.parse(task!.scheduleAt) - Date.now();
+    expect(ahead).toBeLessThan(30 * 24 * 60 * 60_000 - 59_000);
+    expect(ahead).toBeGreaterThan(30 * 24 * 60 * 60_000 - 120_000);
   });
   it("in-memory queue reports duplicate names like Cloud Tasks", async () => {
     const queue = new MemoryWakeQueue();

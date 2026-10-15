@@ -126,6 +126,7 @@ export {
   Kernel,
   assertDurablePlugins,
   assertRequestOnlyPlugins,
+  DURABLE_WORKFLOW_MAX_STEPS,
   sortPlugins,
   type BootPhase,
   type HookTrace,

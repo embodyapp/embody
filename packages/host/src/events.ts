@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { drain } from "./drain.js";
+import { drain, settleAll } from "./drain.js";
 import type { Kernel } from "@embody/core";
 import {
   eventDeliveryRequestSchema,
@@ -232,7 +232,7 @@ export class OutboxWorker {
       }
     };
     const concurrency = this.options.storage.dialect === "sqlite" ? 1 : this.values.concurrency;
-    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
+    await settleAll(Array.from({ length: Math.min(concurrency, items.length) }, run));
   }
   private async process(row: OutboxEvent): Promise<void> {
     try {
@@ -316,7 +316,7 @@ export class DeliveryWorker {
       }
     };
     const concurrency = this.options.storage.dialect === "sqlite" ? 1 : this.values.concurrency;
-    await Promise.all(Array.from({ length: Math.min(concurrency, claimed.length) }, run));
+    await settleAll(Array.from({ length: Math.min(concurrency, claimed.length) }, run));
   }
   private async process(delivery: EventDelivery): Promise<void> {
     try {

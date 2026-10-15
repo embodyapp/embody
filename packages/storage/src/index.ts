@@ -301,9 +301,14 @@ export interface DurableRepository {
   transactionId(): Promise<string>;
   /** One outbox event of the current tenant. */
   event(id: string): Promise<OutboxEvent | null>;
+  /** One workflow step of the current tenant, with its instance's cancellation flag. */
+  step(
+    id: string,
+  ): Promise<{ readonly step: WorkflowStep; readonly cancelRequested: boolean } | null>;
   /**
-   * Whether the current tenant has work due before `before`, or claimed work whose claim is
-   * older than `expired` (a lost lease).
+   * Whether the current tenant has claimable work due before `before`, or claimed work whose
+   * claim is older than `expired` (a lost lease). A compensation waiting for a later step and
+   * steps of a cancelled instance are not counted.
    */
   overdue(options: { readonly before: string; readonly expired: string }): Promise<boolean>;
   /**

@@ -389,17 +389,18 @@ export function createHost(options: HostOptions): EmbodyHost {
     });
   if (durable !== undefined)
     app.post("/_embody/drain", async (request, reply) => {
+      // Only the queue's platform invoker token is accepted here; gateway principal tokens
+      // (X-Gateway-Auth) are ignored and never authorize a drain. Callers learn nothing else
+      // about this host before they authenticate.
+      const authorization = request.headers.authorization;
+      await durable.verifier.verify(
+        bearer(typeof authorization === "string" ? authorization : undefined),
+      );
       if (!accepting || options.kernel.state !== "ready") throw new UnavailableError();
       if (active >= maximum) {
         reply.header("retry-after", "1");
         throw new RateLimitedError();
       }
-      // Only the queue's platform invoker token is accepted here; gateway principal tokens
-      // (X-Gateway-Auth) are ignored and never authorize a drain.
-      const authorization = request.headers.authorization;
-      await durable.verifier.verify(
-        bearer(typeof authorization === "string" ? authorization : undefined),
-      );
       active++;
       try {
         const result = await durable.drain(request.body);

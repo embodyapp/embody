@@ -32,6 +32,8 @@ export const DURABLE_LIMITS = Object.freeze({
   /** Events and steps one drain claims. Each holds a database connection while it runs. */
   eventBatch: 4,
   stepBatch: 2,
+  /** More step wakes than this in one transaction collapse into sweeps. */
+  stepWakesPerTransaction: 4,
   /** Work this late with no drain is re-enqueued after an inbound request (MD12). */
   overdueGraceMs: 60_000,
   /** Retained records one cleanup deletes before it schedules a follow-up. */
@@ -57,10 +59,7 @@ export const drainRequestSchema = z
   })
   .strict()
   .refine((value) => value.kind !== "event" || value.id !== undefined, "Event wake needs an id")
-  .refine(
-    (value) => value.kind !== "step" || (value.id !== undefined && value.instance !== undefined),
-    "Step wake needs a step and instance id",
-  );
+  .refine((value) => value.kind !== "step" || value.id !== undefined, "Step wake needs an id");
 export type DrainRequest = z.output<typeof drainRequestSchema>;
 
 /** One wake-up: a named task that calls this app's drain endpoint at `scheduleAt`. */
@@ -116,18 +115,18 @@ export interface WakingStorageOptions {
   readonly queue: WakeQueue;
   readonly clock?: Clock;
   readonly maxTasksPerTransaction?: number;
+  /** Claims older than this are recoverable. Each claim's lease wake fires just after it. */
+  readonly leaseMs?: number;
 }
 
 type Wake = Omit<DrainRequest, "v" | "app" | "name" | "txid">;
 
-/** Steps a drain could claim now or later, keyed by what makes a wake for them distinct. */
-function runnable(snapshot: WorkflowSnapshot): Map<string, WorkflowStep> {
+/** Forward steps a drain could claim now or later, keyed by what makes a wake for them distinct. */
+function runnable(snapshot: WorkflowSnapshot | null): Map<string, WorkflowStep> {
   const steps = new Map<string, WorkflowStep>();
+  if (snapshot === null || snapshot.cancelRequested) return steps;
   for (const step of snapshot.steps)
-    if (
-      ((step.status === "pending" || step.status === "waiting") && !snapshot.cancelRequested) ||
-      step.status === "compensating"
-    )
+    if (step.status === "pending" || step.status === "waiting")
       steps.set(`${step.id}:${step.status}:${step.attempt}:${step.scheduledAt}`, step);
   return steps;
 }
@@ -139,16 +138,55 @@ function compensationState(snapshot: WorkflowSnapshot | null): string {
     .join(",");
 }
 /**
- * Steps this transaction made runnable. Compensations run in reverse order, so when any step
- * stops compensating or running, every remaining compensation is woken again: the claim decides
- * which one may run.
+ * Wakes one instance needs after this transaction. A forward step gets its own wake when it
+ * becomes runnable. Compensations run one at a time in reverse order, so any change to them gets
+ * a single sweep and the claim picks the one that may run: O(1) tasks per change, not O(n).
  */
-function newlyRunnable(before: WorkflowSnapshot | null, after: WorkflowSnapshot): WorkflowStep[] {
-  const prior = before === null ? new Map<string, WorkflowStep>() : runnable(before);
-  const changed = compensationState(before) !== compensationState(after);
-  return [...runnable(after)]
-    .filter(([key, step]) => !prior.has(key) || (step.status === "compensating" && changed))
-    .map(([, step]) => step);
+function instanceWakes(before: WorkflowSnapshot | null, after: WorkflowSnapshot): Wake[] {
+  const prior = runnable(before);
+  const wakes: Wake[] = [...runnable(after)]
+    .filter(([key]) => !prior.has(key))
+    .map(([, step]) => ({
+      kind: "step",
+      org: after.orgId,
+      id: step.id,
+      instance: after.id,
+      due: step.scheduledAt,
+    }));
+  const compensating = after.steps.filter((step) => step.status === "compensating");
+  if (compensating.length > 0 && compensationState(before) !== compensationState(after))
+    wakes.push({
+      kind: "sweep",
+      org: after.orgId,
+      due: compensating.map((step) => step.scheduledAt).sort()[0]!,
+    });
+  return wakes;
+}
+/**
+ * Beyond a few step wakes, one transaction's steps collapse into one sweep per tenant and due
+ * time. A sweep claims globally and chains while due work remains, so fan-out never meets the
+ * per-transaction quota.
+ */
+function collapse(wakes: readonly Wake[]): Wake[] {
+  const steps = wakes.filter((wake) => wake.kind === "step").length;
+  const result: Wake[] = [];
+  const sweeps = new Set<string>();
+  for (const wake of wakes) {
+    const sweep =
+      wake.kind === "sweep" ||
+      (wake.kind === "step" && steps > DURABLE_LIMITS.stepWakesPerTransaction);
+    if (!sweep) result.push(wake);
+    else if (!sweeps.has(`${wake.org}:${wake.due}`)) {
+      sweeps.add(`${wake.org}:${wake.due}`);
+      result.push({ kind: "sweep", org: wake.org, due: wake.due });
+    }
+  }
+  return result;
+}
+/** Cloud Tasks schedules at most 30 days ahead; a later task arrives early and reschedules. */
+function scheduleTime(due: string, now: Date): string {
+  const latest = now.getTime() + MAX_SCHEDULE_MS - 60_000;
+  return Date.parse(due) > latest ? new Date(latest).toISOString() : due;
 }
 
 /** Records what one transaction changes and enqueues its wake tasks before it commits. */
@@ -156,12 +194,20 @@ class WakeTracker {
   public readonly transaction: StorageTransaction;
   private readonly events: OutboxEvent[] = [];
   private readonly instances = new Map<string, WorkflowSnapshot | null>();
+  /** One lease wake per claim, so every claimed item has a successor if its drain dies. */
+  private readonly leases: { readonly wake: Wake; readonly attempt: number }[] = [];
   private completed = false;
   public constructor(
     private readonly tx: StorageTransaction,
     private readonly options: WakingStorageOptions,
   ) {
     const { outbox, workflows } = tx;
+    const leaseEnd = (claimedAt?: string): string =>
+      new Date(
+        Date.parse(claimedAt ?? this.now().toISOString()) +
+          (options.leaseMs ?? DURABLE_LIMITS.leaseMs) +
+          1_000,
+      ).toISOString();
     const tracked: WorkflowRepository = {
       ...workflows,
       start: async (input) => {
@@ -176,6 +222,15 @@ class WakeTracker {
       retry: async (id, now) => {
         await this.capture(id);
         return workflows.retry(id, now);
+      },
+      claimDue: async (claimOptions) => {
+        const claims = await workflows.claimDue(claimOptions);
+        for (const claim of claims)
+          this.leases.push({
+            wake: { kind: "step", org: claim.orgId, id: claim.id, due: leaseEnd(claimOptions.now) },
+            attempt: claim.attempt,
+          });
+        return claims;
       },
       lockClaim: async (claim) => {
         const step = await workflows.lockClaim(claim);
@@ -199,6 +254,20 @@ class WakeTracker {
           this.events.push(event);
           return event;
         },
+        claimBatch: async (claimOptions) => {
+          const claimed = await outbox.claimBatch(claimOptions);
+          for (const event of claimed)
+            this.leases.push({
+              wake: {
+                kind: "event",
+                org: event.orgId,
+                id: event.id,
+                due: leaseEnd(event.claimedAt),
+              },
+              attempt: event.attempts,
+            });
+          return claimed;
+        },
         fail: async (id, error, retryAt) => {
           const event = await outbox.fail(id, error, retryAt);
           if (event !== null) this.events.push(event);
@@ -212,62 +281,60 @@ class WakeTracker {
       workflows: tracked,
     };
   }
+  private now(): Date {
+    return (this.options.clock ?? { now: () => new Date() }).now();
+  }
   private async capture(instanceId: string): Promise<void> {
     if (this.instances.has(instanceId)) return;
     this.instances.set(instanceId, await this.tx.workflows.get(instanceId));
   }
   /** Enqueues every wake this transaction needs. Throwing rolls the transaction back. */
   public async flush(): Promise<void> {
-    const now = (this.options.clock ?? { now: () => new Date() }).now();
+    const now = this.now();
     const wakes: Wake[] = [];
     for (const event of this.events)
       if (event.status === "pending" || event.status === "failed")
         wakes.push({ kind: "event", org: event.orgId, id: event.id, due: event.scheduledAt });
     for (const [id, before] of this.instances) {
       const after = await this.tx.workflows.get(id);
-      if (after === null) continue;
-      for (const step of newlyRunnable(before, after))
-        wakes.push({
-          kind: "step",
-          org: after.orgId,
-          id: step.id,
-          instance: id,
-          due: step.scheduledAt,
-        });
+      if (after !== null) wakes.push(...instanceWakes(before, after));
     }
-    if (wakes.length === 0 && !this.completed) return;
+    const work = collapse(wakes);
+    if (work.length === 0 && this.leases.length === 0 && !this.completed) return;
     const maximum = this.options.maxTasksPerTransaction ?? DURABLE_LIMITS.maxTasksPerTransaction;
-    if (wakes.length > maximum)
+    if (work.length > maximum)
       throw new RateLimitedError(
         `One transaction may schedule at most ${maximum} wake tasks; split the work across actions or steps`,
       );
-    for (const wake of wakes)
-      if (Date.parse(wake.due) - now.getTime() > MAX_SCHEDULE_MS)
-        throw new ValidationError("Durable work can be scheduled at most 30 days ahead");
     if (this.tx.durable === undefined)
       throw new DependencyError("The durable profile requires PostgreSQL storage");
-    const txid = await this.tx.durable.transactionId();
-    const tasks: WakeTask[] = wakes.map((wake) => {
-      const name = taskName(wake.kind, this.options.appId, wake.org, wake.id, wake.due, txid);
+    const txid = work.length === 0 ? undefined : await this.tx.durable.transactionId();
+    const app = this.options.appId;
+    const tasks: WakeTask[] = work.map((wake) => {
+      const name = taskName(wake.kind, app, wake.org, wake.id, wake.due, txid);
       return {
         name,
-        scheduleAt: wake.due,
-        body: { v: 1, app: this.options.appId, ...wake, txid, name },
+        scheduleAt: scheduleTime(wake.due, now),
+        body: { v: 1, app, ...wake, ...(txid === undefined ? {} : { txid }), name },
       };
     });
+    // Lease wakes carry no transaction ID: if the claim rolled back, the drain finds nothing.
+    for (const { wake, attempt } of this.leases) {
+      const name = taskName("lease", app, wake.org, wake.kind, wake.id, attempt);
+      tasks.push({
+        name,
+        scheduleAt: scheduleTime(wake.due, now),
+        body: { v: 1, app, ...wake, name },
+      });
+    }
     if (this.completed) {
       // One cleanup per tenant and day; it runs just inside the queue's 30-day limit.
       const due = new Date(now.getTime() + MAX_SCHEDULE_MS - 60_000).toISOString();
-      const name = taskName(
-        "cleanup",
-        this.options.appId,
-        this.tx.orgId,
-        Math.floor(now.getTime() / DAY_MS),
-      );
+      const name = taskName("cleanup", app, this.tx.orgId, Math.floor(now.getTime() / DAY_MS));
       tasks.push({
         name,
         scheduleAt: due,
-        body: { v: 1, app: this.options.appId, kind: "cleanup", org: this.tx.orgId, due, name },
+        body: { v: 1, app, kind: "cleanup", org: this.tx.orgId, due, name },
       });
     }
     try {
@@ -279,8 +346,9 @@ class WakeTracker {
 }
 
 /**
- * Wraps storage so every transaction that records an outbox event or makes a workflow step
- * runnable enqueues its wake tasks before it commits. A queue failure rolls the write back.
+ * Wraps storage so every transaction that records an outbox event, makes a workflow step
+ * runnable or claims work enqueues its wake tasks before it commits. A queue failure rolls the
+ * transaction back.
  */
 export function wakingStorage(
   storage: StorageConnection,
@@ -332,10 +400,16 @@ export interface DurableDrainOptions {
 /**
  * Processes one bounded batch per wake task. Workers never run on timers in the durable profile;
  * a drain runs only when a task arrives, and recovery runs only after an inbound request.
+ *
+ * Every item has a successor task at all times: its own wake until it is claimed, a lease wake
+ * (enqueued with the claim) while it is claimed, and a follow-up whenever a drain leaves due work
+ * behind for its tenant.
  */
 export class DurableDrain {
   private readonly clock: Clock;
   private readonly leaseMs: number;
+  /** Last recovery check per tenant, so recovery costs at most one query per tenant a minute. */
+  private readonly checked = new Map<string, number>();
   public constructor(private readonly options: DurableDrainOptions) {
     this.clock = options.clock ?? { now: () => new Date() };
     this.leaseMs = options.leaseMs ?? DURABLE_LIMITS.leaseMs;
@@ -361,18 +435,15 @@ export class DurableDrain {
 
   /**
    * After an inbound request: if this tenant has work that is overdue with no drain in sight (a
-   * task that was lost or gave up), enqueue one sweep. At most one per tenant and minute.
+   * task that was lost or gave up), enqueue one sweep. At most one check per tenant and minute.
    */
   public async recover(orgId: string): Promise<boolean> {
     const now = this.clock.now().getTime();
-    const overdue = await this.options.storage.transaction(orgId, (tx) => {
-      if (tx.durable === undefined)
-        throw new DependencyError("The durable profile requires PostgreSQL storage");
-      return tx.durable.overdue({
-        before: new Date(now - DURABLE_LIMITS.overdueGraceMs).toISOString(),
-        expired: new Date(now - this.leaseMs - DURABLE_LIMITS.overdueGraceMs).toISOString(),
-      });
-    });
+    const last = this.checked.get(orgId);
+    if (last !== undefined && now - last < 60_000) return false;
+    if (this.checked.size >= 1_000) this.checked.clear();
+    this.checked.set(orgId, now);
+    const overdue = await this.overdue(orgId, now - DURABLE_LIMITS.overdueGraceMs);
     if (!overdue) return false;
     const due = new Date(now).toISOString();
     const name = taskName("sweep", this.options.appId, orgId, "recover", Math.floor(now / 60_000));
@@ -382,6 +453,17 @@ export class DurableDrain {
       body: { v: 1, app: this.options.appId, kind: "sweep", org: orgId, due, name },
     });
     return true;
+  }
+
+  private overdue(orgId: string, before: number): Promise<boolean> {
+    return this.options.storage.transaction(orgId, (tx) => {
+      if (tx.durable === undefined)
+        throw new DependencyError("The durable profile requires PostgreSQL storage");
+      return tx.durable.overdue({
+        before: new Date(before).toISOString(),
+        expired: new Date(before - this.leaseMs).toISOString(),
+      });
+    });
   }
 
   private async run(request: DrainRequest): Promise<DrainResult> {
@@ -396,12 +478,21 @@ export class DurableDrain {
       if (status === "aborted") return { retry: false, outcome: "rolled-back", ...idle };
     }
     if (request.kind === "cleanup") return this.cleanup(request);
+    const followUps: WakeTask[] = [];
+    const enqueue = async () => {
+      await Promise.all(followUps.map((task) => this.options.queue.enqueue(task)));
+      return followUps.length;
+    };
+    if (request.kind === "sweep" && Date.parse(request.due) > this.clock.now().getTime()) {
+      // Scheduled sooner than its due time (the queue's 30-day horizon, or clock skew).
+      followUps.push(this.followUp(request, "sweep", "due", new Date(request.due)));
+      return { retry: false, outcome: "early", ...idle, followUps: await enqueue() };
+    }
     const events = await this.options.outbox.tick({
       orgId: request.org,
       limit: DURABLE_LIMITS.eventBatch,
     });
     const steps = await this.options.workflows.tick({ limit: DURABLE_LIMITS.stepBatch });
-    const followUps: WakeTask[] = [];
     let early = false;
     const sweep = (): void => {
       if (followUps.some((task) => task.body.kind === "sweep")) return;
@@ -411,27 +502,36 @@ export class DurableDrain {
     const now = this.clock.now();
     const state = await this.options.storage.transaction(request.org, async (tx) => {
       if (request.kind === "event") return this.eventState(tx, request.id!);
-      if (request.kind === "step") return this.stepState(tx, request.instance!, request.id!);
+      if (request.kind === "step") return this.stepState(tx, request.id!);
       return undefined;
     });
-    if (state !== undefined) {
-      if (state.status === "leased") {
-        const due = new Date(Date.parse(state.claimedAt) + this.leaseMs + 1_000);
-        followUps.push(this.followUp(request, request.kind, `lease:${state.attempt}`, due));
-      } else if (state.status === "scheduled") {
-        if (Date.parse(state.scheduledAt) > now.getTime()) {
-          // A later schedule has its own wake; the same schedule means this task came early.
-          if (Date.parse(request.due) >= Date.parse(state.scheduledAt)) early = true;
-        } else if (state.claimable) sweep();
-      }
+    if (state?.status === "leased") {
+      const expires = Date.parse(state.claimedAt) + this.leaseMs;
+      if (expires <= now.getTime()) sweep();
+      else
+        followUps.push(
+          this.followUp(request, request.kind, `lease:${state.attempt}`, new Date(expires + 1_000)),
+        );
+    } else if (state?.status === "scheduled") {
+      if (Date.parse(state.scheduledAt) > now.getTime()) {
+        // A later schedule has its own wake; the same schedule means this task came early.
+        if (Date.parse(request.due) >= Date.parse(state.scheduledAt)) {
+          early = true;
+          const due = scheduleTime(state.scheduledAt, now);
+          followUps.push(this.followUp(request, request.kind, `due:${due}`, new Date(due)));
+        }
+      } else if (state.claimable) sweep();
     }
-    await Promise.all(followUps.map((task) => this.options.queue.enqueue(task)));
+    // Never leave due work for this tenant without a successor.
+    if (!followUps.some((task) => task.body.kind === "sweep")) {
+      if (await this.overdue(request.org, now.getTime())) sweep();
+    }
     return {
-      retry: early,
+      retry: false,
       outcome: early ? "early" : "processed",
       events,
       steps,
-      followUps: followUps.length,
+      followUps: await enqueue(),
     };
   }
 
@@ -484,7 +584,7 @@ export class DurableDrain {
     due: Date,
   ): WakeTask {
     const name = taskName(kind, request.name, reason);
-    const scheduleAt = due.toISOString();
+    const scheduleAt = scheduleTime(due.toISOString(), this.clock.now());
     const target =
       kind === request.kind
         ? {
@@ -495,7 +595,7 @@ export class DurableDrain {
     return {
       name,
       scheduleAt,
-      body: { ...this.base(request), kind, ...target, due: scheduleAt, name },
+      body: { ...this.base(request), kind, ...target, due: due.toISOString(), name },
     };
   }
 
@@ -511,19 +611,18 @@ export class DurableDrain {
     return undefined;
   }
 
-  private async stepState(
-    tx: StorageTransaction,
-    instanceId: string,
-    stepId: string,
-  ): Promise<WorkState | undefined> {
-    const snapshot = await tx.workflows.get(instanceId);
-    const step = snapshot?.steps.find((candidate) => candidate.id === stepId);
-    if (snapshot === null || snapshot === undefined || step === undefined) return undefined;
-    if (step.status === "running" && step.claimedAt !== undefined)
+  private async stepState(tx: StorageTransaction, id: string): Promise<WorkState | undefined> {
+    if (tx.durable === undefined)
+      throw new DependencyError("The durable profile requires PostgreSQL storage");
+    const found = await tx.durable.step(id);
+    if (found === null) return undefined;
+    const { step, cancelRequested } = found;
+    // A claimed compensation keeps its status; its claim time marks the lease.
+    if ((step.status === "running" || step.status === "compensating") && step.claimedAt)
       return { status: "leased", claimedAt: step.claimedAt, attempt: step.attempt };
-    if ((step.status === "pending" || step.status === "waiting") && !snapshot.cancelRequested)
+    if ((step.status === "pending" || step.status === "waiting") && !cancelRequested)
       return { status: "scheduled", scheduledAt: step.scheduledAt, claimable: true };
-    // A compensation waits for later ones; their completion wakes it again.
+    // A compensation waits for later ones; their completion sweeps again.
     if (step.status === "compensating")
       return { status: "scheduled", scheduledAt: step.scheduledAt, claimable: false };
     return undefined;

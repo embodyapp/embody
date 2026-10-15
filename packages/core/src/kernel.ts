@@ -114,6 +114,9 @@ export function assertRequestOnlyPlugins(plugins: readonly EmbodyPlugin[]): void
   }
 }
 
+/** Steps per durable workflow; bounds the wakes one workflow transaction can need. */
+export const DURABLE_WORKFLOW_MAX_STEPS = 50;
+
 /**
  * Preflight for the hosted durable profile: workflows, event handlers and subscriptions are
  * allowed and must fit hosted limits; always-on declarations and startup callbacks are not.
@@ -135,6 +138,11 @@ export function assertDurablePlugins(plugins: readonly EmbodyPlugin[]): void {
       throw new DependencyError(
         `Durable plugin ${plugin.id} cannot run init/services startup callbacks; move work into actions`,
       );
+    for (const [name, workflow] of Object.entries(plugin.workflows ?? {}))
+      if (Object.keys(workflow.steps).length > DURABLE_WORKFLOW_MAX_STEPS)
+        throw new DependencyError(
+          `Durable workflow ${plugin.id}.${name} has more than ${DURABLE_WORKFLOW_MAX_STEPS} steps; split it into workflows that start each other`,
+        );
   }
   assertHostedWorkflowLimits(plugins);
 }

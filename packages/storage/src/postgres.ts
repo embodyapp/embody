@@ -609,13 +609,27 @@ class PostgresTransaction implements StorageTransaction {
       const result = await this.client.query("SELECT * FROM embody_outbox WHERE id = $1", [id]);
       return result.rows[0] === undefined ? null : outbox(result.rows[0]);
     },
+    step: async (id: string) => {
+      const result = await this.client.query(
+        "SELECT s.*, i.cancel_requested AS instance_cancel_requested FROM embody_workflow_steps s JOIN embody_workflow_instances i ON i.id = s.instance_id WHERE s.id = $1",
+        [id],
+      );
+      const row = result.rows[0] as Row | undefined;
+      return row === undefined
+        ? null
+        : { step: workflowStep(row), cancelRequested: row["instance_cancel_requested"] === true };
+    },
     overdue: async (options: { readonly before: string; readonly expired: string }) => {
-      // Row-level security limits both checks to the current tenant.
+      // Row-level security limits both checks to the current tenant. The step conditions mirror
+      // what embody_claim_workflow_steps can claim.
       const result = await this.client.query(
         `SELECT EXISTS (SELECT 1 FROM embody_outbox WHERE (status IN ('pending', 'failed') AND scheduled_at < $1) OR (status = 'processing' AND claimed_at < $2))
             OR EXISTS (SELECT 1 FROM embody_workflow_steps s JOIN embody_workflow_instances i ON i.id = s.instance_id
-              WHERE i.status NOT IN ('completed', 'failed', 'cancelled', 'compensated')
-                AND ((s.status IN ('pending', 'waiting', 'compensating') AND s.scheduled_at < $1) OR (s.status = 'running' AND s.claimed_at < $2))) AS overdue`,
+              WHERE (NOT i.cancel_requested AND s.status IN ('pending', 'waiting') AND s.scheduled_at < $1)
+                OR (s.status = 'running' AND s.claimed_at < $2)
+                OR (s.status = 'compensating' AND s.scheduled_at < $1 AND (s.claimed_at IS NULL OR s.claimed_at < $2)
+                  AND NOT EXISTS (SELECT 1 FROM embody_workflow_steps later WHERE later.instance_id = s.instance_id
+                    AND later.position > s.position AND later.status IN ('compensating', 'running')))) AS overdue`,
         [timestamp(options.before), timestamp(options.expired)],
       );
       return asRow(result.rows[0])["overdue"] === true;

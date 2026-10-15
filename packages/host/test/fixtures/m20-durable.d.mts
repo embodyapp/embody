@@ -3,6 +3,7 @@ import type { WakeQueue, WakeTask } from "../../src/index.js";
 
 export const APP_ID: string;
 export const SHIP_DELAY_MS: number;
+export const FAN_LEAVES: number;
 export const FIXTURE_TABLES: string;
 export function FIXTURE_GRANTS(role: string): string;
 export interface M20Effects {

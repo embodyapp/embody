@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { drain } from "./drain.js";
+import { drain, settleAll } from "./drain.js";
 import {
   ForbiddenError,
   NonRetryableWorkflowError,
+  RateLimitedError,
+  ValidationError,
   type Kernel,
   type WorkflowSnapshot,
   type WorkflowStepRecord,
@@ -92,10 +94,38 @@ export class WorkflowWorker {
     };
     const concurrency =
       this.options.storage.dialect === "sqlite" ? 1 : (this.options.concurrency ?? 4);
-    await Promise.all(Array.from({ length: Math.min(concurrency, claimed.length) }, run));
+    await settleAll(Array.from({ length: Math.min(concurrency, claimed.length) }, run));
     return claimed.length;
   }
   private async process(claim: WorkflowStepClaim): Promise<void> {
+    try {
+      await this.attempt(claim);
+    } catch (error) {
+      await this.recordUncommitted(claim, error);
+    }
+  }
+  /**
+   * The step's own transaction could not commit, for example because the wakes it needed could
+   * not be scheduled. Its writes rolled back and it still holds its claim. Record the failure in
+   * a new transaction so retry limits apply, instead of rerunning the step after every lease.
+   * A deterministic scheduling failure is terminal. If this fails too, the claim's lease wake
+   * retries the step later.
+   */
+  private async recordUncommitted(claim: WorkflowStepClaim, error: unknown): Promise<void> {
+    try {
+      await this.options.storage.transaction(claim.orgId, async (tx) => {
+        const step = (await tx.workflows.lockClaim(claim)) as WorkflowStepRecord | null;
+        if (step === null) return;
+        const snapshot = (await tx.workflows.get(step.instanceId)) as WorkflowSnapshot | null;
+        if (snapshot === null) return;
+        const deterministic = error instanceof RateLimitedError || error instanceof ValidationError;
+        await this.recordFailure(tx, step, snapshot, error, deterministic);
+      });
+    } catch {
+      throw error;
+    }
+  }
+  private async attempt(claim: WorkflowStepClaim): Promise<void> {
     await this.options.storage.transaction(claim.orgId, async (tx) => {
       const step = (await tx.workflows.lockClaim(claim)) as WorkflowStepRecord | null;
       if (step === null) return;
@@ -133,42 +163,52 @@ export class WorkflowWorker {
           producerPluginId: snapshot.definition.split(".")[0]!,
         });
       } catch (error) {
-        const workflow = this.options.kernel.plugins
-          .flatMap((plugin) =>
-            Object.entries(plugin.workflows ?? {}).map(([name, definition]) => ({
-              target: `${plugin.id}.${name}`,
-              definition,
-            })),
-          )
-          .find(({ target }) => target === snapshot.definition)?.definition;
-        const policy = workflow?.steps[step.name]?.retry ?? { maxAttempts: 1, backoffMs: 1_000 };
-        const terminal =
-          step.status === "compensating" ||
-          error instanceof NonRetryableWorkflowError ||
-          error instanceof ForbiddenError ||
-          step.attempt >= policy.maxAttempts;
-        const retryAt = terminal
-          ? undefined
-          : new Date(
-              this.clock.now().getTime() + 2 ** (step.attempt - 1) * (policy.backoffMs ?? 1_000),
-            ).toISOString();
-        const code = error instanceof Error && "code" in error ? String(error.code) : "STEP_ERROR";
-        await tx.workflows.failStep({
-          id: step.id,
-          error: `Workflow step failed (${code})`,
-          ...(retryAt ? { retryAt } : {}),
-          terminal,
-          now: this.clock.now().toISOString(),
-        });
-        await this.publish(tx, step.orgId, {
-          eventName: `${snapshot.definition}.failed`,
-          payload: { workflowId: snapshot.id, step: step.name, attempt: step.attempt, terminal },
-          occurredAt: this.clock.now().toISOString(),
-          producerPluginId: snapshot.definition.split(".")[0]!,
-        });
+        await this.recordFailure(tx, step, snapshot, error);
       } finally {
         watch?.();
       }
+    });
+  }
+  private async recordFailure(
+    tx: StorageTransaction,
+    step: WorkflowStepRecord,
+    snapshot: WorkflowSnapshot,
+    error: unknown,
+    forceTerminal = false,
+  ): Promise<void> {
+    const workflow = this.options.kernel.plugins
+      .flatMap((plugin) =>
+        Object.entries(plugin.workflows ?? {}).map(([name, definition]) => ({
+          target: `${plugin.id}.${name}`,
+          definition,
+        })),
+      )
+      .find(({ target }) => target === snapshot.definition)?.definition;
+    const policy = workflow?.steps[step.name]?.retry ?? { maxAttempts: 1, backoffMs: 1_000 };
+    const terminal =
+      forceTerminal ||
+      step.status === "compensating" ||
+      error instanceof NonRetryableWorkflowError ||
+      error instanceof ForbiddenError ||
+      step.attempt >= policy.maxAttempts;
+    const retryAt = terminal
+      ? undefined
+      : new Date(
+          this.clock.now().getTime() + 2 ** (step.attempt - 1) * (policy.backoffMs ?? 1_000),
+        ).toISOString();
+    const code = error instanceof Error && "code" in error ? String(error.code) : "STEP_ERROR";
+    await tx.workflows.failStep({
+      id: step.id,
+      error: `Workflow step failed (${code})`,
+      ...(retryAt ? { retryAt } : {}),
+      terminal,
+      now: this.clock.now().toISOString(),
+    });
+    await this.publish(tx, step.orgId, {
+      eventName: `${snapshot.definition}.failed`,
+      payload: { workflowId: snapshot.id, step: step.name, attempt: step.attempt, terminal },
+      occurredAt: this.clock.now().toISOString(),
+      producerPluginId: snapshot.definition.split(".")[0]!,
     });
   }
   /** Writes a lifecycle event unless the kernel's profile drops events nobody handles. */

@@ -31,6 +31,7 @@ import {
   FIXTURE_GRANTS,
   FIXTURE_TABLES,
   principal,
+  FAN_LEAVES,
   SHIP_DELAY_MS,
 } from "./fixtures/m20-durable.mjs";
 import { holdClaimLock } from "./fixtures/claim-lock.mjs";
@@ -104,7 +105,7 @@ suite("M20 queue-woken durable runtime under the PostgreSQL runtime role", () =>
   /** Delivers due tasks as the queue would: acknowledge on success, keep on a retry answer. */
   const deliver = async (queue: MemoryWakeQueue, drain: DurableDrain, clock: TestClock) => {
     const results: DrainResult[] = [];
-    for (let round = 0; round < 40; round++) {
+    for (let round = 0; round < 400; round++) {
       const [task] = queue.due(clock.now());
       if (task === undefined) return results;
       const result = await drain.drain(task.body);
@@ -116,7 +117,7 @@ suite("M20 queue-woken durable runtime under the PostgreSQL runtime role", () =>
   };
   const deliverTable = async (orgId: string, drain: DurableDrain, clock: TestClock) => {
     const results: DrainResult[] = [];
-    for (let round = 0; round < 40; round++) {
+    for (let round = 0; round < 400; round++) {
       const [task] = await tables.due(orgId, clock.now());
       if (task === undefined) return results;
       const result = await drain.drain(task.body);
@@ -263,15 +264,24 @@ suite("M20 queue-woken durable runtime under the PostgreSQL runtime role", () =>
       idempotencyKey: tenant,
     });
     await deliver(queue, drain, clock);
+    // Lease wakes carry no instance; the delayed step's own wake does.
     const ship = queue.tasks.find(
-      (task) => task.body.kind === "step" && Date.parse(task.scheduleAt) > Date.now(),
+      (task) =>
+        task.body.kind === "step" &&
+        task.body.instance !== undefined &&
+        Date.parse(task.scheduleAt) > Date.now(),
     )!;
     expect(Date.parse(ship.scheduleAt) - Date.parse(queue.tasks[0]!.scheduleAt)).toBe(
       SHIP_DELAY_MS,
     );
     expect((await effects.ledger(started.id)).effects).toEqual([`${started.id}:reserve`]);
-    // A task delivered before its time (clock skew) is retried and runs nothing.
-    expect(await drain.drain(ship.body)).toMatchObject({ retry: true, outcome: "early" });
+    // A task delivered before its time (clock skew) reschedules itself and runs nothing.
+    expect(await drain.drain(ship.body)).toMatchObject({
+      retry: false,
+      outcome: "early",
+      followUps: 1,
+    });
+    expect(queue.tasks.at(-1)!.scheduleAt).toBe(ship.scheduleAt);
     expect((await effects.ledger(started.id)).effects).not.toContain(`${started.id}:ship`);
     clock.offset = SHIP_DELAY_MS + 1_000;
     await deliver(queue, drain, clock);
@@ -356,7 +366,8 @@ suite("M20 queue-woken durable runtime under the PostgreSQL runtime role", () =>
     expect(await later.drain.recover(tenant)).toBe(false);
     later.clock.offset = 2 * 60_000;
     expect(await later.drain.recover(tenant)).toBe(true);
-    expect(await later.drain.recover(tenant)).toBe(true);
+    // At most one check per tenant and minute.
+    expect(await later.drain.recover(tenant)).toBe(false);
     expect(queue.tasks.map((task) => task.body.kind)).toEqual(["sweep"]);
     await deliver(queue, later.drain, later.clock);
     expect((await effects.ledger(`ordered:${tenant}`)).effects).toHaveLength(1);
@@ -408,6 +419,78 @@ suite("M20 queue-woken durable runtime under the PostgreSQL runtime role", () =>
     const next = queue.tasks.at(-1)!;
     expect(next.body.kind).toBe("cleanup");
     expect(Date.parse(next.scheduleAt) - Date.now()).toBeGreaterThan(29 * 24 * 60 * 60_000);
+  });
+
+  it("B3: wide fan-out collapses into chained sweeps and completes", async () => {
+    const queue = new MemoryWakeQueue();
+    const { kernel, drain, clock } = await runtime(queue);
+    const tenant = org();
+    const started = await workflow(
+      kernel,
+      tenant,
+      "start",
+      { input: {}, idempotencyKey: tenant },
+      "fan",
+    );
+    await deliver(queue, drain, clock);
+    const ledger = await effects.ledger(started.id);
+    expect(ledger.effects).toHaveLength(1 + FAN_LEAVES);
+    expect(Object.values(ledger.attempts).every((attempts) => attempts === 1)).toBe(true);
+    // Root's transaction made 40 steps runnable with one sweep, not 40 tasks.
+    const fromRoot = queue.tasks.filter((task) => task.body.kind === "step" && task.body.instance);
+    expect(fromRoot.length).toBeLessThanOrEqual(2);
+    clock.offset = SHIP_DELAY_MS + 1_000;
+    await deliver(queue, drain, clock);
+    expect((await workflow(kernel, tenant, "status", { id: started.id }, "fan")).status).toBe(
+      "completed",
+    );
+  });
+
+  it("B3: cancelling 40 completed steps compensates them all in reverse order, O(1) tasks per change", async () => {
+    const queue = new MemoryWakeQueue();
+    const { kernel, drain, clock } = await runtime(queue);
+    const tenant = org();
+    const started = await workflow(
+      kernel,
+      tenant,
+      "start",
+      { input: {}, idempotencyKey: tenant },
+      "fan",
+    );
+    await deliver(queue, drain, clock);
+    const before = queue.tasks.length;
+    await workflow(kernel, tenant, "cancel", { id: started.id }, "fan");
+    expect(queue.tasks.length - before).toBe(1);
+    await deliver(queue, drain, clock);
+    expect((await workflow(kernel, tenant, "status", { id: started.id }, "fan")).status).toBe(
+      "compensated",
+    );
+    const undone = (await effects.ledger(`${started.id}:undo:`)).attempts;
+    expect(Object.keys(undone)).toHaveLength(FAN_LEAVES);
+    expect(Object.values(undone).every((attempts) => attempts === 1)).toBe(true);
+  });
+
+  it("B3: a step whose results can never be scheduled fails once instead of looping", async () => {
+    const queue = new MemoryWakeQueue();
+    const { kernel, drain, clock } = await runtime(queue);
+    const tenant = org();
+    const started = await workflow(
+      kernel,
+      tenant,
+      "start",
+      { input: {}, idempotencyKey: tenant },
+      "noisy",
+    );
+    await deliver(queue, drain, clock);
+    const failed = await workflow(kernel, tenant, "status", { id: started.id }, "noisy");
+    expect(failed.status).toBe("failed");
+    // Lease wakes arrive later and find nothing to rerun.
+    clock.offset = LEASE_MS + 2_000;
+    await deliver(queue, drain, clock);
+    expect((await effects.ledger(started.id)).attempts).toEqual({ [`${started.id}:shout`]: 1 });
+    expect(
+      (await owner.query("SELECT 1 FROM embody_outbox WHERE org_id = $1", [tenant])).rows,
+    ).toEqual([]);
   });
 
   describe("M20.b crash matrix (killed processes)", () => {
@@ -531,6 +614,62 @@ suite("M20 queue-woken durable runtime under the PostgreSQL runtime role", () =>
         effects: [`ordered:${tenant}:0`],
         attempts: { [`ordered:${tenant}:0`]: 1 },
       });
+    });
+
+    it("B1: a drain that dies holding another task's step leaves a lease wake", async () => {
+      const owned = org();
+      const other = org();
+      const { kernel, drain, clock } = await tableRuntime();
+      const started = await workflow(kernel, owned, "start", {
+        input: { orderId: owned },
+        idempotencyKey: owned,
+      });
+      // The step's own task was already answered, as when an earlier batch was full.
+      for (const task of await tables.due(owned)) await tables.acknowledge(task.name);
+      await order(kernel, other, { orderId: other });
+      const [task] = await tables.due(other);
+      // The other tenant's event drain claims the step (claims are global) and dies in it.
+      await runChild(
+        { M20_MODE: "drain", M20_TASK: JSON.stringify(task!.body) },
+        "before-step-effect",
+      );
+      expect(await drain.drain(task!.body)).toMatchObject({ outcome: "processed" });
+      await tables.acknowledge(task!.name);
+      clock.offset = LEASE_MS + 2_000;
+      await deliverTable(owned, drain, clock);
+      expect((await workflow(kernel, owned, "status", { id: started.id })).status).toBe(
+        "completed",
+      );
+      expect((await effects.ledger(started.id)).attempts).toEqual({
+        [`${started.id}:reserve`]: 1,
+        [`${started.id}:ship`]: 1,
+      });
+    });
+
+    it("B2: a drain that dies in a compensation leaves a lease wake", async () => {
+      const tenant = org();
+      const { kernel, drain, clock } = await tableRuntime();
+      const started = await workflow(kernel, tenant, "start", {
+        input: { orderId: tenant },
+        idempotencyKey: tenant,
+      });
+      await deliverTable(tenant, drain, clock);
+      await workflow(kernel, tenant, "cancel", { id: started.id });
+      const [sweep] = (await tables.due(tenant)).filter((task) => task.body.kind === "sweep");
+      await runChild(
+        { M20_MODE: "drain", M20_TASK: JSON.stringify(sweep!.body) },
+        "in-compensation",
+      );
+      expect(await drain.drain(sweep!.body)).toMatchObject({ outcome: "processed", steps: 0 });
+      await tables.acknowledge(sweep!.name);
+      clock.offset = LEASE_MS + 2_000;
+      await deliverTable(tenant, drain, clock);
+      expect((await workflow(kernel, tenant, "status", { id: started.id })).status).toBe(
+        "compensated",
+      );
+      expect((await effects.ledger(`${started.id}:undo`)).effects).toEqual([
+        `${started.id}:undo:reserve`,
+      ]);
     });
 
     it("killed mid-step after its effect: the step reruns after its lease, one logical effect", async () => {

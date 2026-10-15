@@ -8,6 +8,8 @@ const { Pool } = createRequire(new URL("../../../storage/package.json", import.m
 export const APP_ID = "shop";
 /** Delay of the `ship` step, so tests can move the clock past it. */
 export const SHIP_DELAY_MS = 60_000;
+/** Leaves of the `fan` workflow: well above the per-transaction step wakes. */
+export const FAN_LEAVES = 40;
 
 /** Tables owned by the maintenance role; the runtime role gets DML only. */
 export const FIXTURE_TABLES = `
@@ -109,6 +111,7 @@ export function createPlugins(effects, pause = async () => undefined) {
           return { reserved: true };
         },
         compensate: async (_output, context) => {
+          await pause("in-compensation");
           await effects.apply(`${context.workflowId}:undo:reserve`);
         },
       },
@@ -131,6 +134,55 @@ export function createPlugins(effects, pause = async () => undefined) {
           if (context.attempt <= context.input.failures) throw new Error("transient");
           await effects.apply(`${context.workflowId}:call`);
           return { ok: true };
+        },
+      },
+    },
+  });
+  // Wide fan-out: completing `root` makes every leaf runnable in one transaction.
+  const leaves = Object.fromEntries(
+    Array.from({ length: FAN_LEAVES }, (_, index) => [
+      `leaf${index}`,
+      {
+        dependsOn: ["root"],
+        handler: async (context) => {
+          await effects.apply(`${context.workflowId}:leaf${index}`);
+          return { index };
+        },
+        compensate: async (_output, context) => {
+          await effects.apply(`${context.workflowId}:undo:leaf${index}`);
+        },
+      },
+    ]),
+  );
+  const fan = defineWorkflow(z.object({}))({
+    version: "1.0.0",
+    resultStep: "final",
+    steps: {
+      root: {
+        handler: async (context) => {
+          await effects.apply(`${context.workflowId}:root`);
+          return { fanned: true };
+        },
+      },
+      ...leaves,
+      final: {
+        dependsOn: Object.keys(leaves),
+        delayMs: SHIP_DELAY_MS,
+        handler: () => ({ done: true }),
+      },
+    },
+  });
+  // Publishes more events than one transaction may wake: it can never commit.
+  const noisy = defineWorkflow(z.object({}))({
+    version: "1.0.0",
+    steps: {
+      shout: {
+        retry: { maxAttempts: 3, backoffMs: 1_000 },
+        handler: async (context) => {
+          await effects.apply(`${context.workflowId}:shout`);
+          for (let index = 0; index < 101; index++)
+            await context.events.publish("shop.noise", { index });
+          return { shouted: true };
         },
       },
     },
@@ -162,7 +214,7 @@ export function createPlugins(effects, pause = async () => undefined) {
           await pause("after-event-effect");
         },
       },
-      workflows: { fulfil, flaky },
+      workflows: { fulfil, flaky, fan, noisy },
     }),
   ];
 }
