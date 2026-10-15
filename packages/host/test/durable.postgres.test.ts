@@ -5,16 +5,20 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  definePlugin,
+  defineWorkflow,
   ForbiddenError,
   Kernel,
   RateLimitedError,
   UnavailableError,
   ValidationError,
+  z,
 } from "@embody/core";
 import { PostgresStorage } from "@embody/storage";
 import {
   createAppHost,
   createDurableDrain,
+  DURABLE_LIMITS,
   MemoryWakeQueue,
   wakingStorage,
   type DrainRequest,
@@ -72,7 +76,11 @@ suite("M20 queue-woken durable runtime under the PostgreSQL runtime role", () =>
   let owner: PgPool;
   const kernels: Kernel[] = [];
 
-  const runtime = async (queue: WakeQueue, clock: TestClock = testClock()) => {
+  const runtime = async (
+    queue: WakeQueue,
+    clock: TestClock = testClock(),
+    plugins: ReturnType<typeof createPlugins> = createPlugins(effects),
+  ) => {
     const base = new PostgresStorage(
       { connectionString: runtimeUrl, max: 5 },
       { schemaMode: "verify" },
@@ -80,7 +88,7 @@ suite("M20 queue-woken durable runtime under the PostgreSQL runtime role", () =>
     const storage = wakingStorage(base, { appId: APP_ID, queue, clock });
     const kernel = new Kernel({
       profile: "durable",
-      plugins: createPlugins(effects),
+      plugins,
       storage,
       now: clock.now,
     });
@@ -373,6 +381,73 @@ suite("M20 queue-woken durable runtime under the PostgreSQL runtime role", () =>
     expect((await effects.ledger(`ordered:${tenant}`)).effects).toHaveLength(1);
     later.clock.offset = 4 * 60_000;
     expect(await later.drain.recover(tenant)).toBe(false);
+  });
+
+  it("F1: a worker holding an expired claim's row lock does not drive an immediate sweep chain", async () => {
+    let release: () => void = () => undefined;
+    const held = defineWorkflow(z.object({}))({
+      version: "1.0.0",
+      resultStep: "stuck",
+      steps: {
+        // Ignores its abort signal, like an uncancellable call: its transaction keeps the lock.
+        stuck: { handler: () => new Promise((resolve) => (release = () => resolve({ ok: true }))) },
+      },
+    });
+    const queue = new MemoryWakeQueue();
+    const { kernel, drain, clock } = await runtime(queue, testClock(), [
+      definePlugin({ id: "shop", version: "1.0.0", workflows: { held } } as never),
+    ] as never);
+    const tenant = org();
+    const started = await workflow(
+      kernel,
+      tenant,
+      "start",
+      { input: {}, idempotencyKey: tenant },
+      "held",
+    );
+    const own = queue.tasks[0]!;
+    const hung = drain.drain(own.body);
+    const running = async () =>
+      (
+        await owner.query(
+          "SELECT 1 FROM embody_workflow_steps WHERE instance_id = $1 AND status = 'running'",
+          [started.id],
+        )
+      ).rows.length === 1;
+    for (let i = 0; i < 200 && !(await running()); i++)
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(await running()).toBe(true);
+    queue.acknowledge(own.name);
+    // The lease expires while the worker still holds the row lock. Watch 30 seconds of queue time.
+    clock.offset = 2 * 60_000;
+    let drains = 0;
+    for (let second = 0; second <= 30; second++, clock.offset += 1_000)
+      // Capped, so a chain fails the bound below instead of spinning.
+      for (let round = 0; round < 100 && drains <= 20; round++) {
+        const task = queue.due(clock.now()).find((item) => item.body.kind !== "cleanup");
+        if (task === undefined) break;
+        drains++;
+        const result = await drain.drain(task.body);
+        if (!result.retry) queue.acknowledge(task.name);
+      }
+    // The lease wake and then one sweep every idle delay, not one sweep per drain.
+    expect(drains).toBeGreaterThanOrEqual(2);
+    expect(drains).toBeLessThanOrEqual(1 + Math.ceil(30_000 / DURABLE_LIMITS.idleSweepDelayMs));
+    // The held step still has a successor task.
+    expect(
+      queue.due(new Date(clock.now().getTime() + DURABLE_LIMITS.idleSweepDelayMs)),
+    ).not.toEqual([]);
+    release();
+    await hung;
+    clock.offset += DURABLE_LIMITS.idleSweepDelayMs;
+    await deliver(queue, drain, clock);
+    expect((await workflow(kernel, tenant, "status", { id: started.id }, "held")).status).toBe(
+      "completed",
+    );
+    // Once the lock is released the chain ends.
+    clock.offset += 10 * 60_000;
+    await deliver(queue, drain, clock);
+    expect(queue.due(clock.now()).filter((task) => task.body.kind !== "cleanup")).toEqual([]);
   });
 
   it("fails closed above the per-transaction wake quota", async () => {

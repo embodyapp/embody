@@ -38,6 +38,11 @@ export const DURABLE_LIMITS = Object.freeze({
   overdueGraceMs: 60_000,
   /** Retained records one cleanup deletes before it schedules a follow-up. */
   purgeBatch: 1_000,
+  /**
+   * A drain that claimed nothing schedules its follow-up sweep this much later, so due work
+   * another worker still holds locked (an expired claim) cannot drive an immediate sweep chain.
+   */
+  idleSweepDelayMs: 5_000,
 });
 
 const MAX_SCHEDULE_MS = 30 * DAY_MS;
@@ -494,12 +499,16 @@ export class DurableDrain {
     });
     const steps = await this.options.workflows.tick({ limit: DURABLE_LIMITS.stepBatch });
     let early = false;
+    const now = this.clock.now();
+    // Due work this drain could not claim is locked by a live claimer (or became due just now).
+    // Its successor still exists, but later: an immediate one would find it locked again.
+    const sweepAt =
+      events === 0 && steps === 0 ? new Date(now.getTime() + DURABLE_LIMITS.idleSweepDelayMs) : now;
     const sweep = (): void => {
       if (followUps.some((task) => task.body.kind === "sweep")) return;
-      followUps.push(this.followUp(request, "sweep", "sweep", this.clock.now()));
+      followUps.push(this.followUp(request, "sweep", "sweep", sweepAt));
     };
     if (events === DURABLE_LIMITS.eventBatch || steps === DURABLE_LIMITS.stepBatch) sweep();
-    const now = this.clock.now();
     const state = await this.options.storage.transaction(request.org, async (tx) => {
       if (request.kind === "event") return this.eventState(tx, request.id!);
       if (request.kind === "step") return this.stepState(tx, request.id!);

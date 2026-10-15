@@ -98,6 +98,12 @@ the 30-second step deadline, then looks at the task's own item:
 - **due but unclaimed**, a full batch, or any other claimable work still due for the tenant:
   enqueue a follow-up sweep.
 
+A sweep follows immediately when the drain claimed something. A drain that claimed nothing
+schedules its sweep 5 seconds later instead (`idleSweepDelayMs`): the due work it saw is locked
+by a live claimer, for example a step handler that ignores its abort signal and keeps its
+transaction open past its lease. The work keeps a successor, but such a chain costs at most one
+sweep per 5 seconds while the lock is held, not one per drain.
+
 Only a task whose transaction is still open is answered `503`, so no work depends on the queue's
 retry ceiling for early tasks.
 
@@ -174,7 +180,9 @@ Crash matrix (`m20-crash-child.mjs` is killed with `SIGKILL` at each point):
 
 Fan-out regressions: a 40-leaf fan-out completes through chained sweeps; cancelling it after
 40 completions creates one task and compensates every leaf once; a step that can never commit
-fails once instead of looping.
+fails once instead of looping. A step whose worker still holds its row lock after the lease
+expires (F1) costs one sweep per idle delay, not an immediate sweep chain, and completes once the
+lock is released.
 
 ## Not yet proven
 
