@@ -606,6 +606,10 @@ test("suite errors keep our sanitized provider messages and drop anything else",
     safeError(new Error("Provider GET run.googleapis.com failed (503); body suppressed")),
     "Provider GET run.googleapis.com failed (503); body suppressed",
   );
+  assert.equal(
+    safeError(new Error("Provider GET failed (0); details suppressed")),
+    "Provider GET failed (0); details suppressed",
+  );
   assert.equal(safeError(new Error("password authentication failed for user x")), "Error");
   assert.equal(safeError(new TypeError("postgresql://u:p@h/db refused")), "TypeError");
 });

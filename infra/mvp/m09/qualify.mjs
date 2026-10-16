@@ -23,7 +23,7 @@ export const M09_LIMITS = Object.freeze({
 /** Our own provider errors carry only a method, host and status; anything else is reduced to its class. */
 export function safeError(error) {
   const message = error instanceof Error ? error.message : "";
-  return /^(Provider [A-Z]+ [a-z0-9.-]+ failed \(\d{1,3}\); (body|details) suppressed|[A-Za-z ,;/.()-]{1,120})$/.test(
+  return /^(Provider [A-Z]+( [a-z0-9.-]+)? failed \(\d{1,3}\); (body|details) suppressed|[A-Za-z ,;/.()-]{1,120})$/.test(
     message,
   ) && !/token|password|secret|postgres(ql)?:/i.test(message)
     ? message

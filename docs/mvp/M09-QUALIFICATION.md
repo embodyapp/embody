@@ -150,7 +150,9 @@ an invoice; the invoice check is a separate step after the run.
    pnpm build && pnpm test:mvp:cloud
    ```
 
-   The run takes about 1.5 hours (the delayed wake is 40 minutes out so the service can reach zero
+   Keep the operator machine awake and on mains power for the whole run (`caffeinate -i`,
+   lid open): a sleeping laptop freezes timers and drops provider connections mid-run, which
+   is what stalled the first live attempts. The run takes about 1.5 hours (the delayed wake is 40 minutes out so the service can reach zero
    first). Sanitized results land in `.artifacts/verification/mvp-cloud.json`.
 5. Destroy the baseline, confirm a no-change plan and an empty owned-name inventory, then record
    the evidence, measured cost and invoice check under `docs/mvp/evidence/M09-<date>/`.
