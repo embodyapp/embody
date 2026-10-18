@@ -566,7 +566,8 @@ async function walkArchive(
     gunzip.destroy();
     if (error instanceof SourceArchiveError) throw error;
     // zlib reports corrupt/truncated input as Z_* codes; filesystem errors from callbacks pass.
-    if (String((error as { code?: unknown }).code ?? "").startsWith("Z_"))
+    const zlibCode = (error as { code?: unknown }).code;
+    if (typeof zlibCode === "string" && zlibCode.startsWith("Z_"))
       throw new SourceArchiveError("ARCHIVE_INVALID", "corrupt gzip stream");
     throw error;
   }

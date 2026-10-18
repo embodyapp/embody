@@ -42,12 +42,14 @@
   },
   "dependencies": {
     "@embody/auth": "workspace:*",
+    "@embody/cloud-contracts": "workspace:*",
     "@embody/core": "workspace:*",
     "@embody/host": "workspace:*",
     "@embody/storage": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.1"
   },
   "devDependencies": {
+    "@embody/gateway": "workspace:*",
     "@types/node": "^22.20.1",
     "vitest": "^4.1.11"
   }

@@ -12,6 +12,7 @@ export {
   type EmbodyDevConfig,
 } from "./dev.js";
 export { startMcpBridge, type McpBridge, type McpBridgeOptions } from "./mcp-bridge.js";
+import { runSourceCommand } from "./source.js";
 
 function gatewayUrl(base: string | URL | undefined, path: string): URL {
   const url = new URL(base ?? "");
@@ -173,7 +174,7 @@ function validate(value: unknown, schema: Schema, path = "input"): void {
 function usage(io: CliIo, code: number = EXIT.usage): number {
   return fail(
     io,
-    "Usage: embody dev [configPath] | embody mcp --url <endpoint> [--token <token>] | embody apps list|inspect <app> | embody <app> <entity> <create|get|list|update|delete> [id] [--flags] | embody <app> <action> [--flags]",
+    "Usage: embody dev [configPath] | embody mcp --url <endpoint> [--token <token>] | embody source pack|upload [dir] [--workspace <ws>] [--app <app>] [--out <file>] | embody apps list|inspect <app> | embody <app> <entity> <create|get|list|update|delete> [id] [--flags] | embody <app> <action> [--flags]",
     code,
   );
 }
@@ -230,6 +231,16 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
   const output = outputIndex >= 0 ? args.splice(outputIndex, 2)[1] : "table";
   if (output !== "json" && output !== "table")
     return fail(io, "--output must be json or table", EXIT.usage);
+  if (args[0] === "source")
+    return runSourceCommand(args.slice(1), {
+      io,
+      fetch: fetcher,
+      baseUrl: baseUrl ?? "",
+      token,
+      output,
+      exit: EXIT,
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
   if (!token)
     return fail(io, "Authentication token is required (EMBODY_TOKEN or --token)", EXIT.auth);
   let catalog: CatalogApp[];
