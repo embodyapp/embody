@@ -99,7 +99,7 @@ await main("m11-local", async () => {
       outputBucket: recipe.outputBucket,
       dockerImage: DOCKER_CLI,
       rewriteSourceUrl: mapUrl,
-      imageAliases: { [builderRef]: imageId },
+      imageAliases: { [builderRef]: tag },
       cleanupImage: RUNTIME_IMAGE,
     });
     const store = new gateway.MemoryGatewayStore();

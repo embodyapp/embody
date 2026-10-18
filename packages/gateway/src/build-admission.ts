@@ -101,21 +101,34 @@ const MAX_TAR_BYTES = BUILD_RECIPE.maxOutputBytes + 16 * 1024 * 1024;
 /**
  * Sandbox step: runs customer code (install, build, manifest extraction) in a container with no
  * network (so no metadata server, registry or provider APIs), no capabilities, a non-root user,
- * bounded memory/CPU/processes/files and a wall clock. Input and output move by `docker cp`; the
- * sandbox never sees the workspace, the step's environment or the Docker socket.
+ * bounded memory/CPU/processes/files and a wall clock. Input is baked into a per-build image by a
+ * platform Dockerfile (COPY only) and output leaves by `docker cp`; the sandbox never sees the
+ * workspace, the step's environment or the Docker socket.
  */
 export function sandboxScript(): string {
   const s = BUILD_RECIPE.sandbox;
   return `set -eu
 W="\${EMBODY_WORKSPACE:-/workspace}"
 N="embody-sandbox-\${EMBODY_ARTIFACT_ID}"
+I="embody-input-\${EMBODY_ARTIFACT_ID}"
 docker rm -f "$N" >/dev/null 2>&1 || true
+# Input image: the recipe image plus source and dependency store, owned by the sandbox user.
+# Platform Dockerfile, no RUN, no network: nothing from the source executes here.
+mkdir -p "$W/sandbox-input"
+mv "$W/src" "$W/sandbox-input/src"
+mv "$W/store" "$W/sandbox-input/store"
+cat > "$W/sandbox-input/Dockerfile" <<'EMBODY_INPUT'
+ARG BUILDER_IMAGE
+FROM \${BUILDER_IMAGE}
+COPY --chown=node:node src/ /app/
+COPY --chown=node:node store/ /store/
+EMBODY_INPUT
+printf 'Dockerfile\n' > "$W/sandbox-input/.dockerignore"
+docker build --network none -q --build-arg BUILDER_IMAGE="$EMBODY_BUILDER_IMAGE" -t "$I" "$W/sandbox-input" >/dev/null
 docker create --name "$N" --network none --user ${s.user} --cap-drop ALL \\
   --security-opt no-new-privileges --memory ${s.memoryBytes} --memory-swap ${s.memoryBytes} \\
   --pids-limit ${s.pids} --cpus ${s.cpus} --ulimit nofile=${s.openFiles}:${s.openFiles} --ulimit core=0 \\
-  --env-file /dev/null --workdir /app --entrypoint /embody/sandbox.sh "$EMBODY_BUILDER_IMAGE" >/dev/null
-docker cp -a "$W/src/." "$N:/app"
-docker cp -a "$W/store/." "$N:/store"
+  --env-file /dev/null --workdir /app --entrypoint /embody/sandbox.sh "$I" >/dev/null
 mkdir -p "$W/sandbox"
 # Log bounded to ${BUILD_RECIPE.maxLogBytes} bytes; the rest is drained, never stored.
 { if timeout -k 10 ${BUILD_RECIPE.sandboxSeconds} docker start -a "$N" 2>&1; then st=0; else st=$?; fi; echo "$st" > "$W/sandbox/status"; } | { head -c ${BUILD_RECIPE.maxLogBytes}; cat >/dev/null; }
@@ -124,12 +137,14 @@ echo "embody: sandbox exit $status"
 docker kill "$N" >/dev/null 2>&1 || true
 if [ "$status" != 0 ]; then
   docker rm -f "$N" >/dev/null 2>&1 || true
+  docker rmi -f "$I" >/dev/null 2>&1 || true
   echo "embody: sandbox failed (status $status)"
   exit 1
 fi
 docker cp "$N:/app" - | { head -c ${MAX_TAR_BYTES} > "$W/sandbox/app.tar"; cat >/dev/null; }
 docker cp "$N:/out/manifest.json" - 2>/dev/null | { head -c ${BUILD_RECIPE.maxManifestBytes * 2} > "$W/sandbox/manifest.tar"; cat >/dev/null; } || true
 docker rm -f "$N" >/dev/null
+docker rmi -f "$I" >/dev/null 2>&1 || true
 `;
 }
 

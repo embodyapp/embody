@@ -268,8 +268,11 @@ describe("M11 build plan (trusted recipe, no customer Dockerfile)", () => {
       `timeout -k 10 ${BUILD_RECIPE.sandboxSeconds}`,
     ])
       expect(script).toContain(flag);
-    // Input/output by docker cp; never a bind mount of the workspace or the Docker socket.
+    // Input baked into an image, output by docker cp; never a mount of the workspace or socket.
     expect(script).not.toMatch(/-v |--volume|--mount|docker\.sock|--privileged/);
+    expect(script).not.toContain("docker cp -a");
+    expect(script).toMatch(/COPY --chown=node:node src\/ \/app\//);
+    expect(script).not.toMatch(/^RUN /m);
     const assemble = assembleScript();
     expect(assemble).toContain("--network none");
     expect(assemble).not.toMatch(/^RUN /m);
