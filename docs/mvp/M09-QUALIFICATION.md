@@ -1,9 +1,8 @@
 # M09 cloud, database and wake-queue qualification
 
-Status: **phase 1 only.** The baseline, adapters, probes, suite and worksheet below exist and
-have mocked fail-closed tests. **No cloud resource has been created and nothing has been spent.**
-Mocked results are not provider evidence. The live run (phase 2) waits for the owner inputs at the
-end of this page. Task definition: [IMPLEMENTATION M09](./IMPLEMENTATION.md#m09--qualify-the-clouddatabase-baseline-and-cost-limits).
+Status: **live-run and passed** on candidate `3ef5f28` (run `027dddff`, 2026-10-18): 19/19 cases,
+zero skips, full cleanup. [Evidence](./evidence/M09-live-3ef5f28/README.md). Independent review
+pending. Task definition: [IMPLEMENTATION M09](./IMPLEMENTATION.md#m09--qualify-the-clouddatabase-baseline-and-cost-limits).
 
 ## Proposed baseline
 
@@ -20,6 +19,26 @@ end of this page. Task definition: [IMPLEMENTATION M09](./IMPLEMENTATION.md#m09-
 | Emergency stop | Pause every app's wake queue (`provider/cloud-tasks.mjs` `pause`); tasks are kept and dispatched on resume. Admission stop for deployments arrives with M10/M12 | step 5 |
 
 IaC and commands: [infra/mvp/m09](../../infra/mvp/m09/README.md).
+
+## Connection budget (measured 2026-10-18)
+
+`db-f1-micro` reports `max_connections` 25, of which 3 are reserved for superusers and 2 are held
+by Cloud SQL's own `cloudsqladmin`, leaving **about 20** for the gateway and apps. Hosted pools
+open at most 5 connections per instance (host and gateway) and close idle ones after 1 s, so
+connections are held only while requests run.
+
+| Consumer | Instances | Pool | Role `CONNECTION LIMIT` |
+|---|---|---|---|
+| Gateway | 1 | 5 | 5 |
+| Each app | 1 (adapter `maxInstanceCount`) | 5 | 5 |
+
+Guaranteed simultaneous full pools: the gateway plus **3 apps**. More apps share the remaining
+slots: when they are exhausted PostgreSQL refuses the connection (`53300`) and the request fails
+closed (`UNAVAILABLE`); the per-role limit stops one app from taking every slot (qualified by the
+storm case). Allowing 3 instances per app (15 connections) would not fit at all on this tier.
+Options when the MVP needs more: smaller hosted pools (code change, no cost), or `db-g1-small`
+(50 connections, +$0.0245/h ≈ **+$17.89/month**, baseline about $34.38, inside the $50 ceiling).
+The controller (M13) must set each app role's limit to pool × max instances.
 
 ## Wake queue design
 
@@ -157,24 +176,25 @@ an invoice; the invoice check is a separate step after the run.
 5. Destroy the baseline, confirm a no-change plan and an empty owned-name inventory, then record
    the evidence, measured cost and invoice check under `docs/mvp/evidence/M09-<date>/`.
 
-## Known risks to settle in phase 2
+## Settled by the live runs
 
-- **Zero representation.** The suite counts only explicit zero points of `instance_count` as
-  zero; a gap in the series is not zero. If Cloud Monitoring reports no points at zero, the case
-  fails and the reviewer must decide on another provider signal, not infer zero from silence.
-- **Internal ingress and Cloud Tasks.** Services use internal-only ingress. Cloud Tasks should
-  count as an internal source in the same project; if it does not, wakes fail and the design must
-  fall back to `all` ingress plus IAM, which the suite's external checks would then cover.
-- **actAs requirements.** The adapter grants actAs on the invoker to both the runtime and the
-  Cloud Tasks agent. The probe shows whether the runtime grant is required (other-invoker 403).
-- **Builder.** Only IAM bindings are inspected; a build that runs user code is MD09/M11.
-- **Network containment (step 4) is open:** MD09 decides the isolated build provider and runtime
-  egress controls. Until then, user deployment stays blocked.
+- **Zero representation:** `instance_count` reports explicit zeros for about seven minutes after
+  scale-down, then no points. Zero before a due time = an explicit zero plus no platform-logged
+  instance start and no request since. Silence alone never counts.
+- **Internal ingress:** Cloud Tasks reaches internal-only services in the same project.
+- **actAs:** the runtime cannot attach another app's invoker (403), so per-app invokers hold.
+- **Pause:** takes a few seconds to stop dispatch; the emergency stop allows a minute.
+- **Bootstrap:** PUBLIC must be revoked as the database owner (a non-owner REVOKE is a no-op).
+- **Builder:** only IAM bindings are inspected; a build that runs user code is MD09/M11.
+- **Network containment (step 4):** MD09 deferred to M11; user deployment stays blocked.
 
-## Owner inputs needed before phase 2
+## Owner inputs (answered 2026-10-15)
 
 1. The GCP test project ID (MD04 records `embody-cloud`) and region (`us-central1`).
 2. How credentials are provided: operator ADC on this machine, or a dedicated credential file.
 3. Explicit approval to spend the one-off $25 M09 qualification budget (MD06).
 4. Optionally, the billing account ID if the budget alert should be created by Terraform.
 5. Whether MD09 (isolated build provider and runtime network controls) is decided now or in M11.
+
+Answers: `embody-cloud`, `us-central1`, the operator's gcloud login, $25 approved, no billing
+account (no budget alert), MD09 delegated and deferred to M11.

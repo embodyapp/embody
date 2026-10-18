@@ -1,0 +1,302 @@
+{
+  "gate": "mvp-cloud",
+  "status": "passed",
+  "timestamp": "2026-10-18T10:20:38.360Z",
+  "commit": "3ef5f28fd0cb2a8cd02bed2d0beb6e33be9cc5a0",
+  "dirty": true,
+  "node": "v24.21.0",
+  "lockfileSha256": "aa67ff682647ae33b335b30062494199194e6f17844f1585c25b9cd47ed27cf5",
+  "schemaSourceSha256": "502cad9d92abe0d084394520c931a51d80f1bfa9b6378c6e9e38b69c6a714bb7",
+  "platformSchemaSourceSha256": "283dacac66f21a1cde30350a349cbe6dc47cee29003454a1ed45ba7d9f17e0e5",
+  "postgresFixtureSha256": "5ee505a6ae07b9b1bfbb9a98493fa0495081732cf2ca423a42311e69f5dea580",
+  "counts": {
+    "passed": 19,
+    "failed": 0,
+    "skipped": 0
+  },
+  "images": [],
+  "suites": ["m09"],
+  "releaseGate": false,
+  "pendingSuites": ["m10", "m11", "m12", "m13", "m14", "m15", "m16", "m17", "m20", "m21"],
+  "m09": {
+    "runId": "027dddff",
+    "startedAt": "2026-10-18T09:04:43.255Z",
+    "finishedAt": "2026-10-18T10:20:38.304Z",
+    "projectedUsd": 3.41,
+    "cost": {
+      "invoiceMeasured": false,
+      "prices": "2026-10-15",
+      "items": {
+        "sql": 0.85,
+        "backups": 0.08,
+        "run": 0.26,
+        "tasks": 0,
+        "logs": 0.25,
+        "images": 0.01,
+        "contingency": 2
+      },
+      "estimatedUpperUsd": 3.45
+    },
+    "cases": {
+      "M09.a.baseline": {
+        "sqlRunnable": true,
+        "sqlZonalSharedCore": true,
+        "sqlNoAuthorizedNetworks": true,
+        "sqlEncryptedOnly": true,
+        "sqlBackups": true,
+        "repository": true,
+        "pass": true
+      },
+      "M09.e.queue-probe": {
+        "subject": "embody-test-m09-r-49660c6779ed@embody-cloud.iam.gserviceaccount.com",
+        "cases": [
+          {
+            "case": "own-now",
+            "status": 200,
+            "expected": 200,
+            "pass": true
+          },
+          {
+            "case": "own-duplicate",
+            "status": 409,
+            "expected": 409,
+            "pass": true
+          },
+          {
+            "case": "own-delayed",
+            "status": 200,
+            "expected": 200,
+            "pass": true
+          },
+          {
+            "case": "own-retry",
+            "status": 200,
+            "expected": 200,
+            "pass": true
+          },
+          {
+            "case": "own-horizon-inside",
+            "status": 200,
+            "expected": 200,
+            "pass": true
+          },
+          {
+            "case": "own-horizon-outside",
+            "status": 400,
+            "expected": 400,
+            "pass": true
+          },
+          {
+            "case": "other-queue",
+            "status": 403,
+            "expected": 403,
+            "pass": true
+          },
+          {
+            "case": "other-invoker",
+            "status": 403,
+            "expected": 403,
+            "pass": true
+          },
+          {
+            "case": "cross-app-target",
+            "status": 200,
+            "expected": 200,
+            "pass": true
+          },
+          {
+            "case": "identity-secret-platform-db",
+            "status": 403,
+            "expected": 403,
+            "pass": true
+          },
+          {
+            "case": "identity-secret-signer",
+            "status": 403,
+            "expected": 403,
+            "pass": true
+          },
+          {
+            "case": "identity-secret-other-app",
+            "status": 403,
+            "expected": 403,
+            "pass": true
+          },
+          {
+            "case": "identity-sign-as-gateway",
+            "status": 403,
+            "expected": 403,
+            "pass": true
+          },
+          {
+            "case": "identity-deploy-api",
+            "status": 403,
+            "expected": 403,
+            "pass": true
+          },
+          {
+            "case": "identity-sql-admin",
+            "status": 403,
+            "expected": 403,
+            "pass": true
+          },
+          {
+            "case": "adapter-created",
+            "status": "created",
+            "expected": "created",
+            "pass": true
+          },
+          {
+            "case": "adapter-duplicate",
+            "status": "duplicate",
+            "expected": "duplicate",
+            "pass": true
+          }
+        ],
+        "missing": [],
+        "pass": true
+      },
+      "M09.e.dedup-after-execution": {
+        "executed": true,
+        "status": 409,
+        "pass": true
+      },
+      "M09.e.retry-503": {
+        "attempts": 6,
+        "statuses": [503, 503, 503, 503, 503, 200],
+        "gapsSeconds": [1.606, 3.003, 4.032, 8.034, 16.045],
+        "retryWindowSeconds": 259200,
+        "pass": true
+      },
+      "M09.d.emergency-stop": {
+        "pausedAt": "2026-10-18T09:13:30.188Z",
+        "deliveredWhilePaused": 0,
+        "deliveredAfterResume": true,
+        "pass": true
+      },
+      "M09.e.unauthenticated": {
+        "anonymous": 404,
+        "operator": 404,
+        "reachedTarget": 0,
+        "pass": true
+      },
+      "M09.e.delayed-wake": {
+        "deliveries": 1,
+        "early": 0,
+        "wakeDelaySeconds": 1.139,
+        "zeroBeforeDue": true,
+        "coldStart": true,
+        "pass": true
+      },
+      "M09.e.oidc-claims": {
+        "tokens": 10,
+        "hasEmail": true,
+        "emailVerified": true,
+        "pass": true
+      },
+      "M09.d.scaling": {
+        "checks": {
+          "minZero": true,
+          "maxBounded": true,
+          "requestBilling": true,
+          "concurrencyBounded": true,
+          "privateIngress": true,
+          "invokerIam": true
+        },
+        "pass": true
+      },
+      "M09.d.zero": {
+        "intervals": [
+          {
+            "start": "2026-10-18T09:32:40.709Z",
+            "end": "2026-10-18T09:38:40.709Z"
+          }
+        ],
+        "pass": true
+      },
+      "M09.b.cross-app": {
+        "woken": 0,
+        "allowedRequests": 0,
+        "deniedRequests": 16,
+        "starts": 0,
+        "pass": true
+      },
+      "M09.b.builder": {
+        "bindings": [
+          {
+            "resource": "projects/embody-cloud/locations/us-central1/repositories/embody-test-m09-images",
+            "role": "roles/artifactregistry.writer"
+          }
+        ],
+        "pass": true
+      },
+      "M09.c.storage": {
+        "exit": 0,
+        "status": "passed",
+        "counts": {
+          "failed": 0,
+          "skipped": 0,
+          "passed": 16
+        },
+        "postgresVersion": 160015,
+        "pass": true
+      },
+      "M09.c.gateway-store": {
+        "exit": 0,
+        "status": "passed",
+        "counts": {
+          "skipped": 0,
+          "failed": 0,
+          "passed": 43
+        },
+        "postgresVersion": null,
+        "pass": true
+      },
+      "M09.c.cold-latency": {
+        "trials": 20,
+        "p95Ms": 43,
+        "p50Ms": 35,
+        "maxMs": 45,
+        "from": "Cloud Run job in us-central1 through the Cloud SQL Auth Proxy",
+        "databaseWarm": true,
+        "note": "new connection per trial; Cloud SQL does not suspend",
+        "pass": true
+      },
+      "M09.c.connect-denials": {
+        "cases": [
+          {
+            "target": "embody_other",
+            "code": "42501"
+          },
+          {
+            "target": "embody_platform",
+            "code": "42501"
+          }
+        ],
+        "pass": true
+      },
+      "M09.c.storm": {
+        "attempts": 10,
+        "limit": 5,
+        "succeeded": 5,
+        "refused": 5,
+        "refusalCodes": ["53300"],
+        "platformDuringStorm": true,
+        "releasedAfter": true,
+        "pass": true
+      },
+      "M09.c.restore": {
+        "seconds": 923.548,
+        "checksumMatches": true,
+        "markerGone": true,
+        "pass": true
+      },
+      "M09.a.teardown": {
+        "leftovers": [],
+        "pass": true
+      }
+    },
+    "error": null,
+    "pass": true
+  }
+}
