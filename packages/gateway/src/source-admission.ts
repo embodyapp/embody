@@ -48,6 +48,12 @@ export interface SourceRecord {
   readonly error?: SourceErrorCode;
   /** Set by M12/M13 when a deployment/release retains the source past unpromoted retention. */
   readonly pinnedBy?: string;
+  /**
+   * Set (by CAS) by the retention sweep before it deletes the object. A purging record is a
+   * tombstone: stores never return, renew or update it, and a new admission with the same key
+   * allocates a fresh upload ID and object key.
+   */
+  readonly purging?: boolean;
   readonly revision: number;
 }
 export interface SourceAdmitInput {
@@ -67,10 +73,13 @@ export interface SourceUsage {
 }
 /** Atomic source persistence; implemented by the memory and PostgreSQL gateway stores. */
 export interface SourceStore {
+  /** Ignores purging tombstones: their key is free for a new identity. */
   admitSource(input: SourceAdmitInput): Promise<{ record: SourceRecord; replay: boolean }>;
+  /** Never returns a purging tombstone. */
   source(workspaceId: string, appId: string, uploadId: string): Promise<SourceRecord | null>;
-  /** CAS on revision; throws ConflictError when another writer won. */
+  /** CAS on revision; throws ConflictError when another writer won or the record is purging. */
   updateSource(next: SourceRecord, expectedRevision: number): Promise<SourceRecord>;
+  /** Expired unpinned records, including purging tombstones left by an interrupted sweep. */
   expiredSources(now: Date, limit: number): Promise<SourceRecord[]>;
   deleteSource(record: SourceRecord): Promise<boolean>;
 }
@@ -209,7 +218,11 @@ export async function verifySubmissionSource(
     submission.appId,
     submission.source.uploadId,
   );
-  if (!record || (Date.parse(record.retainUntil) <= now.getTime() && !record.pinnedBy))
+  if (
+    !record ||
+    record.purging ||
+    (Date.parse(record.retainUntil) <= now.getTime() && !record.pinnedBy)
+  )
     throw new SourceAdmissionError("NOT_FOUND");
   if (
     record.state !== "verified" ||
@@ -220,28 +233,48 @@ export async function verifySubmissionSource(
   return record;
 }
 
-/** Retention sweep (M16 schedules it). Deletes the object first so no record is orphaned. */
+/**
+ * Retention sweep (M16 schedules it). Each record is first fenced by CAS (`purging`), so a
+ * concurrent renewal either wins the CAS (the record is skipped) or, once fenced, gets a fresh
+ * identity and object key. Only then is the object deleted, and the tombstone last, so no live
+ * record ever points at a deleted object and a failed sweep leaves a tombstone to retry.
+ */
 export async function purgeExpiredSources(options: {
-  store: Pick<SourceStore, "expiredSources" | "deleteSource">;
+  store: Pick<SourceStore, "expiredSources" | "deleteSource" | "updateSource">;
   objects: Pick<SourceObjectStore, "delete">;
   now?: Date;
   limit?: number;
-}): Promise<{ deleted: number; failed: number }> {
+}): Promise<{ deleted: number; failed: number; skipped: number }> {
   const records = await options.store.expiredSources(
     options.now ?? new Date(),
     options.limit ?? 100,
   );
   let deleted = 0;
   let failed = 0;
+  let skipped = 0;
   for (const record of records) {
     try {
-      await options.objects.delete(record.objectKey);
-      if (await options.store.deleteSource(record)) deleted += 1;
+      let fenced = record;
+      if (!record.purging) {
+        try {
+          fenced = await options.store.updateSource({ ...record, purging: true }, record.revision);
+        } catch (error) {
+          // Renewed or pinned since it was listed: no longer expired, not ours to delete.
+          if (error instanceof ConflictError) {
+            skipped += 1;
+            continue;
+          }
+          throw error;
+        }
+      }
+      await options.objects.delete(fenced.objectKey);
+      if (await options.store.deleteSource(fenced)) deleted += 1;
+      else skipped += 1;
     } catch {
       failed += 1;
     }
   }
-  return { deleted, failed };
+  return { deleted, failed, skipped };
 }
 
 export interface SourceAdmissionOptions {
@@ -333,6 +366,8 @@ export function registerSourceRoutes(
     scope: { workspace: string; appId: string; principal: Principal },
     target: string,
     work: () => Promise<T>,
+    /** Returned results that are still failures (a persisted rejection). */
+    rejection?: (result: T) => SourceErrorCode | undefined,
   ): Promise<T> => {
     const started = Date.now();
     const base = {
@@ -361,14 +396,21 @@ export function registerSourceRoutes(
       throw new SourceAdmissionError("DEPENDENCY_UNAVAILABLE");
     }
     let record: AuditRecord = { ...base, outcome: "failure", durationMs: 0 };
+    const failure = (code: SourceErrorCode | undefined): AuditRecord => ({
+      ...base,
+      outcome: "failure",
+      errorCode: code ? (AUDIT_CODE[code] ?? "VALIDATION_ERROR") : "INTERNAL_ERROR",
+      durationMs: Date.now() - started,
+    });
     try {
       const result = await work();
-      record = { ...base, outcome: "success", durationMs: Date.now() - started };
+      const rejected = rejection?.(result);
+      record = rejected
+        ? failure(rejected)
+        : { ...base, outcome: "success", durationMs: Date.now() - started };
       return result;
     } catch (error) {
-      const code = error instanceof SourceAdmissionError ? error.code : undefined;
-      const errorCode = code ? (AUDIT_CODE[code] ?? "VALIDATION_ERROR") : "INTERNAL_ERROR";
-      record = { ...base, outcome: "failure", errorCode, durationMs: Date.now() - started };
+      record = failure(error instanceof SourceAdmissionError ? error.code : undefined);
       throw error;
     } finally {
       await deadline(deps.admission.complete(record), 5_000).catch(() => undefined);
@@ -447,73 +489,82 @@ export function registerSourceRoutes(
     const uploadId = (request.params as { upload: string }).upload;
     if (!SourceUploadIdSchema.safeParse(uploadId).success)
       throw new SourceAdmissionError("NOT_FOUND");
-    const outcome = await audited(request, reply, scope, "source.complete", async () => {
-      const load = () =>
-        deadline(deps.store.source(scope.workspace, scope.appId, uploadId), timeout).catch(() => {
-          throw new SourceAdmissionError("DEPENDENCY_UNAVAILABLE");
-        });
-      const record = await load();
-      if (!record) throw new SourceAdmissionError("NOT_FOUND");
-      if (record.state !== "pending") return record;
-      const storage = <T>(promise: Promise<T>) =>
-        deadline(promise, timeout).catch(() => {
-          throw new SourceAdmissionError("DEPENDENCY_UNAVAILABLE");
-        });
-      const info = await storage(deps.objects.stat(record.objectKey));
-      if (!info) throw new SourceAdmissionError("UPLOAD_INCOMPLETE");
-      const reject = async (code: SourceErrorCode) => {
-        await storage(deps.objects.delete(record.objectKey));
-        return deps.store.updateSource(
-          { ...without(record, "verifiedAt"), state: "rejected", error: code },
-          record.revision,
-        );
-      };
-      const settle = async (write: () => Promise<SourceRecord>) => {
-        try {
-          return await write();
-        } catch (error) {
-          if (error instanceof SourceAdmissionError) throw error;
-          if (!(error instanceof ConflictError))
+    const outcome = await audited(
+      request,
+      reply,
+      scope,
+      "source.complete",
+      async () => {
+        const load = () =>
+          deadline(deps.store.source(scope.workspace, scope.appId, uploadId), timeout).catch(() => {
             throw new SourceAdmissionError("DEPENDENCY_UNAVAILABLE");
-          // A concurrent completion won the CAS; report its authoritative outcome.
-          const latest = await load();
-          if (!latest) throw new SourceAdmissionError("NOT_FOUND");
-          return latest;
+          });
+        const record = await load();
+        if (!record) throw new SourceAdmissionError("NOT_FOUND");
+        if (record.state !== "pending") return record;
+        const storage = <T>(promise: Promise<T>) =>
+          deadline(promise, timeout).catch(() => {
+            throw new SourceAdmissionError("DEPENDENCY_UNAVAILABLE");
+          });
+        const info = await storage(deps.objects.stat(record.objectKey));
+        if (!info) throw new SourceAdmissionError("UPLOAD_INCOMPLETE");
+        const reject = async (code: SourceErrorCode) => {
+          // Pinned to the inspected generation: a stale completion must never delete a newer,
+          // re-armed upload under the same key.
+          await storage(deps.objects.delete(record.objectKey, { generation: info.generation }));
+          return deps.store.updateSource(
+            { ...without(record, "verifiedAt"), state: "rejected", error: code },
+            record.revision,
+          );
+        };
+        const settle = async (write: () => Promise<SourceRecord>) => {
+          try {
+            return await write();
+          } catch (error) {
+            if (error instanceof SourceAdmissionError) throw error;
+            if (!(error instanceof ConflictError))
+              throw new SourceAdmissionError("DEPENDENCY_UNAVAILABLE");
+            // A concurrent completion won the CAS; report its authoritative outcome.
+            const latest = await load();
+            if (!latest) throw new SourceAdmissionError("NOT_FOUND");
+            return latest;
+          }
+        };
+        if (info.bytes !== record.bytes) return settle(() => reject("SIZE_MISMATCH"));
+        const archive = await storage(
+          deps.objects.read(record.objectKey, {
+            generation: info.generation,
+            maxBytes: record.bytes,
+          }),
+        );
+        const digest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
+        if (archive.byteLength !== record.bytes) return settle(() => reject("SIZE_MISMATCH"));
+        if (digest !== record.digest) return settle(() => reject("DIGEST_MISMATCH"));
+        let summary: Awaited<ReturnType<typeof inspectSourceArchive>>;
+        try {
+          summary = await inspectSourceArchive(archive);
+        } catch (error) {
+          const code = error instanceof SourceArchiveError ? error.code : "ARCHIVE_INVALID";
+          return settle(() => reject(code));
         }
-      };
-      if (info.bytes !== record.bytes) return settle(() => reject("SIZE_MISMATCH"));
-      const archive = await storage(
-        deps.objects.read(record.objectKey, {
-          generation: info.generation,
-          maxBytes: record.bytes,
-        }),
-      );
-      const digest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
-      if (archive.byteLength !== record.bytes) return settle(() => reject("SIZE_MISMATCH"));
-      if (digest !== record.digest) return settle(() => reject("DIGEST_MISMATCH"));
-      let summary: Awaited<ReturnType<typeof inspectSourceArchive>>;
-      try {
-        summary = await inspectSourceArchive(archive);
-      } catch (error) {
-        const code = error instanceof SourceArchiveError ? error.code : "ARCHIVE_INVALID";
-        return settle(() => reject(code));
-      }
-      const { revision, ...rest } = record;
-      return settle(() =>
-        deps.store.updateSource(
-          {
-            ...rest,
-            state: "verified",
-            verifiedAt: deps.clock.now().toISOString(),
-            files: summary.files,
-            expandedBytes: summary.expandedBytes,
-            treeDigest: summary.treeDigest,
+        const { revision, ...rest } = record;
+        return settle(() =>
+          deps.store.updateSource(
+            {
+              ...rest,
+              state: "verified",
+              verifiedAt: deps.clock.now().toISOString(),
+              files: summary.files,
+              expandedBytes: summary.expandedBytes,
+              treeDigest: summary.treeDigest,
+              revision,
+            },
             revision,
-          },
-          revision,
-        ),
-      );
-    });
+          ),
+        );
+      },
+      (result) => (result.state === "rejected" ? result.error : undefined),
+    );
     const status = sourceStatus(outcome);
     if (outcome.state === "rejected" && outcome.error) return fail(reply, outcome.error, status);
     return reply.status(200).send(status);

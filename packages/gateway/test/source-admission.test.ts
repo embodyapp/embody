@@ -518,6 +518,149 @@ describe("authenticated source admission API (M10)", () => {
     expect(results.map((r) => r.json<SourceStatus>().state)).toEqual(["verified", "verified"]);
   });
 
+  it("never leaves a verified source without its object when a re-run races the retention sweep (B1)", async () => {
+    const f = await fixture();
+    const archive = validArchive();
+    const first = (await f.admit(archive)).json<SourceStatus>();
+    expect(first.state).toBe("verified");
+    const old = (await f.store.source(f.workspace, APP, first.uploadId))!;
+    f.advance(Date.parse(old.retainUntil) - f.clock.now().getTime() + 1000);
+    // The sweep has listed the record; the user re-runs the same upload before the sweep
+    // reaches it (sequential provider deletes make that window seconds wide).
+    const listed = f.store.expiredSources.bind(f.store);
+    let rerun: SourceStatus | undefined;
+    const sweepStore = {
+      expiredSources: async (now: Date, limit: number) => {
+        const records = await listed(now, limit);
+        const created = (await f.create(f.request(archive))).json<SourceStatus>();
+        if (created.state === "pending" && created.upload) await f.put(created, archive);
+        rerun = (await f.complete(created.uploadId)).json<SourceStatus>();
+        return records;
+      },
+      updateSource: f.store.updateSource.bind(f.store),
+      deleteSource: f.store.deleteSource.bind(f.store),
+    };
+    const purged = await purgeExpiredSources({
+      store: sweepStore,
+      objects: f.objects,
+      now: f.clock.now(),
+    });
+    expect(rerun).toMatchObject({ state: "verified", uploadId: first.uploadId });
+    const record = (await f.store.source(f.workspace, APP, first.uploadId))!;
+    expect(record.state).toBe("verified");
+    expect(await f.objects.stat(record.objectKey)).not.toBeNull();
+    expect(purged).toEqual({ deleted: 0, failed: 0, skipped: 1 });
+    await expect(
+      verifySubmissionSource(
+        f.store,
+        {
+          workspaceId: f.workspace,
+          appId: APP,
+          source: { uploadId: first.uploadId, digest: sha(archive), bytes: archive.byteLength },
+        } as DeploymentSubmission,
+        f.clock.now(),
+      ),
+    ).resolves.toMatchObject({ uploadId: first.uploadId });
+  });
+
+  it("gives a re-run a fresh identity once the sweep has fenced the record, and never deletes it (B1)", async () => {
+    const f = await fixture();
+    const archive = validArchive();
+    const first = (await f.admit(archive)).json<SourceStatus>();
+    const old = (await f.store.source(f.workspace, APP, first.uploadId))!;
+    f.advance(Date.parse(old.retainUntil) - f.clock.now().getTime() + 1000);
+    // The re-run lands after the fence, while the sweep's object delete is in flight.
+    const realDelete = f.objects.delete.bind(f.objects);
+    let rerun: SourceStatus | undefined;
+    const objects = {
+      delete: async (key: string, options?: { generation?: string }) => {
+        rerun = (await f.admit(archive)).json<SourceStatus>();
+        return realDelete(key, options);
+      },
+    };
+    expect(await purgeExpiredSources({ store: f.store, objects, now: f.clock.now() })).toEqual({
+      deleted: 1,
+      failed: 0,
+      skipped: 0,
+    });
+    expect(rerun).toMatchObject({ state: "verified" });
+    expect(rerun!.uploadId).not.toBe(first.uploadId);
+    expect(await f.store.source(f.workspace, APP, first.uploadId)).toBeNull();
+    const fresh = (await f.store.source(f.workspace, APP, rerun!.uploadId))!;
+    expect(f.objects.keys()).toEqual([fresh.objectKey]);
+    // A re-run of the CLI now replays the fresh, intact identity.
+    expect((await f.create(f.request(archive))).json()).toMatchObject({
+      uploadId: rerun!.uploadId,
+      state: "verified",
+    });
+  });
+
+  it("retries a sweep interrupted after fencing; the tombstone is invisible meanwhile", async () => {
+    const f = await fixture();
+    const archive = validArchive();
+    const first = (await f.admit(archive)).json<SourceStatus>();
+    const old = (await f.store.source(f.workspace, APP, first.uploadId))!;
+    f.advance(Date.parse(old.retainUntil) - f.clock.now().getTime() + 1000);
+    const failing = { delete: () => Promise.reject(new Error("storage down")) };
+    expect(
+      await purgeExpiredSources({ store: f.store, objects: failing, now: f.clock.now() }),
+    ).toEqual({ deleted: 0, failed: 1, skipped: 0 });
+    expect((await f.complete(first.uploadId)).statusCode).toBe(404);
+    expect(f.objects.keys()).toEqual([old.objectKey]);
+    expect(
+      await purgeExpiredSources({ store: f.store, objects: f.objects, now: f.clock.now() }),
+    ).toEqual({ deleted: 1, failed: 0, skipped: 0 });
+    expect(f.objects.keys()).toEqual([]);
+  });
+
+  it("a stale rejecting completion never deletes a newer re-armed upload (B1)", async () => {
+    const f = await fixture();
+    const archive = validArchive();
+    const status = (await f.create(f.request(archive))).json<SourceStatus>();
+    const corrupt = Buffer.from(archive);
+    corrupt[corrupt.length - 1] = corrupt[corrupt.length - 1]! ^ 0xff;
+    expect((await f.put(status, corrupt)).status).toBe(200);
+    // Completion B stalls in its provider delete while A rejects, the user re-arms and C verifies.
+    const realDelete = f.objects.delete.bind(f.objects);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let calls = 0;
+    vi.spyOn(f.objects, "delete").mockImplementation(async (key, options) => {
+      calls += 1;
+      if (calls === 1) await gate;
+      return realDelete(key, options);
+    });
+    const stale = f.complete(status.uploadId);
+    await vi.waitFor(() => expect(calls).toBe(1));
+    expect((await f.complete(status.uploadId)).json()).toMatchObject({
+      error: { code: "DIGEST_MISMATCH" },
+    });
+    const rearmed = (await f.create(f.request(archive))).json<SourceStatus>();
+    expect(rearmed).toMatchObject({ uploadId: status.uploadId, attempt: 2 });
+    expect((await f.put(rearmed, archive)).status).toBe(200);
+    expect((await f.complete(status.uploadId)).json()).toMatchObject({ state: "verified" });
+    release();
+    expect((await stale).json()).toMatchObject({ state: "verified" });
+    const record = (await f.store.source(f.workspace, APP, status.uploadId))!;
+    expect(await f.objects.stat(record.objectKey)).not.toBeNull();
+  });
+
+  it("audits persisted rejections as failures (N1)", async () => {
+    const f = await fixture();
+    const audits = vi.spyOn(f.store, "complete");
+    const archive = validArchive();
+    const status = (await f.create(f.request(archive))).json<SourceStatus>();
+    const corrupt = Buffer.from(archive);
+    corrupt[corrupt.length - 1] = corrupt[corrupt.length - 1]! ^ 0xff;
+    await f.put(status, corrupt);
+    expect((await f.complete(status.uploadId)).statusCode).toBe(400);
+    const records = audits.mock.calls.map(([record]) => record);
+    expect(records.map((r) => [r.target, r.outcome, r.errorCode])).toEqual([
+      ["source.create", "success", undefined],
+      ["source.complete", "failure", "VALIDATION_ERROR"],
+    ]);
+  });
+
   it("purges expired unpinned sources and their objects after retention", async () => {
     const f = await fixture();
     const archive = validArchive();
@@ -537,11 +680,13 @@ describe("authenticated source admission API (M10)", () => {
     ).toEqual({
       deleted: 0,
       failed: 0,
+      skipped: 0,
     });
     const after = new Date(Date.parse(record.retainUntil));
     expect(await purgeExpiredSources({ store: f.store, objects: f.objects, now: after })).toEqual({
       deleted: 1,
       failed: 0,
+      skipped: 0,
     });
     expect(await f.store.source(f.workspace, APP, done.uploadId)).toBeNull();
     expect(f.objects.keys()).toEqual([pinnedRecord.objectKey]);

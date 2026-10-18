@@ -20,7 +20,7 @@ The archive is deterministic (sorted paths, zero timestamps/owners, normalized m
 
 - Interrupted or expired transfer: nothing is stored (single-request PUT); `complete` returns `UPLOAD_INCOMPLETE`; the next create call renews access for the same upload ID.
 - Already stored (client crashed before `complete`): the repeated PUT gets `412` and the CLI proceeds to `complete`.
-- Digest or size mismatch (bytes corrupted in transit or swapped): the object is deleted, the record is `rejected`; a create call with the same key re-arms the same upload ID with `attempt + 1`, at most 3 attempts.
+- Digest or size mismatch (bytes corrupted in transit or swapped): the inspected object generation is deleted, the record is `rejected`; a create call with the same key re-arms the same upload ID with `attempt + 1`, at most 3 attempts.
 - Archive-content rejections (unsafe paths, bombs, forbidden files) are deterministic for that digest and stay terminal.
 
 None of these steps submits a deployment or starts a build; `verifySubmissionSource` (for M12) accepts only a `verified`, unexpired record of the same workspace/app whose stored digest and size equal the submission's.
@@ -72,7 +72,7 @@ The gateway streams the archive through gunzip and never holds the expanded tree
 
 | Quota | Value |
 |---|---|
-| Request rate / concurrency | M07 workspace admission (60/min, 20 in flight), shared with dispatch and recorded in durable audit as `source.create` / `source.complete` |
+| Request rate / concurrency | M07 workspace admission (60/min, 20 in flight), shared with dispatch and recorded in durable audit as `source.create` / `source.complete` (a persisted rejection is audited as a failure) |
 | Pending uploads with live access | 3 per app |
 | Retained source bytes | 100 MiB per workspace (unexpired or pinned records) |
 | Upload attempts after digest/size mismatch | 3 per upload ID |
@@ -101,7 +101,15 @@ CLI exit codes: `0` verified, `2` usage/packaging, `3` authentication, `4` permi
 
 ## Source retention
 
-Each record stores `createdAt`, `accessExpiresAt`, `retainUntil`, actor, digest, size, tree digest and the optional `pinnedBy`. `purgeExpiredSources` deletes the object first and then the record (CAS), so no record points at a missing object and no object is orphaned by a failed sweep; M16 schedules the sweep.
+Each record stores `createdAt`, `accessExpiresAt`, `retainUntil`, actor, digest, size, tree digest and the optional `pinnedBy`. `purgeExpiredSources` (M16 schedules it) handles each expired, unpinned record in three steps:
+
+1. It fences the record by CAS (`purging`). If the record was renewed or pinned after the sweep listed it, the CAS fails and the record is skipped.
+2. It deletes the object.
+3. It deletes the tombstone (CAS).
+
+A tombstone is invisible: status, completion and `verifySubmissionSource` return not found, and nothing can update or pin it. A re-run with the same key therefore gets a fresh upload ID and object key instead of renewing the record being purged. A sweep interrupted after the fence leaves the tombstone listed for the next sweep. So no live record points at a deleted object, and no object is orphaned by a failed sweep. Tombstones do not count toward quotas.
+
+Deletes made by a rejecting completion are pinned to the object generation it inspected (GCS `ifGenerationMatch`; a `412` means a newer re-upload owns the key and is left alone). A stale completion therefore cannot delete a re-armed upload.
 
 **Decided (MD15, owner approved 2026-10-18):** unpromoted source (pending, rejected or verified but never referenced by a deployment) is deleted **7 days** after the upload was first requested. That is the frozen M02 contract value (`HOSTED_PROFILE.sourceRetentionDays`), long enough to deploy or retry, and keeps the least customer source at rest. Source referenced by a deployment or release is pinned (`pinnedBy`, set by M12/M13) and kept as long as that deployment (90 days) or release (active: indefinitely; inactive: 30 days) is retained, so rollbacks and audits can trace an image to its exact source. Storage cost is negligible against MD06 (at most 100 MiB per workspace of standard storage, under $0.01/month per workspace). Changing it is a one-constant contract change. Customer-data retention beyond source (MD10) stays open.
 
@@ -110,6 +118,6 @@ A bucket lifecycle rule on the `sources/` prefix (age > retention + 1 day) is a 
 ## Storage adapters
 
 - `MemorySourceObjectStore`: local fake for tests and development. HMAC-signed PUT URLs with GCS-like semantics (key, exact length, content type, create-only, expiry); everything else is refused. Not durable.
-- `GcsSourceObjectStore`: private Google Cloud Storage bucket. Upload access is a V4 signed URL signed through IAM `signBlob` by a dedicated signer service account (no private keys are stored); signed headers bind the exact length, create-only precondition and content type; expiry is capped at 15 minutes. Metadata, bounded generation-pinned reads and deletes use the JSON API with the gateway's workload token from the metadata server. Every provider call has a 10-second deadline and maps failures to opaque errors.
+- `GcsSourceObjectStore`: private Google Cloud Storage bucket. Upload access is a V4 signed URL signed through IAM `signBlob` by a dedicated signer service account (no private keys are stored); signed headers bind the exact length, create-only precondition and content type; expiry is capped at 15 minutes. Metadata, bounded generation-pinned reads and (optionally generation-conditional) deletes use the JSON API with the gateway's workload token from the metadata server. Every provider call has a 10-second deadline and maps failures to opaque errors.
 
 Bucket requirements: uniform bucket-level access, public access prevention enforced, no public or `allUsers` bindings, versioning off (create-only writes plus explicit deletes), same region as the gateway (`us-central1`). A signed PUT acts with the signer's permissions, so the dedicated signer service account holds only `roles/storage.objectCreator` on the bucket; the gateway identity holds object get/delete on the bucket (for example `roles/storage.objectUser`) and `iam.serviceAccounts.signBlob` on the signer (`roles/iam.serviceAccountTokenCreator`); users never get bucket IAM. Live GCS evidence: [`test:mvp:cloud` suite `m10`](./evidence/M10-live-f7b1423/README.md) (run `582c24`, 11/11). Observed provider behavior: a request missing a signed header gets `400`, a tampered signature or other object key `403`, a wrong length `400`, an existing object `412`, expired access `400`; anonymous reads `403` and lists `401`.

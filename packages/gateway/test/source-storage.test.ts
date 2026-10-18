@@ -1,6 +1,11 @@
 import { createVerify, generateKeyPairSync, createSign } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { GcsSourceObjectStore, SourceStorageError, metadataAccessToken } from "../src/index.js";
+import {
+  GcsSourceObjectStore,
+  MemorySourceObjectStore,
+  SourceStorageError,
+  metadataAccessToken,
+} from "../src/index.js";
 
 const KEY = "sources/ws_aaaaaaaa/app_aaaaaaaa/src_aaaaaaaa.tar.gz";
 const SIGNER = "embody-source-signer@embody-cloud.iam.gserviceaccount.com";
@@ -106,6 +111,31 @@ describe("GCS source object store adapter", () => {
     expect(
       calls.every((c) => c.init.redirect === "error" && c.init.signal instanceof AbortSignal),
     ).toBe(true);
+  });
+
+  it("deletes only the inspected generation; a newer object (412) is left in place", async () => {
+    const { store, calls } = adapter((url) =>
+      url.searchParams.get("ifGenerationMatch") === "7"
+        ? new Response(null, { status: 204 })
+        : url.searchParams.has("ifGenerationMatch")
+          ? new Response(null, { status: 412 })
+          : new Response(null, { status: 500 }),
+    );
+    await expect(store.delete(KEY, { generation: "7" })).resolves.toBeUndefined();
+    await expect(store.delete(KEY, { generation: "8" })).resolves.toBeUndefined();
+    expect(calls.map((c) => c.url.searchParams.get("ifGenerationMatch"))).toEqual(["7", "8"]);
+    // An unconditional delete never treats 412 (or anything else) as success.
+    await expect(store.delete(KEY)).rejects.toBeInstanceOf(SourceStorageError);
+    await expect(store.delete(KEY, { generation: "1&x=y" })).rejects.toBeInstanceOf(
+      SourceStorageError,
+    );
+    const memory = new MemorySourceObjectStore();
+    memory.putRaw(KEY, new Uint8Array(1));
+    const first = (await memory.stat(KEY))!.generation;
+    await memory.delete(KEY, { generation: first });
+    memory.putRaw(KEY, new Uint8Array(2));
+    await memory.delete(KEY, { generation: first });
+    expect((await memory.stat(KEY))?.bytes).toBe(2);
   });
 
   it("maps provider failures to opaque errors without tokens or provider text", async () => {

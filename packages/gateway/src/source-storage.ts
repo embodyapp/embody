@@ -29,8 +29,11 @@ export interface SourceObjectStore {
   stat(objectKey: string): Promise<SourceObjectInfo | null>;
   /** Must fail rather than return more than `maxBytes`. */
   read(objectKey: string, options: { generation: string; maxBytes: number }): Promise<Uint8Array>;
-  /** Idempotent: deleting a missing object succeeds. */
-  delete(objectKey: string): Promise<void>;
+  /**
+   * Idempotent: deleting a missing object succeeds. With `generation`, only that generation is
+   * deleted; a newer object under the same key (a re-upload) is left in place.
+   */
+  delete(objectKey: string, options?: { generation?: string }): Promise<void>;
 }
 export class SourceStorageError extends Error {
   public constructor(message: string) {
@@ -129,9 +132,11 @@ export class MemorySourceObjectStore implements SourceObjectStore {
       return Promise.reject(new SourceStorageError("Source object larger than expected"));
     return Promise.resolve(Buffer.from(value.data));
   }
-  public delete(objectKey: string): Promise<void> {
+  public delete(objectKey: string, options: { generation?: string } = {}): Promise<void> {
     assertKey(objectKey);
-    this.objects.delete(objectKey);
+    const value = this.objects.get(objectKey);
+    if (value && (options.generation === undefined || value.generation === options.generation))
+      this.objects.delete(objectKey);
     return Promise.resolve();
   }
   /** Test hooks: inspect keys or place bytes as a malicious/racing writer would. */
@@ -366,10 +371,17 @@ export class GcsSourceObjectStore implements SourceObjectStore {
       throw new SourceStorageError("Source object read failed");
     }
   }
-  public async delete(objectKey: string): Promise<void> {
+  public async delete(objectKey: string, options: { generation?: string } = {}): Promise<void> {
     assertKey(objectKey);
-    const response = await this.call(this.objectUrl(objectKey), { method: "DELETE" });
-    if (!response.ok && response.status !== 404)
+    if (options.generation !== undefined && !/^\d{1,24}$/.test(options.generation))
+      throw new SourceStorageError("Invalid generation");
+    const condition =
+      options.generation === undefined ? "" : `?ifGenerationMatch=${options.generation}`;
+    const response = await this.call(`${this.objectUrl(objectKey)}${condition}`, {
+      method: "DELETE",
+    });
+    // 404: already gone. 412: the key now holds a newer generation, which is not ours to delete.
+    if (!response.ok && response.status !== 404 && !(condition && response.status === 412))
       throw new SourceStorageError("Source object delete failed");
   }
 }

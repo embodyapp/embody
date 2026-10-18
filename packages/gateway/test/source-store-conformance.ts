@@ -214,5 +214,51 @@ export function sourceStoreConformance(
       expect(await store.deleteSource(renewed.record)).toBe(true);
       expect(await store.source(workspace, record.appId, record.uploadId)).toBeNull();
     });
+
+    it("fences a purge with a tombstone: invisible, never updated, key gets a fresh identity", async () => {
+      const { record } = await store.admitSource(input());
+      const verified = await store.updateSource(
+        { ...record, state: "verified", files: 2, expandedBytes: 10, treeDigest: digest(5) },
+        record.revision,
+      );
+      const after = new Date(Date.parse(record.retainUntil));
+      const tombstone = await store.updateSource({ ...verified, purging: true }, verified.revision);
+      expect(await store.source(workspace, record.appId, record.uploadId)).toBeNull();
+      // Neither a stale writer nor a pin can resurrect a tombstone.
+      await expect(
+        store.updateSource({ ...tombstone, purging: false }, tombstone.revision),
+      ).rejects.toThrow();
+      await expect(
+        store.updateSource({ ...tombstone, pinnedBy: "dep_aaaaaaaa" }, tombstone.revision),
+      ).rejects.toThrow();
+      // The same key now admits a new identity with its own object key, not the tombstone.
+      const fresh = await store.admitSource(input({ now: after }));
+      expect(fresh.replay).toBe(false);
+      expect(fresh.record.uploadId).not.toBe(record.uploadId);
+      expect(fresh.record.objectKey).not.toBe(record.objectKey);
+      expect(await store.admitSource(input({ now: after }))).toMatchObject({
+        replay: true,
+        record: { uploadId: fresh.record.uploadId },
+      });
+      // Tombstones stay listed until deleted (an interrupted sweep retries) and use no quota.
+      const listed = (await store.expiredSources(after, 1000)).filter(
+        (r) => r.workspaceId === workspace,
+      );
+      expect(listed.map((r) => [r.uploadId, r.purging])).toEqual([[record.uploadId, true]]);
+      expect(
+        await code(
+          store.admitSource(
+            input({
+              now: after,
+              idempotencyKey: "sha256_key_quota_0001",
+              digest: digest(9),
+              bytes: SOURCE_ADMISSION.maxRetainedSourceBytesPerWorkspace - 1000,
+            }),
+          ),
+        ),
+      ).toBe("resolved");
+      expect(await store.deleteSource(tombstone)).toBe(true);
+      expect(await store.source(workspace, record.appId, fresh.record.uploadId)).not.toBeNull();
+    });
   });
 }

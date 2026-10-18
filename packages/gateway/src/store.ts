@@ -274,11 +274,12 @@ export class MemoryGatewayStore implements GatewayStore, SourceStore {
       (r) =>
         r.workspaceId === input.workspaceId &&
         r.appId === input.appId &&
-        r.idempotencyKey === input.idempotencyKey,
+        r.idempotencyKey === input.idempotencyKey &&
+        !r.purging,
     );
     const now = input.now.getTime();
     const others = [...this.sources.values()].filter(
-      (r) => r.workspaceId === input.workspaceId && r !== existing,
+      (r) => r.workspaceId === input.workspaceId && r !== existing && !r.purging,
     );
     const usage: SourceUsage = {
       pendingForApp: others.filter(
@@ -301,12 +302,13 @@ export class MemoryGatewayStore implements GatewayStore, SourceStore {
     uploadId: string,
   ): Promise<SourceRecord | null> {
     const record = this.sources.get(`${workspaceId}/${uploadId}`);
-    return record && record.appId === appId ? clone(record) : null;
+    return record && record.appId === appId && !record.purging ? clone(record) : null;
   }
   public async updateSource(next: SourceRecord, expected: number): Promise<SourceRecord> {
     const key = `${next.workspaceId}/${next.uploadId}`;
     const prior = this.sources.get(key);
-    if (!prior || prior.revision !== expected) throw new ConflictError("Revision conflict");
+    if (!prior || prior.revision !== expected || prior.purging)
+      throw new ConflictError("Revision conflict");
     if (!sameSourceIdentity(prior, next)) throw new BadRequestError("Source identity is immutable");
     const value = { ...clone(next), revision: expected + 1 };
     this.sources.set(key, value);
@@ -370,7 +372,8 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore {
         CREATE TABLE IF NOT EXISTS embody_platform_quotas (workspace_id text PRIMARY KEY REFERENCES embody_platform_workspaces(id), used integer NOT NULL, reset_at timestamptz NOT NULL);
         CREATE TABLE IF NOT EXISTS embody_platform_audit (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), request_id text NOT NULL, document jsonb NOT NULL, admitted_at timestamptz NOT NULL DEFAULT clock_timestamp(), lease_until timestamptz NOT NULL, completed boolean NOT NULL DEFAULT false, PRIMARY KEY(workspace_id,request_id));
         CREATE INDEX IF NOT EXISTS embody_platform_audit_lease ON embody_platform_audit(workspace_id,lease_until) WHERE NOT completed;
-        CREATE TABLE IF NOT EXISTS embody_platform_sources (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), upload_id text NOT NULL, app_id text NOT NULL, idempotency_key text NOT NULL, state text NOT NULL CHECK (state IN ('pending','verified','rejected')), bytes bigint NOT NULL CHECK (bytes > 0), access_expires_at timestamptz NOT NULL, retain_until timestamptz NOT NULL, pinned boolean NOT NULL DEFAULT false, revision bigint NOT NULL CHECK (revision > 0), document jsonb NOT NULL, PRIMARY KEY(workspace_id,upload_id), UNIQUE(workspace_id,app_id,idempotency_key));
+        CREATE TABLE IF NOT EXISTS embody_platform_sources (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), upload_id text NOT NULL, app_id text NOT NULL, idempotency_key text NOT NULL, state text NOT NULL CHECK (state IN ('pending','verified','rejected')), bytes bigint NOT NULL CHECK (bytes > 0), access_expires_at timestamptz NOT NULL, retain_until timestamptz NOT NULL, pinned boolean NOT NULL DEFAULT false, purging boolean NOT NULL DEFAULT false, revision bigint NOT NULL CHECK (revision > 0), document jsonb NOT NULL, PRIMARY KEY(workspace_id,upload_id));
+        CREATE UNIQUE INDEX IF NOT EXISTS embody_platform_sources_key ON embody_platform_sources(workspace_id,app_id,idempotency_key) WHERE NOT purging;
         CREATE INDEX IF NOT EXISTS embody_platform_sources_retention ON embody_platform_sources(retain_until) WHERE NOT pinned;`);
       await client.query("COMMIT");
     } catch (error) {
@@ -543,7 +546,7 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore {
       if (!workspace.rowCount) throw new NotFoundError("Workspace not found");
       const existing = (
         await client.query<{ document: SourceRecord }>(
-          "SELECT document FROM embody_platform_sources WHERE workspace_id=$1 AND app_id=$2 AND idempotency_key=$3",
+          "SELECT document FROM embody_platform_sources WHERE workspace_id=$1 AND app_id=$2 AND idempotency_key=$3 AND NOT purging",
           [input.workspaceId, input.appId, input.idempotencyKey],
         )
       ).rows[0]?.document;
@@ -551,7 +554,7 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore {
         await client.query<{ pending: number; bytes: string }>(
           `SELECT count(*) FILTER (WHERE app_id=$2 AND state='pending' AND access_expires_at>$4)::int AS pending,
             COALESCE(sum(bytes) FILTER (WHERE retain_until>$4 OR pinned),0)::text AS bytes
-          FROM embody_platform_sources WHERE workspace_id=$1 AND NOT (app_id=$2 AND idempotency_key=$3)`,
+          FROM embody_platform_sources WHERE workspace_id=$1 AND NOT purging AND NOT (app_id=$2 AND idempotency_key=$3)`,
           [input.workspaceId, input.appId, input.idempotencyKey, input.now],
         )
       ).rows[0]!;
@@ -601,7 +604,7 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore {
     return (
       (
         await this.pool.query<{ document: SourceRecord }>(
-          "SELECT document FROM embody_platform_sources WHERE workspace_id=$1 AND app_id=$2 AND upload_id=$3",
+          "SELECT document FROM embody_platform_sources WHERE workspace_id=$1 AND app_id=$2 AND upload_id=$3 AND NOT purging",
           [workspaceId, appId, uploadId],
         )
       ).rows[0]?.document ?? null
@@ -612,9 +615,9 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore {
       throw new BadRequestError("Invalid revision");
     const value: SourceRecord = { ...next, revision: expected + 1 };
     const result = await this.pool.query<{ document: SourceRecord }>(
-      `UPDATE embody_platform_sources SET state=$5,access_expires_at=$6,retain_until=$7,pinned=$8,revision=$9,document=$10
+      `UPDATE embody_platform_sources SET state=$5,access_expires_at=$6,retain_until=$7,pinned=$8,revision=$9,document=$10,purging=$15
       WHERE workspace_id=$1 AND upload_id=$2 AND app_id=$3 AND revision=$4 AND idempotency_key=$11
-        AND document->>'objectKey'=$12 AND document->>'digest'=$13 AND bytes=$14 RETURNING document`,
+        AND document->>'objectKey'=$12 AND document->>'digest'=$13 AND bytes=$14 AND NOT purging RETURNING document`,
       [
         value.workspaceId,
         value.uploadId,
@@ -630,9 +633,10 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore {
         value.objectKey,
         value.digest,
         value.bytes,
+        Boolean(value.purging),
       ],
     );
-    // Revision or immutable identity mismatch: never overwrite another record's identity.
+    // Revision, purging tombstone or immutable identity mismatch: never overwrite another record's identity.
     if (!result.rowCount) throw new ConflictError("Revision conflict");
     return value;
   }
