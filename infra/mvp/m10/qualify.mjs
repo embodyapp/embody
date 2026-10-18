@@ -334,7 +334,9 @@ export async function runM10Suite(env, provider, deps) {
           shorterRejected: results.shorter >= 400 && results.shorter < 500,
           badSignatureRejected: results.badSignature === 403,
           otherObjectRejected: results.otherObject === 403,
-          preconditionRequired: results.droppedPrecondition === 403,
+          // GCS answers 400 when a signed header is missing; the later 200 proves nothing was stored.
+          preconditionRequired:
+            results.droppedPrecondition >= 400 && results.droppedPrecondition < 500,
           rangeRequired: results.widenedRange === 403,
           validStored: results.valid === 200,
           createOnly: results.overwrite === 412,
@@ -500,7 +502,12 @@ export async function runM10Suite(env, provider, deps) {
       teardown = { pass: false, error: safe(error) };
     }
   }
-  const leftovers = await provider.inventory(approval, runId);
+  // IAM listings are eventually consistent after deletion: re-check for a bounded time.
+  let leftovers = await provider.inventory(approval, runId);
+  for (let attempt = 0; leftovers.length && attempt < 12; attempt++) {
+    await provider.wait(15_000);
+    leftovers = await provider.inventory(approval, runId);
+  }
   const iamAfter = await provider.projectIam();
   cases.cleanup = {
     pass: teardown.pass === true && leftovers.length === 0 && iamBefore === iamAfter,
