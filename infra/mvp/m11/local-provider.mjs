@@ -214,8 +214,23 @@ export class LocalBuildProvider {
   async get(buildId) {
     const build = this.builds.get(buildId);
     if (!build) throw new Error("Build not found");
-    const { substitutions, ...config } = build.config;
-    void substitutions;
+    // Echo the config the way Cloud Build does: substitutions applied.
+    const { substitutions, ...planned } = build.config;
+    const executed = (value) =>
+      value
+        .split("$$")
+        .join("\u0000")
+        .replaceAll("$_SOURCE_URL", substitutions._SOURCE_URL)
+        .split("\u0000")
+        .join("$");
+    const config = {
+      ...planned,
+      steps: planned.steps.map((s) => ({
+        ...s,
+        args: s.args.map(executed),
+        env: s.env.map(executed),
+      })),
+    };
     return {
       id: build.id,
       status: build.status,
@@ -245,7 +260,10 @@ export class LocalBuildProvider {
     await rm(join(this.bucketDir, prefix), { recursive: true, force: true });
   }
   async deleteLogs(logsBucket) {
-    await rm(join(this.bucketDir, logsBucket.replace(/^gs:\/\/[^/]+\//, "")), { recursive: true, force: true });
+    await rm(join(this.bucketDir, logsBucket.replace(/^gs:\/\/[^/]+\//, "")), {
+      recursive: true,
+      force: true,
+    });
   }
   async readLog(buildId, logsBucket, maxBytes) {
     const bytes = await this.readOutput(

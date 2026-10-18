@@ -152,9 +152,9 @@ cp "$W/inputs/sbom.json" "$W/admit/sbom.json"
 cat > "$W/assemble/Dockerfile" <<'EMBODY_DOCKERFILE'
 ARG RUNTIME_IMAGE
 FROM \${RUNTIME_IMAGE}
-COPY --chown=1000:1000 . /app
+COPY --chown=node:node . /app
 WORKDIR /app
-USER 1000:1000
+USER node
 ENV NODE_ENV=production
 CMD ["node", "${BUILD_RECIPE.entrypoint}"]
 EMBODY_DOCKERFILE
@@ -181,16 +181,32 @@ function canonical(value: unknown): string {
 }
 const sha256 = (data: string | Uint8Array) =>
   `sha256:${createHash("sha256").update(data).digest("hex")}`;
-/** Digest over the platform-controlled fields only: the provider echoes these back verbatim. */
-export function buildConfigDigest(config: Omit<BuildConfig, "substitutions">): string {
+const SOURCE_URL_ENV = "EMBODY_SOURCE_URL=";
+/**
+ * Cloud Build reports steps as executed: substitutions applied, so `$$` reads back as `$` and
+ * `$_SOURCE_URL` as the signed URL. Both forms map to the same canonical text; the source URL
+ * (a per-attempt capability) is never part of the digest.
+ */
+export function executedForm(value: string, form: "planned" | "executed"): string {
+  if (value.startsWith(SOURCE_URL_ENV)) return `${SOURCE_URL_ENV}<source>`;
+  return form === "planned" ? value.split("$$").join("$") : value;
+}
+/**
+ * Digest over the platform-controlled fields. The plan is digested in its `planned` form, the
+ * provider's record in its `executed` form; they agree only if the build ran the exact plan.
+ */
+export function buildConfigDigest(
+  config: Omit<BuildConfig, "substitutions">,
+  form: "planned" | "executed" = "executed",
+): string {
   return sha256(
     canonical({
       steps: config.steps.map((s) => ({
         id: s.id,
         name: s.name,
         entrypoint: s.entrypoint,
-        args: s.args,
-        env: s.env,
+        args: s.args.map((a) => executedForm(a, form)),
+        env: s.env.map((e) => executedForm(e, form)),
         timeout: s.timeout,
       })),
       images: config.images,
@@ -286,7 +302,7 @@ export function planBuild(recipe: BuildRecipeConfig, input: BuildPlanInput): Bui
     image,
     outputPrefix,
     config: { ...config, substitutions: { _SOURCE_URL: input.sourceUrl } },
-    configDigest: buildConfigDigest(config),
+    configDigest: buildConfigDigest(config, "planned"),
   };
 }
 
@@ -521,7 +537,8 @@ export async function decideAdmission(input: {
     code,
     ...(pushedDigest ? { imageDigest: pushedDigest } : {}),
   });
-  if (buildConfigDigest(build.config) !== plan.configDigest) return reject("PROVENANCE_INVALID");
+  if (buildConfigDigest(build.config, "executed") !== plan.configDigest)
+    return reject("PROVENANCE_INVALID");
   const prepared = prepareOutput(build.stepOutputs[0]);
   if (build.status === "TIMEOUT") return reject("BUILD_TIMEOUT");
   if (build.status === "INTERNAL_ERROR") return reject("DEPENDENCY_UNAVAILABLE");

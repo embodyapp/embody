@@ -78,8 +78,23 @@ export class MemoryBuildProvider implements BuildProvider {
     this.check();
     const build = this.builds.get(buildId);
     if (!build) return Promise.reject(new BuildProviderError("Build not found"));
-    const { substitutions, ...config } = build.config;
-    void substitutions;
+    // Echo the config the way Cloud Build does: substitutions applied.
+    const { substitutions, ...planned } = build.config;
+    const executed = (value: string) =>
+      value
+        .split("$$")
+        .join("\u0000")
+        .replaceAll("$_SOURCE_URL", substitutions._SOURCE_URL)
+        .split("\u0000")
+        .join("$");
+    const config = {
+      ...planned,
+      steps: planned.steps.map((s) => ({
+        ...s,
+        args: s.args.map(executed),
+        env: s.env.map(executed),
+      })),
+    };
     return Promise.resolve({
       id: buildId,
       status: build.result?.status ?? "WORKING",

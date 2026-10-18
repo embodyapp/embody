@@ -257,7 +257,7 @@ describe("M11 build plan (trusted recipe, no customer Dockerfile)", () => {
     const script = sandboxScript();
     for (const flag of [
       "--network none",
-      "--user 1000:1000",
+      "--user node:node",
       "--cap-drop ALL",
       "--security-opt no-new-privileges",
       `--memory ${BUILD_RECIPE.sandbox.memoryBytes}`,
@@ -273,7 +273,7 @@ describe("M11 build plan (trusted recipe, no customer Dockerfile)", () => {
     const assemble = assembleScript();
     expect(assemble).toContain("--network none");
     expect(assemble).not.toMatch(/^RUN /m);
-    expect(assemble).toContain("COPY --chown=1000:1000 . /app");
+    expect(assemble).toContain("COPY --chown=node:node . /app");
     // Cloud Build substitutes `$X`: every literal dollar in a script is escaped.
     expect(plan.config.steps[1]!.args[1]).not.toMatch(/(^|[^$])\$[A-Za-z{(]/);
   });

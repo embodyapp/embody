@@ -36,7 +36,8 @@ export const BUILD_RECIPE = Object.freeze({
   maxLockedPackages: 3_000,
   sandbox: Object.freeze({
     network: "none",
-    user: "1000:1000",
+    /** uid/gid 1000 in the pinned Node base image (named: older daemons resolve names only). */
+    user: "node:node",
     memoryBytes: 4 * 1024 * 1024 * 1024,
     pids: 512,
     cpus: 2,
