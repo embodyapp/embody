@@ -286,10 +286,12 @@ input, select { width: 100%; border: 1px solid #dcd2c5; background: #fdfaf5; pad
 .start-section::before { content: '✳'; position: absolute; left: -35px; bottom: -105px; font: 300px var(--font-display); color: #d1b483; opacity: .2; pointer-events: none; }
 .start-section h2 { margin-top: 18px; }
 .start-section > p { font-size: 12px; color: #746452; margin-top: 17px; }
-.workflow-options { max-width: 700px; margin: 28px auto; display: flex; justify-content: center; flex-wrap: wrap; gap: 9px; }
-.workflow-options button { padding: 11px 15px; border: 1px solid #cdbb9e; border-radius: 30px; background: #fff9ee80; font-size: 10px; position: relative; }
-.workflow-options button[aria-pressed="true"] { background: #fff9ee; border-color: #6b5340; box-shadow: 0 0 0 1px #6b5340; }
-.workflow-options button[aria-pressed="true"]::before { content: '✓ '; }
+.waitlist-form { max-width: 600px; margin: 28px auto 0; position: relative; text-align: left; }
+.waitlist-form label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 10px; }
+.waitlist-fields { display: flex; align-items: stretch; gap: 12px; }
+.waitlist-fields input { flex: 1; min-width: 0; border: 1.5px solid #b59a76; border-radius: 9px; background: #fffdf7; padding: 15px; font: 16px var(--font-body); color: var(--text-main); }
+.waitlist-fields input::placeholder { color: #8a7a6b; }
+.waitlist-fields .button { flex-shrink: 0; }
 .start-section .start-note { font-size: 9px; margin-top: 23px; }
 .start-note a { text-decoration: underline; text-underline-offset: 3px; }
 .site-footer { border-top: 1px solid var(--line); padding: 28px 0 35px; display: flex; gap: 20px; align-items: center; justify-content: space-between; }
@@ -429,8 +431,10 @@ input, select { width: 100%; border: 1px solid #dcd2c5; background: #fdfaf5; pad
   .start-section h2 { font-size: 34px; }
   .start-section > p { font-size: 11px; }
   .start-section h2 br { display: none; }
-  .workflow-options { margin: 23px 0; gap: 8px; }
-  .workflow-options button { font-size: 9px; padding: 11px 12px; }
+  .waitlist-fields { flex-direction: column; gap: 12px; }
+  .waitlist-fields input { min-height: 52px; }
+  .waitlist-fields .button { width: 100%; }
+  .waitlist-form { margin-top: 23px; }
   .start-section .start-note { max-width: 250px; margin-inline: auto; }
   .site-footer { flex-direction: column; align-items: flex-start; gap: 15px; padding: 25px 0; }
   .site-footer > div { margin-left: 0; flex-wrap: wrap; gap: 17px; }

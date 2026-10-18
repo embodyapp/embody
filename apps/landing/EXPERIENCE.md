@@ -40,12 +40,12 @@ All four attributed quotes, names, profile links, and available photos come unch
 
 A static chat window shows a right-aligned user request—close the Acme deal, start onboarding, and draft the invoice—and a left-aligned Embody reply with three inline action rows: CRM, Tasks, and Billing. A visually styled approval label and message-composer illustration use non-interactive spans, not buttons or inputs. Nothing executes; no fake typing, sending, or approval occurs. The window header and caption explicitly label the chat preview and limit it to configured apps and permitted actions.
 
-The explorer shell, sample workspaces, reset, foundation expander, and journey section have been removed, along with their JavaScript state and event handlers. The page does not call an LLM, connect a real CRM, deploy apps, send messages, or schedule automation. The admin illustration remains labeled as a preview. Workflow-interest buttons update a GitHub discussion link; there is no fake signup form.
+The explorer shell, sample workspaces, reset, foundation expander, and journey section have been removed, along with their JavaScript state and event handlers. The page does not call an LLM, connect a real CRM, deploy apps, send messages, or schedule automation. The admin illustration remains labeled as a preview. The main CTA is a native email waitlist form using the original site's Google Forms endpoint (form ID `1FAIpQLSf6z6c00hg3DbjIX1AVQ0bUBLNtGyoybqAWX06Q_f6tR5svJA`, required email field `entry.1271661547`). Header and hero early-access links point to it. Google provides the actual confirmation in a new tab; no unverified success message or duplicate background submission is used. The form works without JavaScript. Email addresses are not stored in browser storage or sent in custom analytics. The live form's public schema was checked to confirm the email field and that responses are open; automated tests intercept POST requests rather than adding fake leads.
 
 ## Files
 
 - `index.html`: narrative, ordered comparison paths, personalization diagram, logos, testimonials, optional explorer, and static illustrations.
-- `src/main.ts`: workflow-interest link and optional analytics; no sample-workspace state remains.
+- `src/main.ts`: optional submission-started and outbound analytics; native form submission has no JS dependency.
 - `src/styles/chat-control.css`: single-request/multiple-app chat illustration and responsive layout.
 - `src/styles/guided-demo.css`: comparison shell, testimonials, logos, explorer, and conversation styling. Historical filename retained.
 - `src/styles/personal-software.css`: simplified personalization figure and process paths, including responsive layouts.
@@ -63,7 +63,7 @@ The old interactive comparison state machine (`src/guided-demo.ts`) is removed. 
 5. With JavaScript disabled, process paths, personalization, logos, and testimonials remain visible.
 6. Check original logo/photo assets and unchanged testimonial quotations.
 7. Verify the explorer and journey sections are absent and their removed event handlers cause no errors. Chat must show user and assistant messages, three named app/action rows, an approval illustration, and preview disclosures, including without JavaScript. The illustrative composer and approval label must not enter the keyboard tab order.
-8. Test chat navigation anchor, skip link, reduced-motion behavior, and workflow-interest link.
+8. Test chat navigation anchor, skip link, reduced-motion behavior, and waitlist email validation, native POST destination, confirmation-tab behavior, and header/hero CTA anchors.
 
 ## Isolated preview deployment
 
