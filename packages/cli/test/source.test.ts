@@ -26,7 +26,8 @@ async function project(): Promise<string> {
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const files: Record<string, string> = {
     "package.json": '{"name":"kanban","type":"module"}',
-    "embody.config.ts": "export default {};\n",
+    "embody.config.ts":
+      'import { writeFileSync } from "node:fs";\nwriteFileSync(new URL("./evaluated", import.meta.url), "x");\nexport default {};\n',
     "src/index.ts": "export const ok = true;\n",
     ".env": `TOKEN=${CANARY}`,
     "credentials.json": `{"k":"${CANARY}"}`,
@@ -169,6 +170,8 @@ describe("embody source (M10)", () => {
     );
     const archive = await readFile(out);
     expect(gunzipSync(archive).includes(Buffer.from(CANARY))).toBe(false);
+    // Packaging reads embody.config.ts as bytes; it never imports or runs it.
+    await expect(readFile(join(root, "evaluated"))).rejects.toMatchObject({ code: "ENOENT" });
     expect(capture.text().out + capture.text().err).not.toContain(CANARY);
   });
 

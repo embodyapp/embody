@@ -196,12 +196,13 @@ export function sourceStoreConformance(
       );
       const before = new Date(Date.parse(record.retainUntil) - 1);
       const after = new Date(Date.parse(record.retainUntil));
-      expect((await store.expiredSources(before, 10)).map((r) => r.uploadId)).not.toContain(
-        record.uploadId,
-      );
-      const expired = await store.expiredSources(after, 10);
-      expect(expired.map((r) => r.uploadId)).toContain(record.uploadId);
-      expect(expired.map((r) => r.uploadId)).not.toContain(pinned.record.uploadId);
+      // The sweep is global; other workspaces' rows may share the database.
+      const mine = async (now: Date) =>
+        (await store.expiredSources(now, 1000))
+          .filter((r) => r.workspaceId === workspace)
+          .map((r) => r.uploadId);
+      expect(await mine(before)).toEqual([]);
+      expect(await mine(after)).toEqual([record.uploadId]);
       const renewed = await store.admitSource(input({ now: after }));
       expect(renewed.record).toMatchObject({
         uploadId: record.uploadId,

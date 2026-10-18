@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -200,6 +203,29 @@ describe("authenticated source admission API (M10)", () => {
     const record = await f.store.source(f.workspace, APP, status.uploadId);
     expect(record).toMatchObject({ actorId: "alice", state: "verified" });
     expect(JSON.stringify(done.json())).not.toContain("objectKey");
+  });
+
+  it("verifies hostile configuration and lifecycle scripts as inert data, never evaluating them", async () => {
+    const f = await fixture();
+    const dir = await mkdtemp(join(tmpdir(), "embody-m10-marker-"));
+    closers.push(() => rm(dir, { recursive: true, force: true }));
+    const marker = join(dir, "evaluated");
+    const payload = `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "x");`;
+    const archive = createSourceArchive([
+      {
+        path: "package.json",
+        content: text(
+          JSON.stringify({
+            name: "x",
+            scripts: { preinstall: `touch ${marker}`, postinstall: `touch ${marker}` },
+          }),
+        ),
+      },
+      { path: "embody.config.ts", content: text(`${payload}\nexport default {};\n`) },
+      { path: "src/index.ts", content: text(payload) },
+    ]);
+    expect((await f.admit(archive)).json()).toMatchObject({ state: "verified", files: 3 });
+    await expect(stat(marker)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("authorizes deployment and quota before allocating any upload capacity", async () => {
