@@ -620,6 +620,14 @@ test("deadline fetch fails a provider call that never answers", async () => {
     deadlineFetch(hanging, 20)("https://run.googleapis.com/v2/x", { method: "GET" }),
     /Provider GET run.googleapis.com failed \(0\); details suppressed/,
   );
+  let calls = 0;
+  const limited = deadlineFetch(
+    async () => (++calls < 3 ? new Response("{}", { status: 429 }) : Response.json({ ok: true })),
+    1000,
+    1,
+  );
+  assert.equal((await limited("https://iam.googleapis.com/v1/x", { method: "POST" })).status, 200);
+  assert.equal(calls, 3);
   const ok = await deadlineFetch(async () => Response.json({ a: 1 }), 1000)("https://x.example/");
   assert.deepEqual(await ok.json(), { a: 1 });
 });

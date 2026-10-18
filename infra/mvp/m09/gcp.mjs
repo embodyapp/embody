@@ -46,7 +46,18 @@ export async function operatorToken(credentials = "adc") {
  * provider call even with AbortSignal.timeout, so this races a referenced timer as well and
  * returns a fully buffered Response.
  */
-export function deadlineFetch(fetcher = fetch, deadlineMs = 60_000) {
+export function deadlineFetch(fetcher = fetch, deadlineMs = 60_000, backoffMs = 5_000) {
+  const once = deadlineFetchOnce(fetcher, deadlineMs);
+  // 429 means the provider did not process the request, so any method may retry it.
+  return async (url, options = {}) => {
+    for (let attempt = 0; ; attempt++) {
+      const response = await once(url, options);
+      if (response.status !== 429 || attempt === 4) return response;
+      await delay(backoffMs * 2 ** attempt);
+    }
+  };
+}
+function deadlineFetchOnce(fetcher, deadlineMs) {
   return async (url, options = {}) => {
     const controller = new AbortController();
     let timer;
