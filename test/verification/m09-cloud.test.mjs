@@ -32,6 +32,9 @@ import {
   evaluateRestore,
   latencySummary,
   fixturePasswords,
+  dropStatements,
+  schemaStatements,
+  releaseStatements,
 } from "../../infra/mvp/m09/sql.mjs";
 
 const env = {
@@ -343,6 +346,17 @@ test("delayed wake fails if delivered early, without zero, or without a cold sta
     false,
   );
   assert.equal(evaluateDelayedWake({ ...good, points: [] }).pass, false);
+  // Zeros stop being reported after a while: a gap counts only with no start or request in it.
+  const early = [{ start: iso(0), end: iso(600), value: 0 }];
+  assert.equal(evaluateDelayedWake({ ...good, points: early }).pass, true);
+  assert.equal(
+    evaluateDelayedWake({ ...good, points: early, starts: [iso(1200), iso(due + 1)] }).pass,
+    false,
+  );
+  assert.equal(
+    evaluateDelayedWake({ ...good, points: early, requests: [{ at: iso(900), status: 200 }] }).pass,
+    false,
+  );
   assert.equal(evaluateDelayedWake({ ...good, starts: [iso(10)] }).pass, false);
   assert.equal(evaluateDelayedWake({ ...good, wakes: [{ ...wake, verified: false }] }).pass, false);
 });
@@ -470,7 +484,17 @@ test("SQL bootstrap limits connections and timeouts, revokes PUBLIC and escapes 
   );
   assert.match(statements, /ALTER ROLE "embody_runtime" SET statement_timeout = 30000/);
   assert.match(statements, /REVOKE ALL ON DATABASE "embody_platform" FROM PUBLIC/);
-  assert.match(statements, /REVOKE "embody_migrator" FROM CURRENT_USER/);
+  // PUBLIC is revoked as the owner: a non-owner's REVOKE is silently a no-op (live finding).
+  assert.match(
+    statements,
+    /SET ROLE "embody_other";\nREVOKE ALL ON DATABASE "embody_other" FROM PUBLIC;\nRESET ROLE/,
+  );
+  assert.equal(schemaStatements().embody_test[0], 'SET ROLE "embody_migrator"');
+  assert.deepEqual(releaseStatements(), [
+    'REVOKE "embody_migrator" FROM CURRENT_USER',
+    'REVOKE "embody_other" FROM CURRENT_USER',
+    'REVOKE "embody_platform_migrator" FROM CURRENT_USER',
+  ]);
   assert.doesNotMatch(statements, /SUPERUSER(?! )|BYPASSRLS(?! )/);
   assert.throws(() => bootstrapStatements({}), /Missing fixture password/);
 });
@@ -634,4 +658,51 @@ test("deadline fetch fails a provider call that never answers", async () => {
 test("gauge-style one-minute zero points merge into an interval", () => {
   const minute = (m, value) => ({ start: iso(m * 60 - 60), end: iso(m * 60), value });
   assert.equal(zeroIntervals([minute(1, 0), minute(2, 0), minute(3, 1)]).length, 1);
+});
+
+test("SQL fixture removal reclaims owner membership before dropping, and only existing roles", () => {
+  const all = dropStatements([
+    "embody_migrator",
+    "embody_other",
+    "embody_platform_migrator",
+    "embody_runtime",
+    "embody_platform_runtime",
+    "postgres",
+  ]);
+  assert.ok(
+    all.indexOf('GRANT "embody_migrator" TO CURRENT_USER') <
+      all.indexOf('DROP DATABASE IF EXISTS "embody_test" WITH (FORCE)'),
+  );
+  assert.ok(all.includes('DROP ROLE "embody_runtime"'));
+  assert.ok(!all.some((statement) => statement.includes("postgres")));
+  assert.deepEqual(dropStatements([]), [
+    'DROP DATABASE IF EXISTS "embody_test" WITH (FORCE)',
+    'DROP DATABASE IF EXISTS "embody_other" WITH (FORCE)',
+    'DROP DATABASE IF EXISTS "embody_platform" WITH (FORCE)',
+  ]);
+});
+
+test("in-region SQL suite accepts only an embody-test instance and loopback proxy URLs", async () => {
+  const { parseSqlSecret } = await import("../../infra/mvp/m09/sql-suite.mjs");
+  const url = (db) => `postgresql://r:p@127.0.0.1:5432/${db}`;
+  const good = {
+    instance: "embody-cloud:us-central1:embody-test-m09-postgres",
+    urls: {
+      EMBODY_POSTGRES_URL: url("a"),
+      EMBODY_POSTGRES_MIGRATION_URL: url("a"),
+      EMBODY_POSTGRES_OTHER_URL: url("b"),
+      EMBODY_PLATFORM_URL: url("p"),
+      EMBODY_PLATFORM_MIGRATION_URL: url("p"),
+    },
+  };
+  assert.deepEqual(parseSqlSecret(JSON.stringify(good)), good);
+  for (const change of [
+    { instance: "prod:us-central1:customers" },
+    { urls: { ...good.urls, EMBODY_PLATFORM_URL: "postgresql://r:p@10.0.0.5:5432/p" } },
+    { urls: { ...good.urls, EMBODY_POSTGRES_OTHER_URL: undefined } },
+  ])
+    assert.throws(
+      () => parseSqlSecret(JSON.stringify({ ...good, ...change })),
+      /embody-test instance/,
+    );
 });

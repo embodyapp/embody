@@ -11,6 +11,7 @@ import { createRequire } from "node:module";
 import { setTimeout as delay } from "node:timers/promises";
 import { setTimeout, clearTimeout } from "node:timers";
 import { URL, URLSearchParams } from "node:url";
+import { Buffer } from "node:buffer";
 import { performance } from "node:perf_hooks";
 import { createCloudRunAppProvisioner } from "../provider/cloud-run.mjs";
 import { createWakeQueueProvisioner, wakeResourceNames } from "../provider/cloud-tasks.mjs";
@@ -24,7 +25,9 @@ import {
   evaluateStorm,
   evaluateConnectDenials,
   evaluateRestore,
-  latencySummary,
+  FIXTURE_ROLES,
+  dropStatements,
+  releaseStatements,
 } from "./sql.mjs";
 const exec = promisify(execFile);
 const { fetch, AbortSignal, AbortController, Response } = globalThis;
@@ -108,8 +111,9 @@ export function createGcpProvider({
   const sqlApi = `https://sqladmin.googleapis.com/v1/projects/${project}/instances/${prefix}-postgres`;
   let cached;
   const accessToken = async () => {
+    // gcloud may return a token close to expiry, so keep it only briefly.
     if (!cached || cached.until < Date.now())
-      cached = { value: await token(), until: Date.now() + 30 * 60_000 };
+      cached = { value: await token(), until: Date.now() + 3 * 60_000 };
     return cached.value;
   };
   // Reads (GET, IAM policy reads, log/metric listing) are retried on timeouts and 5xx.
@@ -120,6 +124,11 @@ export function createGcpProvider({
       try {
         return await apiOnce(url, method, body, options);
       } catch (error) {
+        // An expired token was not used for anything: refresh it and retry any method once.
+        if (/failed \(401\)/.test(error.message) && attempt === 0) {
+          cached = undefined;
+          continue;
+        }
         const transient = /failed \((0|5\d\d)\)/.test(error.message);
         if (!idempotent || !transient || attempt === 2) throw error;
         await delay(5000 * (attempt + 1));
@@ -358,10 +367,11 @@ export function createGcpProvider({
     },
     async starts(fixture, which) {
       const entries = await logs(
-        `${serviceFilter(fixture[which].service)} AND jsonPayload.message="embody.m09.start"`,
+        // Cloud Run's own system log records every instance start, whatever the app does.
+        `${serviceFilter(fixture[which].service)} AND logName="projects/${project}/logs/run.googleapis.com%2Fvarlog%2Fsystem" AND textPayload:"Starting new instance"`,
         fixture.createdAt,
       );
-      return entries.map((entry) => entry.jsonPayload.at);
+      return entries.map((entry) => entry.timestamp);
     },
     async requests(fixture, which) {
       const entries = await logs(
@@ -508,6 +518,7 @@ export function createGcpProvider({
         await wake.remove(scope);
         await apps.remove(scope);
       }
+      await removeSqlJob(fixture.runId);
       await rm(join(PRIVATE, `${fixture.runId}.json`), { force: true });
     },
     async inventory({ runId }) {
@@ -535,6 +546,24 @@ export function createGcpProvider({
       }
       if (await api(`${run}/jobs/${prefix}-qprobe-${runId}`))
         left.jobs.push(`${prefix}-qprobe-${runId}`);
+      const sqlt = sqlJobId(runId);
+      if (await api(`${run}/jobs/${sqlt}`)) left.jobs.push(sqlt);
+      if (await api(`https://secretmanager.googleapis.com/v1/projects/${project}/secrets/${sqlt}`))
+        left.secrets.push(sqlt);
+      if (
+        await api(
+          `https://iam.googleapis.com/v1/projects/${project}/serviceAccounts/${sqlt}@${project}.iam.gserviceaccount.com`,
+        )
+      )
+        left.identities.push(sqlt);
+      const projectPolicy = await api(
+        `https://cloudresourcemanager.googleapis.com/v1/projects/${project}:getIamPolicy`,
+        "POST",
+        { options: { requestedPolicyVersion: 3 } },
+      );
+      left.projectBindings = (projectPolicy.bindings ?? [])
+        .filter((binding) => binding.condition?.title === `m09-sqlt-${runId}`)
+        .map((binding) => binding.role);
       return left;
     },
     async measuredUsage(fixture) {
@@ -616,6 +645,8 @@ export function createGcpProvider({
         password: passwords.postgres,
       });
       await waitSqlOperations();
+      // A run that was interrupted can leave its fixture behind; start clean.
+      await dropFixture(connect);
       const admin = await connect("postgres", "postgres");
       try {
         for (const statement of bootstrapStatements(passwords)) await admin.query(statement);
@@ -630,29 +661,35 @@ export function createGcpProvider({
           await client.end();
         }
       }
-      const env = {
-        ...process.env,
-        EMBODY_POSTGRES_URL: url("embody_runtime", "embody_test"),
-        EMBODY_POSTGRES_MIGRATION_URL: url("embody_migrator", "embody_test"),
-        EMBODY_POSTGRES_OTHER_URL: url("embody_other", "embody_other"),
-        EMBODY_PLATFORM_URL: url("embody_platform_runtime", "embody_platform"),
-        EMBODY_PLATFORM_MIGRATION_URL: url("embody_platform_migrator", "embody_platform"),
-        EMBODY_POSTGRES_PROVIDER_INSTANCE: `${project}:${region}:${prefix}-postgres`,
-      };
-      delete env.EMBODY_POSTGRES_TEST_CONTAINER;
-      for (const [id, script] of [
-        ["storage", "scripts/test-postgres.mjs"],
-        ["gateway-store", "scripts/test-gateway-store.mjs"],
-      ]) {
-        const child = await exec(process.execPath, [script], {
-          env,
-          maxBuffer: 50 * 1024 * 1024,
-        }).then(
-          () => 0,
-          (error) => error.code ?? 1,
-        );
-        results[id] = { exit: child, pass: child === 0 };
+      const release = await connect("postgres", "postgres");
+      try {
+        for (const statement of releaseStatements()) await release.query(statement);
+      } finally {
+        await release.end();
       }
+      // Storage/gateway-store suites and latency run in-region (see sql-suite.mjs).
+      const job = await runSqlJob(fixture, passwords);
+      for (const [id, gate] of [
+        ["storage", job?.storage],
+        ["gateway-store", job?.gatewayStore],
+      ])
+        results[id] = {
+          exit: gate?.exit ?? null,
+          status: gate?.status ?? "missing",
+          counts: gate?.counts ?? null,
+          postgresVersion: gate?.postgresVersion ?? null,
+          pass: gate?.exit === 0 && gate?.status === "passed" && gate?.counts?.skipped === 0,
+        };
+      results["cold-latency"] =
+        job?.latency?.trials === 20
+          ? {
+              ...job.latency,
+              from: "Cloud Run job in us-central1 through the Cloud SQL Auth Proxy",
+              databaseWarm: true,
+              note: "new connection per trial; Cloud SQL does not suspend",
+              pass: true,
+            }
+          : { trials: job?.latency?.trials ?? 0, pass: false };
       const denials = [];
       for (const target of ["embody_other", "embody_platform"]) {
         const result = await attempt("embody_runtime", target);
@@ -660,24 +697,6 @@ export function createGcpProvider({
         denials.push({ target, code: result.ok ? "connected" : result.code });
       }
       results["connect-denials"] = evaluateConnectDenials(denials);
-      const samples = [];
-      for (let index = 0; index < 20; index++) {
-        const result = await attempt("embody_runtime", "embody_test");
-        if (result.ok) {
-          await result.client.query("SELECT 1");
-          samples.push(result.ms);
-          await result.client.end();
-        }
-      }
-      results["cold-latency"] =
-        samples.length === 20
-          ? {
-              ...latencySummary(samples),
-              databaseWarm: true,
-              note: "new connection through the Auth Proxy; Cloud SQL does not suspend",
-              pass: true,
-            }
-          : { trials: samples.length, pass: false };
       const storm = await Promise.all(
         Array.from({ length: SQL_LIMITS.runtimeConnectionLimit + 5 }, () =>
           attempt("embody_runtime", "embody_test"),
@@ -696,10 +715,155 @@ export function createGcpProvider({
       });
       results.restore = await restoreCheck(connect);
     } finally {
+      await removeSqlJob(fixture.runId).catch(() => undefined);
       await dropFixture(connect).catch(() => undefined);
       proxy.kill();
     }
     return results;
+  }
+
+  function sqlJobId(runId) {
+    return `${prefix}-sqlt-${runId}`;
+  }
+  async function sqlClientBinding(email, runId, add) {
+    const projectUrl = `https://cloudresourcemanager.googleapis.com/v1/projects/${project}`;
+    const policy = await api(`${projectUrl}:getIamPolicy`, "POST", {
+      options: { requestedPolicyVersion: 3 },
+    });
+    const title = `m09-sqlt-${runId}`;
+    const bindings = (policy.bindings ?? []).filter(
+      (binding) => binding.condition?.title !== title,
+    );
+    if (!add && bindings.length === (policy.bindings ?? []).length) return;
+    if (add)
+      bindings.push({
+        role: "roles/cloudsql.client",
+        members: [`serviceAccount:${email}`],
+        condition: {
+          title,
+          expression: `resource.name.endsWith('/instances/${prefix}-postgres')`,
+        },
+      });
+    await withAccountPropagation(() =>
+      api(`${projectUrl}:setIamPolicy`, "POST", {
+        policy: { ...policy, version: 3, bindings },
+      }),
+    );
+  }
+  async function withAccountPropagation(operation) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (!/failed \(400\)/.test(error.message) || attempt === 5) throw error;
+        await delay(5000 * (attempt + 1));
+      }
+    }
+  }
+  /**
+   * In-region SQL suites: a run-scoped identity with Cloud SQL client on this instance only
+   * (conditional binding, as in M05), the fixture URLs in a run-scoped secret only it can read,
+   * and a job that runs sql-suite.mjs. Everything is removed by removeSqlJob.
+   */
+  async function runSqlJob(fixture, passwords) {
+    const id = sqlJobId(fixture.runId);
+    const email = `${id}@${project}.iam.gserviceaccount.com`;
+    const description = JSON.stringify({ managed_by: MARKER, run: fixture.runId });
+    await api(`https://iam.googleapis.com/v1/projects/${project}/serviceAccounts`, "POST", {
+      accountId: id,
+      serviceAccount: { displayName: id, description },
+    });
+    await sqlClientBinding(email, fixture.runId, true);
+    const secrets = `https://secretmanager.googleapis.com/v1/projects/${project}/secrets`;
+    await api(`${secrets}?secretId=${id}`, "POST", {
+      labels: { managed_by: MARKER, fixture: prefix, run: fixture.runId },
+      replication: { userManaged: { replicas: [{ location: region }] } },
+    });
+    const local = (role, database) =>
+      `postgresql://${role}:${encodeURIComponent(passwords[role])}@127.0.0.1:5432/${database}`;
+    const payload = {
+      instance: `${project}:${region}:${prefix}-postgres`,
+      urls: {
+        EMBODY_POSTGRES_URL: local("embody_runtime", "embody_test"),
+        EMBODY_POSTGRES_MIGRATION_URL: local("embody_migrator", "embody_test"),
+        EMBODY_POSTGRES_OTHER_URL: local("embody_other", "embody_other"),
+        EMBODY_PLATFORM_URL: local("embody_platform_runtime", "embody_platform"),
+        EMBODY_PLATFORM_MIGRATION_URL: local("embody_platform_migrator", "embody_platform"),
+      },
+    };
+    await api(`${secrets}/${id}:addVersion`, "POST", {
+      payload: { data: Buffer.from(JSON.stringify(payload)).toString("base64") },
+    });
+    await withAccountPropagation(() =>
+      api(`${secrets}/${id}:setIamPolicy`, "POST", {
+        policy: {
+          bindings: [
+            { role: "roles/secretmanager.secretAccessor", members: [`serviceAccount:${email}`] },
+          ],
+        },
+      }),
+    );
+    await delay(60_000);
+    await operation(
+      await api(`${run}/jobs?jobId=${id}`, "POST", {
+        labels: { managed_by: MARKER, fixture: prefix, run: fixture.runId },
+        template: {
+          taskCount: 1,
+          template: {
+            maxRetries: 0,
+            timeout: "3600s",
+            serviceAccount: email,
+            containers: [
+              {
+                image,
+                command: ["node", "infra/mvp/m09/sql-suite.mjs"],
+                resources: { limits: { cpu: "2", memory: "4Gi" } },
+                env: [
+                  {
+                    name: "EMBODY_M09_SQL",
+                    valueSource: { secretKeyRef: { secret: id, version: "1" } },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      }),
+      "https://run.googleapis.com/v2",
+    );
+    const since = now().toISOString();
+    await operation(
+      await api(`${run}/jobs/${id}:run`, "POST", {}),
+      "https://run.googleapis.com/v2",
+    ).catch(() => undefined);
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const entries = await logs(
+        `resource.type="cloud_run_job" AND resource.labels.job_name="${id}" AND jsonPayload.message="embody.m09.sqlSuite"`,
+        since,
+      );
+      if (entries.length) return entries.at(-1).jsonPayload;
+      await delay(10_000);
+    }
+    return null;
+  }
+  async function removeSqlJob(runId) {
+    const id = sqlJobId(runId);
+    const email = `${id}@${project}.iam.gserviceaccount.com`;
+    const deletion = await api(`${run}/jobs/${id}`, "DELETE");
+    if (deletion?.name) await operation(deletion, "https://run.googleapis.com/v2");
+    await sqlClientBinding(email, runId, false);
+    await api(
+      `https://secretmanager.googleapis.com/v1/projects/${project}/secrets/${id}`,
+      "DELETE",
+    );
+    const account = await api(
+      `https://iam.googleapis.com/v1/projects/${project}/serviceAccounts/${email}`,
+    );
+    if (account && account.description === JSON.stringify({ managed_by: MARKER, run: runId }))
+      await api(
+        `https://iam.googleapis.com/v1/projects/${project}/serviceAccounts/${email}`,
+        "DELETE",
+      );
   }
   async function waitSqlOperations() {
     for (let attempt = 0; attempt < 240; attempt++) {
@@ -780,16 +944,12 @@ export function createGcpProvider({
   async function dropFixture(connect) {
     const admin = await connect("postgres", "postgres");
     try {
-      for (const database of ["embody_test", "embody_other", "embody_platform"])
-        await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
-      for (const role of [
-        "embody_migrator",
-        "embody_runtime",
-        "embody_other",
-        "embody_platform_migrator",
-        "embody_platform_runtime",
-      ])
-        await admin.query(`DROP ROLE IF EXISTS "${role}"`);
+      const { rows } = await admin.query(
+        "SELECT rolname FROM pg_roles WHERE rolname = ANY($1::text[])",
+        [FIXTURE_ROLES],
+      );
+      for (const statement of dropStatements(rows.map((row) => row.rolname)))
+        await admin.query(statement);
     } finally {
       await admin.end();
     }

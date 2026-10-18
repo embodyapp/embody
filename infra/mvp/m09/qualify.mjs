@@ -121,14 +121,27 @@ export function zeroIntervals(points, minSeconds = M09_LIMITS.minZeroSeconds) {
 }
 
 /** M09.e: the delayed task woke the service from an observed zero, never before it was due. */
-export function evaluateDelayedWake({ scheduleAt, wakes, starts, points }) {
+/**
+ * Live finding (run 5): instance_count reports explicit zeros for about seven minutes after
+ * scale-down and then no points until the next instance. Silence alone is never zero, so a
+ * zero interval that ended before the due time counts only if the platform logged no
+ * instance start and no request between its end and the due time.
+ */
+export function evaluateDelayedWake({ scheduleAt, wakes, starts, points, requests = [] }) {
   const due = Date.parse(scheduleAt);
   const deliveries = wakes.filter((wake) => wake.probe === "own-delayed");
   const early = deliveries.filter((wake) => Date.parse(wake.receivedAt) < due);
   const first = deliveries.map((wake) => Date.parse(wake.receivedAt)).sort((a, b) => a - b)[0];
-  const zeroBeforeDue = zeroIntervals(points).some(
-    (interval) => Date.parse(interval.start) < due && Date.parse(interval.end) >= due - 60_000,
-  );
+  const between = (at, from) => Date.parse(at) > from && Date.parse(at) < due - 5_000;
+  const zeroBeforeDue = zeroIntervals(points).some((interval) => {
+    const end = Date.parse(interval.end);
+    if (Date.parse(interval.start) >= due) return false;
+    if (end >= due - 60_000) return true;
+    return (
+      !starts.some((at) => between(at, end)) &&
+      !requests.some((request) => between(request.at, end))
+    );
+  });
   const coldStart = starts.some(
     (at) => Date.parse(at) >= due - 5_000 && Date.parse(at) <= (first ?? 0),
   );
@@ -373,6 +386,7 @@ export async function runM09Suite(env, provider) {
         scheduleAt: scheduleAt ?? "invalid",
         wakes,
         starts: await provider.starts(fixture, "own"),
+        requests: await provider.requests(fixture, "own"),
         points,
       }),
     );

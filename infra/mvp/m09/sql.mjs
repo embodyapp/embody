@@ -21,11 +21,21 @@ export function fixturePasswords(roles) {
   return Object.fromEntries(roles.map((role) => [role, randomBytes(24).toString("base64url")]));
 }
 
+const DATABASES = Object.freeze([
+  ["embody_test", "embody_migrator", "embody_runtime"],
+  ["embody_other", "embody_other", null],
+  ["embody_platform", "embody_platform_migrator", "embody_platform_runtime"],
+]);
+
 /**
  * Statements run as the Cloud SQL `postgres` admin (cloudsqlsuperuser, not a real superuser).
  * The M03 role/database layout plus provider limits: per-role CONNECTION LIMIT, statement and
- * idle-in-transaction timeouts, PUBLIC revoked. The admin is granted each owner role only to
- * create its database (PostgreSQL 16 requires SET on the owner) and the grant is revoked.
+ * idle-in-transaction timeouts, PUBLIC revoked on every database and schema.
+ *
+ * Live finding (2026-10-18): a non-owner's REVOKE of PUBLIC is silently a no-op, which left
+ * app B's database open to app A. So the admin takes owner membership (PostgreSQL 16 also needs
+ * it for CREATE DATABASE ... OWNER), runs every owner-scoped statement under SET ROLE, and only
+ * releases the membership after the schemas are done (`releaseStatements`).
  */
 export function bootstrapStatements(passwords, limits = SQL_LIMITS) {
   const roles = {
@@ -44,39 +54,35 @@ export function bootstrapStatements(passwords, limits = SQL_LIMITS) {
       `ALTER ROLE ${ident(role)} SET idle_in_transaction_session_timeout = ${Number(limits.idleInTransactionTimeoutMs)}`,
     );
   }
-  for (const [database, owner, runtime] of [
-    ["embody_test", "embody_migrator", "embody_runtime"],
-    ["embody_other", "embody_other", null],
-    ["embody_platform", "embody_platform_migrator", "embody_platform_runtime"],
-  ]) {
+  for (const [database, owner, runtime] of DATABASES)
     statements.push(
       `GRANT ${ident(owner)} TO CURRENT_USER`,
       `CREATE DATABASE ${ident(database)} OWNER ${ident(owner)}`,
-      `REVOKE ${ident(owner)} FROM CURRENT_USER`,
+      `SET ROLE ${ident(owner)}`,
       `REVOKE ALL ON DATABASE ${ident(database)} FROM PUBLIC`,
       ...(runtime ? [`GRANT CONNECT ON DATABASE ${ident(database)} TO ${ident(runtime)}`] : []),
+      "RESET ROLE",
     );
-  }
   return statements;
 }
-/** Per-database schema statements; run connected to each database as the admin. */
+/** Per-database schema statements, run connected to each database as its owner. */
 export function schemaStatements() {
-  return {
-    embody_test: [
-      "REVOKE ALL ON SCHEMA public FROM PUBLIC",
-      'GRANT USAGE, CREATE ON SCHEMA public TO "embody_migrator"',
-      'GRANT USAGE ON SCHEMA public TO "embody_runtime"',
-    ],
-    embody_other: [
-      "REVOKE ALL ON SCHEMA public FROM PUBLIC",
-      'GRANT USAGE, CREATE ON SCHEMA public TO "embody_other"',
-    ],
-    embody_platform: [
-      "REVOKE ALL ON SCHEMA public FROM PUBLIC",
-      'GRANT USAGE, CREATE ON SCHEMA public TO "embody_platform_migrator"',
-      'GRANT USAGE ON SCHEMA public TO "embody_platform_runtime"',
-    ],
-  };
+  return Object.fromEntries(
+    DATABASES.map(([database, owner, runtime]) => [
+      database,
+      [
+        `SET ROLE ${ident(owner)}`,
+        "REVOKE ALL ON SCHEMA public FROM PUBLIC",
+        `GRANT USAGE, CREATE ON SCHEMA public TO ${ident(owner)}`,
+        ...(runtime ? [`GRANT USAGE ON SCHEMA public TO ${ident(runtime)}`] : []),
+        "RESET ROLE",
+      ],
+    ]),
+  );
+}
+/** After the schemas: the admin gives up owner membership again. */
+export function releaseStatements() {
+  return DATABASES.map(([, owner]) => `REVOKE ${ident(owner)} FROM CURRENT_USER`);
 }
 
 export function percentile(samples, p) {
@@ -142,4 +148,28 @@ export function evaluateRestore({
       checksumAtBackup === checksumAfterRestore &&
       markerAfterRestore === false,
   };
+}
+
+export const FIXTURE_ROLES = Object.freeze([
+  "embody_migrator",
+  "embody_runtime",
+  "embody_other",
+  "embody_platform_migrator",
+  "embody_platform_runtime",
+]);
+
+/**
+ * Removes the fixture. The Cloud SQL admin is not a superuser and gave up owner membership
+ * after bootstrap, so it takes membership back (it created the roles, so it holds ADMIN) before
+ * dropping each database. Only roles that still exist are touched; repeatable.
+ */
+export function dropStatements(existingRoles) {
+  const exists = new Set(existingRoles.filter((role) => FIXTURE_ROLES.includes(role)));
+  return [
+    ...DATABASES.flatMap(([database, owner]) => [
+      ...(exists.has(owner) ? [`GRANT ${ident(owner)} TO CURRENT_USER`] : []),
+      `DROP DATABASE IF EXISTS ${ident(database)} WITH (FORCE)`,
+    ]),
+    ...FIXTURE_ROLES.filter((role) => exists.has(role)).map((role) => `DROP ROLE ${ident(role)}`),
+  ];
 }
