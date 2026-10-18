@@ -33,8 +33,42 @@ export {
   type GcsSourceObjectStoreOptions,
   type SourceObjectInfo,
   type SourceObjectStore,
+  type SourceReadAccessRequest,
   type SourceUploadAccessRequest,
 } from "./source-storage.js";
+export {
+  BUILD_DEADLINE_MS,
+  BuildAdmission,
+  BuildAdmissionError,
+  BuildProviderError,
+  ORPHAN_AGE_MS,
+  SOURCE_READ_SECONDS,
+  artifactStatus,
+  assembleScript,
+  assertRecipeConfig,
+  buildConfigDigest,
+  cleanupOrphanedImages,
+  decideAdmission,
+  planBuild,
+  purgeArtifacts,
+  sandboxScript,
+  type AdmissionDecision,
+  type ArtifactRecord,
+  type ArtifactStore,
+  type ArtifactWrite,
+  type BuildAdmissionOptions,
+  type BuildConfig,
+  type BuildPlan,
+  type BuildPlanInput,
+  type BuildProvider,
+  type BuildRecipeConfig,
+  type BuildStep,
+  type ProviderBuild,
+  type ProviderBuildStatus,
+  type SourceReadAccess,
+} from "./build-admission.js";
+export { CloudBuildProvider, toProviderBuild, type CloudBuildProviderOptions } from "./cloud-build.js";
+export { MemoryBuildProvider, type SimulatedBuildResult } from "./memory-build.js";
 export { hostedSigningIdentity } from "./identity.js";
 export { cloudRunInvocationToken, type CloudRunInvocationOptions } from "./cloud-run.js";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
