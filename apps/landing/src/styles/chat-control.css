@@ -1,0 +1,60 @@
+.chat-control-layout { display: grid; grid-template-columns: 1fr 1.15fr; align-items: center; gap: 65px; }
+.chat-control-copy h2 { margin-top: 17px; font-size: clamp(34px, 3.8vw, 48px); }
+.chat-control-copy > p { margin-top: 22px; font-size: 16px; color: #75656c; }
+.chat-control-visual { margin: 0; min-width: 0; }
+.business-chat { background: #fffcf7; border: 1.5px solid #b7a28a; border-radius: 15px; box-shadow: 5px 6px 0 #d9cdbd; overflow: hidden; }
+.business-chat-header { display: flex; align-items: center; gap: 9px; padding: 16px 21px; border-bottom: 1px solid #e5dacf; background: #faf4e9; }
+.business-chat-header > strong { font: 600 25px var(--font-display); letter-spacing: -.7px; }
+.chat-preview-label { margin-left: auto; font-size: 8px; letter-spacing: 1px; color: #8b796c; }
+.business-chat-thread { padding: 23px 21px 20px; }
+.chat-message { display: flex; flex-direction: column; }
+.chat-speaker { font-size: 10px; font-weight: 600; color: #7b687f; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.business-chat .user-message { align-items: flex-end; margin: 0 0 0 45px; padding: 0; border: 0; background: none; border-radius: 0; }
+.chat-bubble { padding: 16px; border: 1px solid #ded2c0; border-radius: 2px 13px 13px 13px; background: #fffdf9; }
+.chat-bubble p { font-size: 14px; line-height: 1.65; }
+.user-message .chat-bubble { background: #ece2f3; border-color: #d8c5e3; border-radius: 13px 2px 13px 13px; }
+.assistant-message { margin-top: 24px; margin-right: 15px; }
+.chat-assistant-icon { color: #ab813e; font-size: 18px; }
+.chat-app-actions { display: grid; gap: 0; margin-top: 16px; border: 1px solid #e3d8c8; border-radius: 8px; overflow: hidden; }
+.chat-app-action { display: grid; grid-template-columns: 25px 52px minmax(0, 1fr); align-items: center; gap: 9px; padding: 10px; border-bottom: 1px solid #e9dfd1; background: #fffbf3; }
+.chat-app-action:last-child { border-bottom: 0; }
+.chat-app-icon { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 6px; background: #f9e4c4; font-size: 19px; color: #a8763e; }
+.chat-tasks .chat-app-icon { color: #67884b; background: #e4edd9; }
+.chat-billing .chat-app-icon { color: #9873aa; background: #ece0f1; }
+.chat-app-action > strong { font-size: 11px; font-weight: 600; }
+.chat-app-action > span:last-child { font-size: 11px; color: #76616e; }
+.chat-review { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; margin-top: 14px; }
+.chat-approval-preview { display: inline-flex; align-items: center; gap: 22px; background: #ffca70; border: 1px solid #aa8149; border-radius: 6px; padding: 10px 13px; font-size: 11px; font-weight: 600; }
+.chat-review > span:last-child { font-size: 9px; color: #86776d; }
+.chat-composer { margin: 0 21px 19px; border: 1px solid #e2d7c6; border-radius: 9px; background: #f7f3ec; padding: 11px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #948678; font-size: 12px; }
+.chat-send-preview { display: grid; place-items: center; width: 27px; height: 27px; background: #e4dbcf; border-radius: 6px; font-size: 18px; }
+.chat-control-visual figcaption { text-align: center; font-size: 9px; line-height: 1.7; color: #837581; margin-top: 16px; }
+@media (max-width: 1050px) {
+  .chat-control-layout { gap: 30px; }
+  .business-chat-thread { padding-inline: 16px; }
+  .business-chat .user-message { margin-left: 25px; }
+  .assistant-message { margin-right: 0; }
+  .chat-bubble { padding: 13px; }
+}
+@media (max-width: 760px) {
+  .chat-control-layout { grid-template-columns: 1fr; gap: 28px; }
+  .chat-control-copy { text-align: center; }
+  .chat-control-copy h2 { font-size: 38px; }
+  .chat-control-copy > p { font-size: 14px; margin-top: 16px; }
+  .business-chat-header { padding: 13px 16px; }
+  .business-chat-thread { padding: 18px 13px; }
+  .chat-bubble p { font-size: 13px; }
+  .chat-app-action { grid-template-columns: 23px 43px minmax(0, 1fr); gap: 7px; padding: 9px 8px; }
+  .chat-app-action > strong, .chat-app-action > span:last-child { font-size: 10px; }
+  .chat-composer { margin: 0 13px 14px; font-size: 11px; }
+  .chat-control-visual figcaption { font-size: 8px; }
+}
+@media (max-width: 360px) {
+  .chat-control-copy h2 { font-size: 33px; }
+  .business-chat .user-message { margin-left: 14px; }
+  .chat-bubble { padding: 11px; }
+  .chat-bubble p { font-size: 12px; }
+  .chat-app-action { gap: 5px; padding-inline: 6px; grid-template-columns: 23px 38px minmax(0, 1fr); }
+  .chat-app-action > strong, .chat-app-action > span:last-child { font-size: 9px; }
+  .chat-review > span:last-child { font-size: 8px; }
+}

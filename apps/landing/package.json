@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "deploy": "pnpm build && npx firebase-tools deploy --project nimrod-experiments --only hosting:embody"
+    "deploy": "pnpm build && npx firebase-tools deploy --project nimrod-experiments --only hosting:embody",
+    "deploy:preview": "pnpm build && npx firebase-tools deploy --project nimrod-experiments --config firebase.preview.json --only hosting"
   },
   "dependencies": {
     "gsap": "^3.15.0",
