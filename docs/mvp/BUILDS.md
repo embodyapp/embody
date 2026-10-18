@@ -73,17 +73,17 @@ A rejected artifact has no image reference or manifest, its public status has no
 
 | Identity | Holds | Never holds |
 |---|---|---|
-| Builder (`<prefix>-builder`) | `artifactregistry.writer` on the builds repository; `artifactregistry.reader` on the platform repository (recipe image); `storage.objectCreator` on the outputs bucket | source bucket access, any project role, Secret Manager, Cloud SQL, Cloud Run, IAM, `actAs` |
+| Builder (`<prefix>-builder`) | `artifactregistry.writer` on the builds repository; `artifactregistry.reader` on the platform repository (recipe image); `storage.objectCreator` on the outputs bucket (manifests and SBOMs are create-only); `storage.legacyBucketReader` and `storage.objectUser` on the separate logs bucket (Cloud Build requires bucket access for a user-specified logs bucket and rewrites the log object during the build) | source bucket access, any project role, Secret Manager, Cloud SQL, Cloud Run, IAM, `actAs` |
 | Source read signer (`<prefix>-src-read`) | `storage.objectViewer` on the source bucket; signs only the builder's GET URL | write, delete, any other bucket |
 | Controller (M12; the operator in the live run) | `cloudbuild.builds.create`/`get`/`cancel`, `actAs` on the builder only, `signBlob` on the read signer, delete on the builds repository and outputs bucket | `actAs` on any runtime identity for builds |
 
 The builds repository uses immutable tags, so no build can overwrite another artifact's tag. Admission binds the digest from the provider's own record, so pushing under another app's path cannot make another app admit it.
 
-**Residual risk:** a container escape on the build VM (a kernel or runc exploit) would reach the builder's token: push images to the builds repository and create objects in the outputs bucket. It cannot read sources, read secrets, reach databases or deploy, and the escaped build's own artifact is still bound to its own digest. Cloud Build runs each build on a fresh VM. The upgrade path is a private pool with no public egress plus a registry mirror for the prepare step (same per-minute price, more setup).
+**Residual risk:** a container escape on the build VM (a kernel or runc exploit) would reach the builder's token: push images to the builds repository, create objects in the outputs bucket and rewrite logs in the logs bucket. It cannot read sources, read secrets, reach databases or deploy, and the escaped build's own artifact is still bound to its own digest. Cloud Build runs each build on a fresh VM. The upgrade path is a private pool with no public egress plus a registry mirror for the prepare step (same per-minute price, more setup).
 
 ## Logs
 
-Build logs are written by the provider to `gs://<outputs>/logs/<ws>/<app>/<artifact>/` (`GCS_ONLY`; no Cloud Logging ingestion). The sandbox's output is cut at 1 MiB. `BuildAdmission.log` returns at most 1 MiB with known platform values and secret-shaped strings (private keys, Google/GitHub/AWS/Slack/OpenAI-style tokens, bearer headers, signed URLs, database URLs) replaced by `[REDACTED]`. Builds receive no platform secrets; redaction is defense in depth. M15 serves logs to `deployment:read` callers.
+Build logs are written by the provider to `gs://<logs bucket>/logs/<ws>/<app>/<artifact>/` (`GCS_ONLY`; no Cloud Logging ingestion), a bucket separate from the create-only outputs because Cloud Build rewrites the log object while a build runs. Logs are never admission inputs, so the builder's write access there cannot change what is admitted; an escaped build could alter or delete other builds' logs (diagnostics only). The sandbox's output is cut at 1 MiB. `BuildAdmission.log` returns at most 1 MiB with known platform values and secret-shaped strings (private keys, Google/GitHub/AWS/Slack/OpenAI-style tokens, bearer headers, signed URLs, database URLs) replaced by `[REDACTED]`. Builds receive no platform secrets; redaction is defense in depth. M15 serves logs to `deployment:read` callers.
 
 ## Retention and cleanup
 

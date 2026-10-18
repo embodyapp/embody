@@ -32,6 +32,7 @@ export function m11Names(project, prefix, runId) {
     buildsRepo: `${prefix}-builds-${runId}`,
     sourceBucket: `${prefix}-src-${runId}`,
     outputBucket: `${prefix}-out-${runId}`,
+    logsBucket: `${prefix}-log-${runId}`,
     job: `${prefix}-run-${runId}`,
   };
 }
@@ -125,12 +126,9 @@ export function createM11GcpProvider({
   }
   async function addBinding(getUrl, setUrl, role, member, wrap = (policy) => ({ policy })) {
     await eventually(async () => {
-      const policy =
-        (await api(
-          getUrl,
-          getUrl.endsWith(":getIamPolicy") ? "POST" : "GET",
-          getUrl.endsWith(":getIamPolicy") ? {} : undefined,
-        )) ?? {};
+      // IAM service accounts take POST :getIamPolicy; Artifact Registry takes GET; buckets GET /iam.
+      const post = getUrl.endsWith(":getIamPolicy") && getUrl.startsWith(IAM);
+      const policy = (await api(getUrl, post ? "POST" : "GET", post ? {} : undefined)) ?? {};
       policy.bindings = [...(policy.bindings ?? []), { role, members: [member] }];
       await api(
         setUrl,
@@ -229,7 +227,7 @@ export function createM11GcpProvider({
             },
           ),
         );
-      for (const bucket of [n.sourceBucket, n.outputBucket])
+      for (const bucket of [n.sourceBucket, n.outputBucket, n.logsBucket])
         await api(`${STORAGE}/b?project=${project}`, "POST", {
           name: bucket,
           location: "US-CENTRAL1",
@@ -263,6 +261,21 @@ export function createM11GcpProvider({
         "roles/storage.objectCreator",
         sa(n.builder.email),
       );
+      // Logs: Cloud Build refuses a user-specified logs bucket the build identity cannot get
+      // (FAILED_PRECONDITION) and rewrites the log object while the build runs, so the builder
+      // gets bucket get/list plus object create/update/delete here, and nowhere else.
+      await addBinding(
+        `${STORAGE}/b/${n.logsBucket}/iam`,
+        `${STORAGE}/b/${n.logsBucket}/iam`,
+        "roles/storage.legacyBucketReader",
+        sa(n.builder.email),
+      );
+      await addBinding(
+        `${STORAGE}/b/${n.logsBucket}/iam`,
+        `${STORAGE}/b/${n.logsBucket}/iam`,
+        "roles/storage.objectUser",
+        sa(n.builder.email),
+      );
       // Read signer: object read on sources only; the operator (as controller) may sign as it.
       await addBinding(
         `${STORAGE}/b/${n.sourceBucket}/iam`,
@@ -285,9 +298,23 @@ export function createM11GcpProvider({
       const config = await mkdtemp(join(recipeContext, "..", "docker-config-"));
       try {
         // Short-lived operator token in a throwaway Docker config; nothing persists.
+        // The throwaway config keeps the operator's plugins and current Docker endpoint.
+        const home = process.env.HOME ?? "";
+        const { stdout: dockerHost } = await exec("docker", [
+          "context",
+          "inspect",
+          "--format",
+          "{{.Endpoints.docker.Host}}",
+        ]);
         await writeFile(
           join(config, "config.json"),
           JSON.stringify({
+            cliPluginsExtraDirs: [
+              join(home, ".docker/cli-plugins"),
+              "/Applications/Docker.app/Contents/Resources/cli-plugins",
+              "/usr/local/lib/docker/cli-plugins",
+              "/usr/libexec/docker/cli-plugins",
+            ],
             auths: {
               [repoHost]: {
                 auth: Buffer.from(`oauth2accesstoken:${await accessToken()}`).toString("base64"),
@@ -296,7 +323,7 @@ export function createM11GcpProvider({
           }),
           { mode: 0o600 },
         );
-        const env = { ...process.env, DOCKER_CONFIG: config };
+        const env = { ...process.env, DOCKER_CONFIG: config, DOCKER_HOST: dockerHost.trim() };
         const base = `${repoHost}/${project}/${context.recipeRepo}`;
         await run(
           "docker",
@@ -369,6 +396,7 @@ export function createM11GcpProvider({
         ...collect("buildsRepo", await api(`${AR}/${repoPath(context.buildsRepo)}:getIamPolicy`)),
         ...collect("recipeRepo", await api(`${AR}/${repoPath(context.recipeRepo)}:getIamPolicy`)),
         ...collect("outputBucket", await api(`${STORAGE}/b/${context.outputBucket}/iam`)),
+        ...collect("logsBucket", await api(`${STORAGE}/b/${context.logsBucket}/iam`)),
         ...collect("sourceBucket", await api(`${STORAGE}/b/${context.sourceBucket}/iam`)),
         ...collect(
           "builderSelf",
@@ -470,7 +498,7 @@ export function createM11GcpProvider({
         );
         removed.push("job");
       }
-      for (const bucket of [n.sourceBucket, n.outputBucket]) {
+      for (const bucket of [n.sourceBucket, n.outputBucket, n.logsBucket]) {
         if (!(await api(`${STORAGE}/b/${bucket}?fields=name`))) continue;
         let pageToken;
         do {
@@ -506,7 +534,7 @@ export function createM11GcpProvider({
         `${STORAGE}/b?project=${project}&prefix=${approval.prefix}-&fields=items(name)`,
       );
       for (const item of buckets?.items ?? [])
-        if (/-(src|out)-[a-f0-9]{6}$/.test(item.name)) leftovers.push(`bucket:${item.name}`);
+        if (/-(src|out|log)-[a-f0-9]{6}$/.test(item.name)) leftovers.push(`bucket:${item.name}`);
       const repos = await api(
         `${AR}/projects/${project}/locations/${M11_REGION}/repositories?pageSize=200`,
       );

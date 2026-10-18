@@ -35,8 +35,13 @@ export interface BuildRecipeConfig {
   readonly runtimeImage: string;
   /** Docker repository for app images, e.g. `us-central1-docker.pkg.dev/p/repo`. */
   readonly imageRepository: string;
-  /** Private bucket for build outputs (manifest, SBOM) and logs. */
+  /** Private bucket for build outputs (manifest, SBOM); the builder may only create objects. */
   readonly outputBucket: string;
+  /**
+   * Private bucket for provider build logs. Separate from outputs because Cloud Build rewrites
+   * the log object while a build runs, so the builder needs object update/delete there.
+   */
+  readonly logsBucket: string;
 }
 const PINNED = /^[a-z0-9.-]+(:\d+)?(\/[a-z0-9._-]+)+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$/;
 export function assertRecipeConfig(config: BuildRecipeConfig): void {
@@ -50,7 +55,9 @@ export function assertRecipeConfig(config: BuildRecipeConfig): void {
     /^[a-z0-9-]+-docker\.pkg\.dev\/[a-z][a-z0-9-]{4,28}[a-z0-9]\/[a-z][a-z0-9-]{0,62}$/.test(
       config.imageRepository,
     ) &&
-    /^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/.test(config.outputBucket);
+    /^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/.test(config.outputBucket) &&
+    /^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/.test(config.logsBucket) &&
+    config.logsBucket !== config.outputBucket;
   if (!ok) throw new TypeError("Invalid build recipe configuration (images must be pinned)");
 }
 
@@ -268,7 +275,7 @@ export function planBuild(recipe: BuildRecipeConfig, input: BuildPlanInput): Bui
       },
     },
     serviceAccount: `projects/${recipe.project}/serviceAccounts/${recipe.builderServiceAccount}`,
-    logsBucket: `gs://${recipe.outputBucket}/logs/${path}/${input.artifactId}`,
+    logsBucket: `gs://${recipe.logsBucket}/logs/${path}/${input.artifactId}`,
     options: { logging: "GCS_ONLY", substitutionOption: "MUST_MATCH" },
     timeout: `${BUILD_RECIPE.maxBuildSeconds}s`,
     tags: ["embody-build", `embody-${input.artifactId.replace("_", "-")}`],
@@ -316,8 +323,10 @@ export interface BuildProvider {
   /** Reads `<outputBucket>/<path>`; null when absent; fails above `maxBytes`. */
   readOutput(path: string, maxBytes: number): Promise<Uint8Array | null>;
   deleteOutputs(prefix: string): Promise<void>;
-  /** Reads the provider log written under `<outputBucket>/logs/...` for this build. */
+  /** Reads the provider log written under the build's `logsBucket` location. */
   readLog(buildId: string, logsBucket: string, maxBytes: number): Promise<string | null>;
+  /** Deletes every log object under a build's `logsBucket` location. */
+  deleteLogs(logsBucket: string): Promise<void>;
   /** Idempotent; deletes one image version by digest under `<repository>/<ws>/<app>`. */
   deleteImage(path: string, digest: string): Promise<void>;
   listImages(
@@ -875,8 +884,6 @@ async function removeBuildOutputs(
     await provider.deleteImage(`${record.workspaceId}/${record.appId}`, record.imageDigest);
   await provider.deleteOutputs(record.outputPrefix);
 }
-const logsPrefix = (record: Pick<ArtifactRecord, "logsBucket">) =>
-  `${record.logsBucket.replace(/^gs:\/\/[^/]+\//, "")}/`;
 
 /**
  * Retention sweep (M16 schedules it). Like source purges: fence by CAS, delete the image,
@@ -915,7 +922,7 @@ export async function purgeArtifacts(options: {
         }
       }
       await removeBuildOutputs(options.provider, fenced);
-      await options.provider.deleteOutputs(logsPrefix(fenced));
+      await options.provider.deleteLogs(fenced.logsBucket);
       if (await options.store.deleteArtifact(fenced)) deleted += 1;
       else skipped += 1;
     } catch {

@@ -102,32 +102,50 @@ export class CloudBuildProvider implements BuildProvider {
     if (!response.ok && response.status !== 400)
       throw new BuildProviderError("Build cancel failed");
   }
-  private object(path: string): string {
+  private object(path: string, bucket = this.recipe.outputBucket): string {
     if (!/^(builds|logs)\/[A-Za-z0-9_./-]{1,400}$/.test(path) || path.includes(".."))
       throw new TypeError("Invalid output path");
-    return `https://storage.googleapis.com/storage/v1/b/${this.recipe.outputBucket}/o/${encodeURIComponent(path)}`;
+    return `https://storage.googleapis.com/storage/v1/b/${bucket}/o/${encodeURIComponent(path)}`;
+  }
+  private logPath(logsBucket: string): string {
+    const prefix = `gs://${this.recipe.logsBucket}/`;
+    const path = logsBucket.startsWith(prefix) ? logsBucket.slice(prefix.length) : "";
+    if (!/^logs\/ws_[a-z0-9]+\/app_[a-z0-9]+\/art_[a-z0-9]+$/.test(path))
+      throw new TypeError("Invalid log location");
+    return path;
   }
   public async readOutput(path: string, maxBytes: number): Promise<Uint8Array | null> {
-    const response = await this.call(`${this.object(path)}?alt=media`, {
+    return this.read(this.object(path), maxBytes);
+  }
+  private async read(url: string, maxBytes: number): Promise<Uint8Array | null> {
+    const response = await this.call(`${url}?alt=media`, {
       headers: { range: `bytes=0-${maxBytes}` },
     });
     if (response.status === 404) return null;
+    // A ranged read of an empty object (a log the provider created but never wrote) is 416.
+    if (response.status === 416) return new Uint8Array();
     if (!response.ok) throw new BuildProviderError("Build output unavailable");
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength > maxBytes) throw new BuildProviderError("Build output too large");
     return bytes;
   }
   public async deleteOutputs(prefix: string): Promise<void> {
-    if (!/^(builds|logs)\/ws_[a-z0-9]+\/app_[a-z0-9]+\/art_[a-z0-9]+\/$/.test(prefix))
+    if (!/^builds\/ws_[a-z0-9]+\/app_[a-z0-9]+\/art_[a-z0-9]+\/$/.test(prefix))
       throw new TypeError("Invalid output prefix");
+    await this.deletePrefix(this.recipe.outputBucket, prefix);
+  }
+  public async deleteLogs(logsBucket: string): Promise<void> {
+    await this.deletePrefix(this.recipe.logsBucket, `${this.logPath(logsBucket)}/`);
+  }
+  private async deletePrefix(bucket: string, prefix: string): Promise<void> {
     const list = await this.json(
-      `https://storage.googleapis.com/storage/v1/b/${this.recipe.outputBucket}/o?prefix=${encodeURIComponent(prefix)}&fields=items(name)`,
+      `https://storage.googleapis.com/storage/v1/b/${bucket}/o?prefix=${encodeURIComponent(prefix)}&fields=items(name)`,
     );
     const items = Array.isArray(list["items"]) ? (list["items"] as { name?: unknown }[]) : [];
     for (const item of items) {
       const name = str(item.name);
       if (!name.startsWith(prefix)) continue;
-      const response = await this.call(this.object(name), { method: "DELETE" });
+      const response = await this.call(this.object(name, bucket), { method: "DELETE" });
       if (!response.ok && response.status !== 404)
         throw new BuildProviderError("Build output delete failed");
     }
@@ -137,11 +155,9 @@ export class CloudBuildProvider implements BuildProvider {
     logsBucket: string,
     maxBytes: number,
   ): Promise<string | null> {
-    const prefix = `gs://${this.recipe.outputBucket}/`;
-    if (!BUILD_ID.test(buildId) || !logsBucket.startsWith(prefix))
-      throw new TypeError("Invalid log location");
-    const bytes = await this.readOutput(
-      `${logsBucket.slice(prefix.length)}/log-${buildId}.txt`,
+    if (!BUILD_ID.test(buildId)) throw new TypeError("Invalid build ID");
+    const bytes = await this.read(
+      this.object(`${this.logPath(logsBucket)}/log-${buildId}.txt`, this.recipe.logsBucket),
       maxBytes,
     );
     return bytes ? Buffer.from(bytes).toString("utf8") : null;

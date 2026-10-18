@@ -84,6 +84,8 @@ test("M11 cloud gate refuses budgets above $5 and combined suites before any clo
 test("builder IAM must be exactly push, recipe read and output create", () => {
   const exact = [
     "buildsRepo:roles/artifactregistry.writer",
+    "logsBucket:roles/storage.legacyBucketReader",
+    "logsBucket:roles/storage.objectUser",
     "outputBucket:roles/storage.objectCreator",
     "recipeRepo:roles/artifactregistry.reader",
   ];

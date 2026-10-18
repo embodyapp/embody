@@ -183,7 +183,7 @@ export class LocalBuildProvider {
       build.status = "SUCCESS";
     }
     build.finishTime = new Date().toISOString();
-    const logs = build.config.logsBucket.replace(`gs://${this.outputBucket}/`, "");
+    const logs = build.config.logsBucket.replace(/^gs:\/\/[^/]+\//, "");
     const logFile = join(this.bucketDir, logs, `log-${build.id}.txt`);
     await mkdir(dirname(logFile), { recursive: true });
     const { writeFile } = await import("node:fs/promises");
@@ -244,9 +244,12 @@ export class LocalBuildProvider {
   async deleteOutputs(prefix) {
     await rm(join(this.bucketDir, prefix), { recursive: true, force: true });
   }
+  async deleteLogs(logsBucket) {
+    await rm(join(this.bucketDir, logsBucket.replace(/^gs:\/\/[^/]+\//, "")), { recursive: true, force: true });
+  }
   async readLog(buildId, logsBucket, maxBytes) {
     const bytes = await this.readOutput(
-      `${logsBucket.replace(`gs://${this.outputBucket}/`, "")}/log-${buildId}.txt`,
+      `${logsBucket.replace(/^gs:\/\/[^/]+\//, "")}/log-${buildId}.txt`,
       maxBytes,
     );
     return bytes ? Buffer.from(bytes).toString("utf8") : null;

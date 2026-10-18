@@ -74,6 +74,7 @@ await main("m11-local", async () => {
       runtimeImage: RUNTIME_IMAGE,
       imageRepository: "us-central1-docker.pkg.dev/embody-m11-local/builds",
       outputBucket: "embody-m11-local-outputs",
+      logsBucket: "embody-m11-local-logs",
     };
 
     // Source objects behind a host HTTP endpoint the prepare container reaches.

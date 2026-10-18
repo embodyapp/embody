@@ -117,6 +117,9 @@ export class MemoryBuildProvider implements BuildProvider {
     const bytes = await this.readOutput(`${logs}/log-${buildId}.txt`, maxBytes);
     return bytes ? Buffer.from(bytes).toString("utf8") : null;
   }
+  public deleteLogs(logsBucket: string): Promise<void> {
+    return this.deleteOutputs(`${logsBucket.replace(/^gs:\/\/[^/]+\//, "")}/`);
+  }
   public deleteImage(path: string, digest: string): Promise<void> {
     this.check();
     this.deletedImages.push(`${path}@${digest}`);

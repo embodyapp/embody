@@ -16,6 +16,7 @@ export const M11_LIMITS = Object.freeze({
   /** Builds, recipe image and base copy for a day, Cloud Run job seconds, GCS and egress. */
   fixedUsd: 0.25,
   buildWaitMs: 45 * 60_000,
+  propagationMs: 8 * 60_000,
 });
 
 /** Guards for suite m11. Throws before any cloud call. */
@@ -67,6 +68,8 @@ export const M11_PROVIDER_METHODS = Object.freeze([
 export function evaluateBuilderBindings(bindings) {
   const expected = [
     "buildsRepo:roles/artifactregistry.writer",
+    "logsBucket:roles/storage.legacyBucketReader",
+    "logsBucket:roles/storage.objectUser",
     "outputBucket:roles/storage.objectCreator",
     "recipeRepo:roles/artifactregistry.reader",
   ];
@@ -158,6 +161,7 @@ export async function runM11Suite(env, provider, deps) {
       runtimeImage: images.runtimeImage,
       imageRepository: `us-central1-docker.pkg.dev/${approval.project}/${context.buildsRepo}`,
       outputBucket: context.outputBucket,
+      logsBucket: context.logsBucket,
     };
     registry = await deps.startFrameworkRegistry(join(recipeDir, "framework"), framework);
     const cloudBuild = provider.buildProvider(recipe);
@@ -182,12 +186,32 @@ export async function runM11Suite(env, provider, deps) {
       const repo = await provider.repositoryConfig(context);
       return { pass: repo.immutableTags, ...repo };
     });
+    // A fresh read signer's tokenCreator grant propagates slowly (M10 saw minutes).
+    const sources = provider.sources(context);
+    await record("propagation", async () => {
+      const started = Date.now();
+      let attempts = 0;
+      for (;;) {
+        attempts += 1;
+        try {
+          await sources.createReadAccess({
+            objectKey: `sources/ws_m11warm000/app_m11warm000/src_m11warm000.tar.gz`,
+            expiresAt: new Date(Date.now() + 60_000),
+          });
+          return { pass: true, attempts, seconds: Math.round((Date.now() - started) / 1000) };
+        } catch {
+          if (Date.now() - started > M11_LIMITS.propagationMs) return { pass: false, attempts };
+          await provider.wait(15_000);
+        }
+      }
+    });
+    if (!cases.propagation.pass) throw new Error("Read signer IAM did not propagate");
     suite = await runM11Cases({
       gateway: deps.gateway,
       contracts: deps.contracts,
       createApp: deps.createApp,
       provider: counted,
-      sources: provider.sources(context),
+      sources,
       store: new deps.gateway.MemoryGatewayStore(),
       recipe,
       registryUrl: registry.url,

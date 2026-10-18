@@ -39,6 +39,7 @@ const recipe: BuildRecipeConfig = {
   runtimeImage: `docker.io/library/node:24-bookworm-slim@${pin("node")}`,
   imageRepository: "us-central1-docker.pkg.dev/embody-cloud/builds",
   outputBucket: "embody-build-outputs",
+  logsBucket: "embody-build-logs",
 };
 
 const followUp = defineWorkflow(z.object({ title: z.string() }))({
