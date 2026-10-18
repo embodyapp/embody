@@ -16,7 +16,8 @@ async function importPackage(name) {
 const core = await importPackage("@embody/core");
 const host = await importPackage("@embody/host");
 const config = (await import(pathToFileURL(join(APP, "dist/embody.config.js")).href)).default;
-if (!config || !Array.isArray(config.plugins)) throw new Error("embody.config default export must be defineApp(...)");
+if (!config || !Array.isArray(config.plugins))
+  throw new Error("embody.config default export must be defineApp(...)");
 const passes = (check) => {
   try {
     check(config.plugins);

@@ -132,7 +132,11 @@ export class CloudBuildProvider implements BuildProvider {
         throw new BuildProviderError("Build output delete failed");
     }
   }
-  public async readLog(buildId: string, logsBucket: string, maxBytes: number): Promise<string | null> {
+  public async readLog(
+    buildId: string,
+    logsBucket: string,
+    maxBytes: number,
+  ): Promise<string | null> {
     const prefix = `gs://${this.recipe.outputBucket}/`;
     if (!BUILD_ID.test(buildId) || !logsBucket.startsWith(prefix))
       throw new TypeError("Invalid log location");
@@ -168,13 +172,17 @@ export class CloudBuildProvider implements BuildProvider {
     const response = await this.call(`${this.packageUrl(path)}/versions?pageSize=500`);
     if (response.status === 404) return [];
     if (!response.ok) throw new BuildProviderError("Image list failed");
-    const body = (await response.json()) as { versions?: { name?: unknown; createTime?: unknown }[] };
+    const body = (await response.json()) as {
+      versions?: { name?: unknown; createTime?: unknown }[];
+    };
     return (body.versions ?? [])
       .map((v) => ({
         digest: decodeURIComponent(str(v.name).split("/versions/")[1] ?? ""),
         createdAt: str(v.createTime),
       }))
-      .filter((v) => /^sha256:[a-f0-9]{64}$/.test(v.digest) && Number.isFinite(Date.parse(v.createdAt)));
+      .filter(
+        (v) => /^sha256:[a-f0-9]{64}$/.test(v.digest) && Number.isFinite(Date.parse(v.createdAt)),
+      );
   }
 }
 

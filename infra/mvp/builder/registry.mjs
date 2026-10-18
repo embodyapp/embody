@@ -5,6 +5,8 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+const { URL } = globalThis;
+
 /** `framework` entries: { name, version, integrity, file } with `file` relative to `dir`. */
 export async function startFrameworkRegistry(dir, framework) {
   const byName = new Map(framework.map((p) => [p.name, p]));
@@ -12,7 +14,8 @@ export async function startFrameworkRegistry(dir, framework) {
     void (async () => {
       const url = new URL(request.url ?? "/", "http://registry.invalid");
       const path = decodeURIComponent(url.pathname).replace(/^\//, "");
-      const tarball = /^(@embody\/[a-z0-9-]+)\/-\/[a-z0-9-]+-(\d+\.\d+\.\d+[0-9A-Za-z.+-]*)\.tgz$/.exec(path);
+      const tarball =
+        /^(@embody\/[a-z0-9-]+)\/-\/[a-z0-9-]+-(\d+\.\d+\.\d+[0-9A-Za-z.+-]*)\.tgz$/.exec(path);
       if (request.method === "GET" && tarball) {
         const pkg = byName.get(tarball[1]);
         if (!pkg || pkg.version !== tarball[2]) return void response.writeHead(404).end();

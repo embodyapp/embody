@@ -345,9 +345,7 @@ export class GcsSourceObjectStore implements SourceObjectStore {
       .sort()
       .map((key) => `${rfc3986(key)}=${rfc3986(query[key]!)}`)
       .join("&");
-    const canonicalHeaders = names
-      .map((name) => `${name}:${signed[name]!.trim()}\n`)
-      .join("");
+    const canonicalHeaders = names.map((name) => `${name}:${signed[name]!.trim()}\n`).join("");
     const canonicalRequest = [
       read ? "GET" : "PUT",
       path,
@@ -386,11 +384,14 @@ export class GcsSourceObjectStore implements SourceObjectStore {
   }
   public async createUploadAccess(request: SourceUploadAccessRequest): Promise<SourceUploadAccess> {
     const { url, stringToSign, headers } = this.canonical(request);
-    url.searchParams.set("X-Goog-Signature", await this.signBlob(this.options.signerEmail, stringToSign));
+    url.searchParams.set(
+      "X-Goog-Signature",
+      await this.signBlob(this.options.signerEmail, stringToSign),
+    );
     return {
       method: "PUT",
       url: url.href,
-      headers: headers as SourceUploadAccess["headers"],
+      headers,
       expiresAt: request.expiresAt.toISOString(),
     };
   }

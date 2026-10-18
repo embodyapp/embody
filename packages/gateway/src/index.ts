@@ -67,7 +67,11 @@ export {
   type ProviderBuildStatus,
   type SourceReadAccess,
 } from "./build-admission.js";
-export { CloudBuildProvider, toProviderBuild, type CloudBuildProviderOptions } from "./cloud-build.js";
+export {
+  CloudBuildProvider,
+  toProviderBuild,
+  type CloudBuildProviderOptions,
+} from "./cloud-build.js";
 export { MemoryBuildProvider, type SimulatedBuildResult } from "./memory-build.js";
 export { hostedSigningIdentity } from "./identity.js";
 export { cloudRunInvocationToken, type CloudRunInvocationOptions } from "./cloud-run.js";

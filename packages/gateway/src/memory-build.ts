@@ -104,10 +104,15 @@ export class MemoryBuildProvider implements BuildProvider {
   public deleteOutputs(prefix: string): Promise<void> {
     this.check();
     this.deletedPrefixes.push(prefix);
-    for (const key of [...this.outputs.keys()]) if (key.startsWith(prefix)) this.outputs.delete(key);
+    for (const key of [...this.outputs.keys()])
+      if (key.startsWith(prefix)) this.outputs.delete(key);
     return Promise.resolve();
   }
-  public async readLog(buildId: string, logsBucket: string, maxBytes: number): Promise<string | null> {
+  public async readLog(
+    buildId: string,
+    logsBucket: string,
+    maxBytes: number,
+  ): Promise<string | null> {
     const logs = logsBucket.replace(/^gs:\/\/[^/]+\//, "");
     const bytes = await this.readOutput(`${logs}/log-${buildId}.txt`, maxBytes);
     return bytes ? Buffer.from(bytes).toString("utf8") : null;

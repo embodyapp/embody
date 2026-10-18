@@ -720,7 +720,7 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
           "SELECT tableowner=current_user AS owned FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'embody_platform_%'",
         )
       ).rows;
-      expect(tables).toHaveLength(6);
+      expect(tables).toHaveLength(7);
       expect(tables.every((row) => !row.owned)).toBe(true);
       await expect(store.migrate()).rejects.toThrow("maintenance authority");
       await expect(

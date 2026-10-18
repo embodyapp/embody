@@ -17,8 +17,7 @@ import {
   type FrameworkPackage,
 } from "../src/index.js";
 
-const integrity = (seed: string) =>
-  `sha512-${createHash("sha512").update(seed).digest("base64")}`;
+const integrity = (seed: string) => `sha512-${createHash("sha512").update(seed).digest("base64")}`;
 const framework: FrameworkPackage[] = [
   { name: "@embody/core", version: "0.1.0", integrity: integrity("core") },
   { name: "@embody/host", version: "0.1.0", integrity: integrity("host") },
@@ -116,7 +115,11 @@ describe("M11 build input policy (trusted, data only)", () => {
     ])
       expect(
         reason(() =>
-          check(packageJson({ dependencies: { "@embody/core": "^0.1.0", "@embody/host": "^0.1.0", x: spec } })),
+          check(
+            packageJson({
+              dependencies: { "@embody/core": "^0.1.0", "@embody/host": "^0.1.0", x: spec },
+            }),
+          ),
         ),
       ).toBe("INPUT_REJECTED");
     expect(reason(() => check("{"))).toBe("INPUT_REJECTED");
@@ -131,16 +134,18 @@ describe("M11 build input policy (trusted, data only)", () => {
     expect(reason(() => check(packageJson({ packageManager: "npm@11.0.0" })))).toBe(
       "UNSUPPORTED_RUNTIME",
     );
-    expect(reason(() => check(packageJson({ packageManager: `pnpm@${BUILD_RECIPE.pnpmVersion}` })))).toBe(
-      "accepted",
-    );
     expect(
-      reason(() => check(packageJson({ dependencies: { "@embody/core": "^0.1.0" } }))),
-    ).toBe("UNSUPPORTED_RUNTIME");
+      reason(() => check(packageJson({ packageManager: `pnpm@${BUILD_RECIPE.pnpmVersion}` }))),
+    ).toBe("accepted");
+    expect(reason(() => check(packageJson({ dependencies: { "@embody/core": "^0.1.0" } })))).toBe(
+      "UNSUPPORTED_RUNTIME",
+    );
   });
   it("rejects missing, stale, non-registry and foreign-framework lockfiles", () => {
     expect(
-      reason(() => checkBuildInputs({ packageJson: packageJson(), lockfile: undefined, framework })),
+      reason(() =>
+        checkBuildInputs({ packageJson: packageJson(), lockfile: undefined, framework }),
+      ),
     ).toBe("LOCKFILE_REJECTED");
     expect(reason(() => check(packageJson(), "lockfileVersion: '6.0'\n"))).toBe(
       "LOCKFILE_REJECTED",
@@ -168,7 +173,10 @@ describe("M11 build input policy (trusted, data only)", () => {
     expect(reason(() => check(packageJson(), linked))).toBe("LOCKFILE_REJECTED");
     const directory = lockfile("\n  local@file:../local:\n    resolution: {directory: ../local}\n");
     expect(reason(() => check(packageJson(), directory))).toBe("LOCKFILE_REJECTED");
-    const weak = lockfile().replace(integrity("zod"), "sha1-abcdefabcdefabcdefabcdefabcdefabcdefabcd");
+    const weak = lockfile().replace(
+      integrity("zod"),
+      "sha1-abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    );
     expect(reason(() => check(packageJson(), weak))).toBe("LOCKFILE_REJECTED");
     expect(reason(() => check(packageJson(), `overrides:\n  zod: 4.0.0\n${lockfile()}`))).toBe(
       "LOCKFILE_REJECTED",
@@ -180,13 +188,17 @@ describe("M11 build input policy (trusted, data only)", () => {
     expect(reason(() => check(packageJson(), extraImporter))).toBe("LOCKFILE_REJECTED");
     const foreign = lockfile().replace(framework[0]!.integrity, integrity("forged-core"));
     expect(reason(() => check(packageJson(), foreign))).toBe("UNSUPPORTED_RUNTIME");
-    const otherVersion = lockfile("\n  '@embody/storage@9.9.9':\n    resolution: {integrity: " + integrity("s") + "}\n");
+    const otherVersion = lockfile(
+      "\n  '@embody/storage@9.9.9':\n    resolution: {integrity: " + integrity("s") + "}\n",
+    );
     expect(reason(() => check(packageJson(), otherVersion))).toBe("UNSUPPORTED_RUNTIME");
   });
   it("produces a deterministic CycloneDX SBOM from lockfile data", () => {
     const inputs = check();
     const sbom = lockfileSbom(inputs, { appId: "app", sourceDigest: `sha256:${"a".repeat(64)}` });
-    expect(lockfileSbom(inputs, { appId: "app", sourceDigest: `sha256:${"a".repeat(64)}` })).toBe(sbom);
+    expect(lockfileSbom(inputs, { appId: "app", sourceDigest: `sha256:${"a".repeat(64)}` })).toBe(
+      sbom,
+    );
     const parsed = JSON.parse(sbom) as { bomFormat: string; components: { purl: string }[] };
     expect(parsed.bomFormat).toBe("CycloneDX");
     expect(parsed.components.map((c) => c.purl)).toContain("pkg:npm/%40embody/core@0.1.0");
@@ -208,7 +220,9 @@ describe("M11 manifest and capability contracts", () => {
     entrypoint: BUILD_RECIPE.entrypoint,
     publishes: ["app.submitted"],
     subscriptions: ["app.submitted"],
-    workflows: [{ target: "app.followUp", version: "0.1.0", steps: [{ name: "remind", dependsOn: [] }] }],
+    workflows: [
+      { target: "app.followUp", version: "0.1.0", steps: [{ name: "remind", dependsOn: [] }] },
+    ],
     catalogDigest: `sha256:${"b".repeat(64)}`,
   };
   it("carries profile, events, subscriptions and versioned workflows", () => {
@@ -296,8 +310,11 @@ describe("M11 manifest and capability contracts", () => {
     expect(ArtifactStatusSchema.safeParse({ ...base, state: "building" }).success).toBe(true);
     expect(ArtifactStatusSchema.safeParse({ ...base, state: "admitted" }).success).toBe(false);
     expect(
-      ArtifactStatusSchema.safeParse({ ...base, state: "rejected", error: buildError("BUILD_FAILED") })
-        .success,
+      ArtifactStatusSchema.safeParse({
+        ...base,
+        state: "rejected",
+        error: buildError("BUILD_FAILED"),
+      }).success,
     ).toBe(true);
   });
 });

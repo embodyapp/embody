@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { startFrameworkRegistry } from "./registry.mjs";
 
+const { AbortSignal, clearTimeout, fetch, setTimeout } = globalThis;
+
 const contracts = await import(
   pathToFileURL(
     process.env.EMBODY_CONTRACTS_MODULE ??
@@ -55,7 +57,12 @@ async function chownTree(path) {
     for (const entry of await readdir(path)) await chownTree(join(path, entry));
 }
 
-for (const name of ["EMBODY_SOURCE_URL", "EMBODY_SOURCE_DIGEST", "EMBODY_SOURCE_BYTES", "EMBODY_APP_ID"])
+for (const name of [
+  "EMBODY_SOURCE_URL",
+  "EMBODY_SOURCE_DIGEST",
+  "EMBODY_SOURCE_BYTES",
+  "EMBODY_APP_ID",
+])
   if (!env[name]) await reject("SOURCE_INVALID", `${name} missing`);
 const expectedBytes = Number(env.EMBODY_SOURCE_BYTES);
 if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0 || expectedBytes > 10 * 1024 * 1024)
@@ -68,7 +75,11 @@ try {
     redirect: "error",
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) await reject(response.status >= 500 ? "DEPENDENCY_UNAVAILABLE" : "SOURCE_INVALID", `source fetch ${response.status}`);
+  if (!response.ok)
+    await reject(
+      response.status >= 500 ? "DEPENDENCY_UNAVAILABLE" : "SOURCE_INVALID",
+      `source fetch ${response.status}`,
+    );
   archive = new Uint8Array(await response.arrayBuffer());
 } catch {
   await reject("DEPENDENCY_UNAVAILABLE", "source fetch failed");
@@ -116,7 +127,14 @@ try {
   });
   if (fetched.code !== 0) {
     console.log(fetched.stderr.slice(-4000).replace(/https?:\/\/127\.0\.0\.1:\d+/g, "<framework>"));
-    await reject(/ERR_PNPM_(LOCKFILE|OUTDATED|TARBALL_INTEGRITY|BAD_TARBALL)/.test(fetched.stdout + fetched.stderr) ? "LOCKFILE_REJECTED" : "DEPENDENCY_UNAVAILABLE", "dependency fetch failed");
+    await reject(
+      /ERR_PNPM_(LOCKFILE|OUTDATED|TARBALL_INTEGRITY|BAD_TARBALL)/.test(
+        fetched.stdout + fetched.stderr,
+      )
+        ? "LOCKFILE_REJECTED"
+        : "DEPENDENCY_UNAVAILABLE",
+      "dependency fetch failed",
+    );
   }
   // 4. Vulnerability policy over the locked set (public advisory database).
   const audit = await run("pnpm", ["audit", "--json", ...pnpmArgs], {
@@ -144,7 +162,10 @@ try {
   }
   // pnpm fetch may create a virtual store; the sandbox installs from the store itself.
   await rm(join(src, "node_modules"), { recursive: true, force: true });
-  const sbom = lockfileSbom(inputs, { appId: env.EMBODY_APP_ID, sourceDigest: env.EMBODY_SOURCE_DIGEST });
+  const sbom = lockfileSbom(inputs, {
+    appId: env.EMBODY_APP_ID,
+    sourceDigest: env.EMBODY_SOURCE_DIGEST,
+  });
   await mkdir(join(W, "inputs"), { recursive: true });
   await writeFile(join(W, "inputs", "sbom.json"), sbom);
   await chownTree(src);
@@ -158,7 +179,9 @@ try {
     packages: inputs.packages.length,
     audit: counts,
   });
-  console.log(`embody: prepared ${inputs.packages.length} locked packages; audit ${JSON.stringify(counts)}`);
+  console.log(
+    `embody: prepared ${inputs.packages.length} locked packages; audit ${JSON.stringify(counts)}`,
+  );
 } finally {
   await registry.close();
 }

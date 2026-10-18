@@ -86,7 +86,9 @@ function honestBuild(config: BuildConfig, options: Honest = {}): SimulatedBuildR
   options.mutate?.(output);
   const manifest = Buffer.from(JSON.stringify(output));
   const sbom = Buffer.from('{"bomFormat":"CycloneDX"}\n');
-  const source = config.steps[0]!.env.find((e) => e.startsWith("EMBODY_SOURCE_DIGEST="))!.split("=")[1];
+  const source = config.steps[0]!.env.find((e) => e.startsWith("EMBODY_SOURCE_DIGEST="))!.split(
+    "=",
+  )[1];
   return {
     status: options.status ?? "SUCCESS",
     outputs: { [`${prefix}manifest.json`]: manifest, [`${prefix}sbom.json`]: sbom },
@@ -166,7 +168,7 @@ async function fixture(
       expectedGeneration: 0,
       capabilities: caps,
       secretReferences: [],
-    }) as DeploymentSubmission;
+    }) as unknown as DeploymentSubmission;
   const admission = new BuildAdmission({ store, provider, recipe, sources: objects, clock });
   return {
     store,
@@ -180,8 +182,12 @@ async function fixture(
   };
 }
 async function buildOnce(f: Awaited<ReturnType<typeof fixture>>, caps = capabilities.requestOnly) {
-  const submission = f.submission(caps as DeploymentSubmission["capabilities"]);
-  const started = await f.admission.start({ submission, deploymentId: "dep_build00001", attempt: 1 });
+  const submission = f.submission(caps);
+  const started = await f.admission.start({
+    submission,
+    deploymentId: "dep_build00001",
+    attempt: 1,
+  });
   f.provider.completeAll();
   return f.admission.settle(started, submission);
 }
@@ -232,15 +238,18 @@ describe("M11 build plan (trusted recipe, no customer Dockerfile)", () => {
       { builderServiceAccount: "user@example.com" },
     ])
       expect(() =>
-        planBuild({ ...recipe, ...unpinned }, {
-          workspaceId: "ws_build00001",
-          appId: "app_build00001",
-          deploymentId: "dep_build00001",
-          artifactId: "art_build00001",
-          sourceDigest: pin("source"),
-          sourceBytes: 100,
-          sourceUrl: "https://x",
-        }),
+        planBuild(
+          { ...recipe, ...unpinned },
+          {
+            workspaceId: "ws_build00001",
+            appId: "app_build00001",
+            deploymentId: "dep_build00001",
+            artifactId: "art_build00001",
+            sourceDigest: pin("source"),
+            sourceBytes: 100,
+            sourceUrl: "https://x",
+          },
+        ),
       ).toThrow(/pinned/);
   });
   it("runs customer code only in a no-network, unprivileged, bounded sandbox", () => {
@@ -287,7 +296,10 @@ describe("M11 admission decisions", () => {
       builder: recipe.builderServiceAccount,
       configDigest: record.configDigest,
     });
-    expect(artifactStatus(record)).toMatchObject({ state: "admitted", imageDigest: record.imageDigest });
+    expect(artifactStatus(record)).toMatchObject({
+      state: "admitted",
+      imageDigest: record.imageDigest,
+    });
     // The source URL handed to the build is a signed GET for exactly the verified object.
     const url = new URL(f.provider.submitted[0]!.substitutions._SOURCE_URL);
     expect(url.pathname).toBe(`/read/${f.verified.objectKey}`);
@@ -308,114 +320,141 @@ describe("M11 admission decisions", () => {
       profile: "durable-v1",
       publishes: ["app.submitted"],
       subscriptions: ["app.submitted"],
-      workflows: [{ target: "app.followUp", version: "0.1.0", steps: [{ name: "remind", dependsOn: [] }] }],
+      workflows: [
+        { target: "app.followUp", version: "0.1.0", steps: [{ name: "remind", dependsOn: [] }] },
+      ],
     });
   });
-  const cases: [string, (c: BuildConfig) => SimulatedBuildResult | undefined, string, unknown?][] = [
-    ["failed build", (c) => ({ ...honestBuild(c), status: "FAILURE", images: [] }), "BUILD_FAILED"],
-    ["provider timeout", (c) => ({ ...honestBuild(c), status: "TIMEOUT", images: [] }), "BUILD_TIMEOUT"],
-    ["provider internal error", (c) => ({ ...honestBuild(c), status: "INTERNAL_ERROR" }), "DEPENDENCY_UNAVAILABLE"],
+  const cases: [string, (c: BuildConfig) => SimulatedBuildResult | undefined, string, unknown?][] =
     [
-      "prepare policy rejection",
-      (c) => ({ status: "FAILURE", stepOutputs: ['{"rejected":"LOCKFILE_REJECTED"}'] }),
-      "LOCKFILE_REJECTED",
-    ],
-    [
-      "prepare claims an unknown code",
-      (c) => ({ status: "FAILURE", stepOutputs: ['{"rejected":"ADMITTED"}'] }),
-      "BUILD_FAILED",
-    ],
-    [
-      "output limit",
-      (c) => ({ status: "FAILURE", stepOutputs: [honestBuild(c).stepOutputs![0]!, "", '{"rejected":"OUTPUT_LIMIT"}'] }),
-      "OUTPUT_LIMIT",
-    ],
-    [
-      "blocking vulnerability",
-      (c) => honestBuild(c, { audit: { critical: 1, high: 0, moderate: 0, low: 0 } }),
-      "VULNERABILITY_POLICY",
-    ],
-    [
-      "manifest substituted after the build",
-      (c) => {
-        const r = honestBuild(c);
-        const key = Object.keys(r.outputs!).find((k) => k.endsWith("manifest.json"))!;
-        return { ...r, outputs: { ...r.outputs, [key]: Buffer.from("{}") } };
-      },
-      "MANIFEST_MISMATCH",
-    ],
-    [
-      "SBOM substituted after the build",
-      (c) => {
-        const r = honestBuild(c);
-        const key = Object.keys(r.outputs!).find((k) => k.endsWith("sbom.json"))!;
-        return { ...r, outputs: { ...r.outputs, [key]: Buffer.from("{}") } };
-      },
-      "MANIFEST_MISMATCH",
-    ],
-    [
-      "missing manifest",
-      (c) => ({ ...honestBuild(c), outputs: {} }),
-      "MANIFEST_INVALID",
-    ],
-    [
-      "invalid catalog",
-      (c) => honestBuild(c, { mutate: (o) => (o["catalog"] = { protocolVersion: 2 }) }),
-      "MANIFEST_INVALID",
-    ],
-    [
-      "unknown output field",
-      (c) => honestBuild(c, { mutate: (o) => (o["secrets"] = ["x"]) }),
-      "MANIFEST_INVALID",
-    ],
-    [
-      "image under another name",
-      (c) => ({ ...honestBuild(c), images: [{ name: `${c.images[0]}-other`, digest: pin("x") }] }),
-      "IMAGE_INVALID",
-    ],
-    [
-      "second image",
-      (c) => ({
-        ...honestBuild(c),
-        images: [...honestBuild(c).images!, { name: c.images[0]!.replace("app_build00001", "app_other00001"), digest: pin("y") }],
-      }),
-      "IMAGE_INVALID",
-    ],
-    [
-      "tag instead of digest",
-      (c) => ({ ...honestBuild(c), images: [{ name: c.images[0]!, digest: "latest" }] }),
-      "IMAGE_INVALID",
-    ],
-    [
-      "prepare output for another source",
-      (c) => {
-        const r = honestBuild(c);
-        const prepared = JSON.parse(r.stepOutputs![0]!) as Record<string, unknown>;
-        return { ...r, stepOutputs: [JSON.stringify({ ...prepared, sourceDigest: pin("other") }), "", r.stepOutputs![2]!] };
-      },
-      "PROVENANCE_INVALID",
-    ],
-    [
-      "missing trusted step output",
-      (c) => ({ ...honestBuild(c), stepOutputs: [] }),
-      "PROVENANCE_INVALID",
-    ],
-    [
-      "request-only app with workflows",
-      (c) => honestBuild(c, { plugins: durablePlugins as never }),
-      "UNSUPPORTED_PROFILE",
-    ],
-    [
-      "request-only app that failed its preflight",
-      (c) => honestBuild(c, { preflight: { requestOnly: false, durable: true } }),
-      "UNSUPPORTED_PROFILE",
-    ],
-    [
-      "request-only app that declares publishes",
-      (c) => honestBuild(c, { publishes: ["app.created"] }),
-      "UNSUPPORTED_PROFILE",
-    ],
-  ];
+      [
+        "failed build",
+        (c) => ({ ...honestBuild(c), status: "FAILURE", images: [] }),
+        "BUILD_FAILED",
+      ],
+      [
+        "provider timeout",
+        (c) => ({ ...honestBuild(c), status: "TIMEOUT", images: [] }),
+        "BUILD_TIMEOUT",
+      ],
+      [
+        "provider internal error",
+        (c) => ({ ...honestBuild(c), status: "INTERNAL_ERROR" }),
+        "DEPENDENCY_UNAVAILABLE",
+      ],
+      [
+        "prepare policy rejection",
+        () => ({ status: "FAILURE", stepOutputs: ['{"rejected":"LOCKFILE_REJECTED"}'] }),
+        "LOCKFILE_REJECTED",
+      ],
+      [
+        "prepare claims an unknown code",
+        () => ({ status: "FAILURE", stepOutputs: ['{"rejected":"ADMITTED"}'] }),
+        "BUILD_FAILED",
+      ],
+      [
+        "output limit",
+        (c) => ({
+          status: "FAILURE",
+          stepOutputs: [honestBuild(c).stepOutputs![0]!, "", '{"rejected":"OUTPUT_LIMIT"}'],
+        }),
+        "OUTPUT_LIMIT",
+      ],
+      [
+        "blocking vulnerability",
+        (c) => honestBuild(c, { audit: { critical: 1, high: 0, moderate: 0, low: 0 } }),
+        "VULNERABILITY_POLICY",
+      ],
+      [
+        "manifest substituted after the build",
+        (c) => {
+          const r = honestBuild(c);
+          const key = Object.keys(r.outputs!).find((k) => k.endsWith("manifest.json"))!;
+          return { ...r, outputs: { ...r.outputs, [key]: Buffer.from("{}") } };
+        },
+        "MANIFEST_MISMATCH",
+      ],
+      [
+        "SBOM substituted after the build",
+        (c) => {
+          const r = honestBuild(c);
+          const key = Object.keys(r.outputs!).find((k) => k.endsWith("sbom.json"))!;
+          return { ...r, outputs: { ...r.outputs, [key]: Buffer.from("{}") } };
+        },
+        "MANIFEST_MISMATCH",
+      ],
+      ["missing manifest", (c) => ({ ...honestBuild(c), outputs: {} }), "MANIFEST_INVALID"],
+      [
+        "invalid catalog",
+        (c) => honestBuild(c, { mutate: (o) => (o["catalog"] = { protocolVersion: 2 }) }),
+        "MANIFEST_INVALID",
+      ],
+      [
+        "unknown output field",
+        (c) => honestBuild(c, { mutate: (o) => (o["secrets"] = ["x"]) }),
+        "MANIFEST_INVALID",
+      ],
+      [
+        "image under another name",
+        (c) => ({
+          ...honestBuild(c),
+          images: [{ name: `${c.images[0]}-other`, digest: pin("x") }],
+        }),
+        "IMAGE_INVALID",
+      ],
+      [
+        "second image",
+        (c) => ({
+          ...honestBuild(c),
+          images: [
+            ...honestBuild(c).images!,
+            { name: c.images[0]!.replace("app_build00001", "app_other00001"), digest: pin("y") },
+          ],
+        }),
+        "IMAGE_INVALID",
+      ],
+      [
+        "tag instead of digest",
+        (c) => ({ ...honestBuild(c), images: [{ name: c.images[0]!, digest: "latest" }] }),
+        "IMAGE_INVALID",
+      ],
+      [
+        "prepare output for another source",
+        (c) => {
+          const r = honestBuild(c);
+          const prepared = JSON.parse(r.stepOutputs![0]!) as Record<string, unknown>;
+          return {
+            ...r,
+            stepOutputs: [
+              JSON.stringify({ ...prepared, sourceDigest: pin("other") }),
+              "",
+              r.stepOutputs![2]!,
+            ],
+          };
+        },
+        "PROVENANCE_INVALID",
+      ],
+      [
+        "missing trusted step output",
+        (c) => ({ ...honestBuild(c), stepOutputs: [] }),
+        "PROVENANCE_INVALID",
+      ],
+      [
+        "request-only app with workflows",
+        (c) => honestBuild(c, { plugins: durablePlugins as never }),
+        "UNSUPPORTED_PROFILE",
+      ],
+      [
+        "request-only app that failed its preflight",
+        (c) => honestBuild(c, { preflight: { requestOnly: false, durable: true } }),
+        "UNSUPPORTED_PROFILE",
+      ],
+      [
+        "request-only app that declares publishes",
+        (c) => honestBuild(c, { publishes: ["app.created"] }),
+        "UNSUPPORTED_PROFILE",
+      ],
+    ];
   for (const [name, behaviour, code] of cases)
     it(`rejects ${name} (${code}) and never exposes an image`, async () => {
       const f = await fixture(behaviour);
@@ -445,7 +484,10 @@ describe("M11 admission decisions", () => {
     const f = await fixture((c) => honestBuild(c));
     expect((await buildOnce(f, capabilities.durable as never)).error).toBe("CAPABILITY_MISMATCH");
     const g = await fixture((c) =>
-      honestBuild(c, { plugins: durablePlugins as never, preflight: { requestOnly: false, durable: false } }),
+      honestBuild(c, {
+        plugins: durablePlugins as never,
+        preflight: { requestOnly: false, durable: false },
+      }),
     );
     expect((await buildOnce(g, { ...capabilities.durable, events: false } as never)).error).toBe(
       "UNSUPPORTED_PROFILE",
@@ -454,13 +496,26 @@ describe("M11 admission decisions", () => {
   it("rejects a build whose provider record differs from the platform plan", async () => {
     const f = await fixture();
     const submission = f.submission();
-    const started = await f.admission.start({ submission, deploymentId: "dep_build00001", attempt: 1 });
+    const started = await f.admission.start({
+      submission,
+      deploymentId: "dep_build00001",
+      attempt: 1,
+    });
     f.provider.completeAll();
     const build = await f.provider.get(started.buildId!);
     for (const config of [
-      { ...build.config, serviceAccount: "projects/x/serviceAccounts/other@x.iam.gserviceaccount.com" },
-      { ...build.config, steps: build.config.steps.map((s, i) => (i === 1 ? { ...s, args: ["-c", "true"] } : s)) },
-      { ...build.config, images: ["us-central1-docker.pkg.dev/embody-cloud/builds/ws_x/app_x:art_x"] },
+      {
+        ...build.config,
+        serviceAccount: "projects/x/serviceAccounts/other@x.iam.gserviceaccount.com",
+      },
+      {
+        ...build.config,
+        steps: build.config.steps.map((s, i) => (i === 1 ? { ...s, args: ["-c", "true"] } : s)),
+      },
+      {
+        ...build.config,
+        images: ["us-central1-docker.pkg.dev/embody-cloud/builds/ws_x/app_x:art_x"],
+      },
       { ...build.config, timeout: "86400s" },
     ]) {
       const decision = await decideAdmission({
@@ -486,7 +541,11 @@ describe("M11 build orchestration", () => {
       { ...base, source: { ...base.source, uploadId: "src_missing0001" } },
     ])
       await expect(
-        f.admission.start({ submission: submission as DeploymentSubmission, deploymentId: "dep_build00001", attempt: 1 }),
+        f.admission.start({
+          submission: submission as DeploymentSubmission,
+          deploymentId: "dep_build00001",
+          attempt: 1,
+        }),
       ).rejects.toMatchObject({ code: "SOURCE_INVALID" });
     expect(f.provider.submitted).toHaveLength(0);
     // Expired retention is not a source either.
@@ -498,8 +557,16 @@ describe("M11 build orchestration", () => {
   it("is idempotent per attempt and recovers a crash between submit and record", async () => {
     const f = await fixture();
     const submission = f.submission();
-    const first = await f.admission.start({ submission, deploymentId: "dep_build00001", attempt: 1 });
-    const again = await f.admission.start({ submission, deploymentId: "dep_build00001", attempt: 1 });
+    const first = await f.admission.start({
+      submission,
+      deploymentId: "dep_build00001",
+      attempt: 1,
+    });
+    const again = await f.admission.start({
+      submission,
+      deploymentId: "dep_build00001",
+      attempt: 1,
+    });
     expect(again.artifactId).toBe(first.artifactId);
     expect(f.provider.submitted).toHaveLength(1);
     expect(f.provider.submitted).toHaveLength(1);
@@ -516,15 +583,28 @@ describe("M11 build orchestration", () => {
       }
       return update(next, expected);
     };
-    await expect(g.admission.start({ submission: sub, deploymentId: "dep_build00001", attempt: 1 })).rejects.toThrow("process died");
-    const orphaned = await g.store.artifactForAttempt("ws_build00001", "app_build00001", "dep_build00001", 1);
+    await expect(
+      g.admission.start({ submission: sub, deploymentId: "dep_build00001", attempt: 1 }),
+    ).rejects.toThrow("process died");
+    const orphaned = await g.store.artifactForAttempt(
+      "ws_build00001",
+      "app_build00001",
+      "dep_build00001",
+      1,
+    );
     expect(orphaned?.buildId).toBeUndefined();
     const recovered = await g.admission.settle(orphaned!, sub);
     expect(recovered.buildId).toBeDefined();
     expect(g.provider.submitted).toHaveLength(1);
     // The build ID is immutable once recorded.
-    await expect(g.store.updateArtifact({ ...recovered, buildId: "other" }, recovered.revision)).rejects.toThrow();
-    const second = await f.admission.start({ submission, deploymentId: "dep_build00001", attempt: 2 });
+    await expect(
+      g.store.updateArtifact({ ...recovered, buildId: "other" }, recovered.revision),
+    ).rejects.toThrow();
+    const second = await f.admission.start({
+      submission,
+      deploymentId: "dep_build00001",
+      attempt: 2,
+    });
     expect(second.artifactId).not.toBe(first.artifactId);
     expect(f.provider.submitted).toHaveLength(2);
     await expect(
@@ -534,7 +614,11 @@ describe("M11 build orchestration", () => {
   it("settles exactly once and keeps a running build pending until its deadline", async () => {
     const f = await fixture(() => undefined);
     const submission = f.submission();
-    const started = await f.admission.start({ submission, deploymentId: "dep_build00001", attempt: 1 });
+    const started = await f.admission.start({
+      submission,
+      deploymentId: "dep_build00001",
+      attempt: 1,
+    });
     f.provider.completeAll();
     expect((await f.admission.settle(started, submission)).state).toBe("building");
     f.advance(BUILD_DEADLINE_MS + 1);
@@ -546,7 +630,9 @@ describe("M11 build orchestration", () => {
     expect(await f.admission.settle(timedOut, submission)).toEqual(timedOut);
   });
   it("redacts logs before an authorized reader sees them", async () => {
-    const f = await fixture((c) => honestBuild(c, { log: "ok\ntoken ya29.a0AfH6SMBcanarycanarycanary\n" }));
+    const f = await fixture((c) =>
+      honestBuild(c, { log: "ok\ntoken ya29.a0AfH6SMBcanarycanarycanary\n" }),
+    );
     const record = await buildOnce(f);
     const log = await f.admission.log(record);
     expect(log).toContain("ok");
@@ -555,31 +641,50 @@ describe("M11 build orchestration", () => {
   it("purges expired artifacts and orphaned images but keeps pinned and recent ones", async () => {
     const f = await fixture();
     const admitted = await buildOnce(f);
-    const pinned = await f.store.updateArtifact({ ...admitted, pinnedBy: "rel_aaaaaaaa" }, admitted.revision);
+    const pinned = await f.store.updateArtifact(
+      { ...admitted, pinnedBy: "rel_aaaaaaaa" },
+      admitted.revision,
+    );
     // Second app attempt, rejected.
     const failing = await fixture((c) => ({ ...honestBuild(c), status: "FAILURE" }));
     const rejected = await buildOnce(failing);
     expect(rejected.state).toBe("rejected");
     const later = new Date(Date.parse(admitted.retainUntil) + 1000);
-    expect(await purgeArtifacts({ store: f.store, provider: f.provider, now: later })).toMatchObject({
+    expect(
+      await purgeArtifacts({ store: f.store, provider: f.provider, now: later }),
+    ).toMatchObject({
       deleted: 0,
     });
     await f.store.updateArtifact({ ...pinned, pinnedBy: undefined } as never, pinned.revision);
     const result = await purgeArtifacts({ store: f.store, provider: f.provider, now: later });
     expect(result).toEqual({ deleted: 1, failed: 0, skipped: 0 });
-    expect(f.provider.deletedImages).toContain(`ws_build00001/app_build00001@${admitted.imageDigest}`);
-    expect(f.provider.deletedPrefixes).toContain(`logs/ws_build00001/app_build00001/${admitted.artifactId}/`);
-    expect(await f.store.artifact("ws_build00001", "app_build00001", admitted.artifactId)).toBeNull();
+    expect(f.provider.deletedImages).toContain(
+      `ws_build00001/app_build00001@${admitted.imageDigest}`,
+    );
+    expect(f.provider.deletedPrefixes).toContain(
+      `logs/ws_build00001/app_build00001/${admitted.artifactId}/`,
+    );
     expect(
-      (await purgeArtifacts({ store: failing.store, provider: failing.provider, now: new Date(Date.parse(rejected.retainUntil) + 1) })).deleted,
+      await f.store.artifact("ws_build00001", "app_build00001", admitted.artifactId),
+    ).toBeNull();
+    expect(
+      (
+        await purgeArtifacts({
+          store: failing.store,
+          provider: failing.provider,
+          now: new Date(Date.parse(rejected.retainUntil) + 1),
+        })
+      ).deleted,
     ).toBe(1);
 
     const orphan = await fixture();
     const kept = await buildOnce(orphan);
-    orphan.provider.images.get("ws_build00001/app_build00001")!.push(
-      { digest: pin("orphan-old"), createdAt: "2029-12-01T00:00:00.000Z" },
-      { digest: pin("orphan-new"), createdAt: orphan.clock.now().toISOString() },
-    );
+    orphan.provider.images
+      .get("ws_build00001/app_build00001")!
+      .push(
+        { digest: pin("orphan-old"), createdAt: "2029-12-01T00:00:00.000Z" },
+        { digest: pin("orphan-new"), createdAt: orphan.clock.now().toISOString() },
+      );
     const cleaned = await cleanupOrphanedImages({
       store: orphan.store,
       provider: orphan.provider,
@@ -588,7 +693,9 @@ describe("M11 build orchestration", () => {
       now: new Date(orphan.clock.now().getTime() + ORPHAN_AGE_MS / 2),
     });
     expect(cleaned).toEqual({ deleted: 1, kept: 2 });
-    expect(orphan.provider.deletedImages).toEqual([`ws_build00001/app_build00001@${pin("orphan-old")}`]);
+    expect(orphan.provider.deletedImages).toEqual([
+      `ws_build00001/app_build00001@${pin("orphan-old")}`,
+    ]);
     expect(kept.state).toBe("admitted");
   });
 });
@@ -600,8 +707,9 @@ describe("M11 provider adapters (request shape only; not provider evidence)", ()
       recipe,
       accessToken: () => Promise.resolve("token-1"),
       fetch: (input, init) => {
-        calls.push({ url: String(input), init: init ?? {} });
-        if (String(input).endsWith("/builds"))
+        const url = input instanceof Request ? input.url : input.toString();
+        calls.push({ url, init: init ?? {} });
+        if (url.endsWith("/builds"))
           return Promise.resolve(Response.json({ metadata: { build: { id: "0b1c2d3e-aaaa" } } }));
         return Promise.resolve(new Response(null, { status: 404 }));
       },
@@ -656,18 +764,38 @@ describe("M11 provider adapters (request shape only; not provider evidence)", ()
       now: () => new Date("2030-01-01T00:00:00.000Z"),
     });
     const key = "sources/ws_build00001/app_build00001/src_aaaaaaaa.tar.gz";
-    const read = store.canonical({ objectKey: key, expiresAt: new Date("2030-01-01T00:10:00.000Z"), method: "GET" });
+    const read = store.canonical({
+      objectKey: key,
+      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
+      method: "GET",
+    });
     expect(read.canonicalRequest.startsWith("GET\n/embody-sources/sources/")).toBe(true);
     expect(read.url.searchParams.get("X-Goog-Credential")).toMatch(/^reader@/);
     expect(read.url.searchParams.get("X-Goog-SignedHeaders")).toBe("host");
-    const upload = store.canonical({ objectKey: key, bytes: 1, contentType: "application/gzip", expiresAt: new Date("2030-01-01T00:10:00.000Z") });
+    const upload = store.canonical({
+      objectKey: key,
+      bytes: 1,
+      contentType: "application/gzip",
+      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
+    });
     expect(upload.url.searchParams.get("X-Goog-Credential")).toMatch(/^signer@/);
     expect(() =>
-      store.canonical({ objectKey: key, expiresAt: new Date("2030-01-01T01:00:00.000Z"), method: "GET" }),
+      store.canonical({
+        objectKey: key,
+        expiresAt: new Date("2030-01-01T01:00:00.000Z"),
+        method: "GET",
+      }),
     ).toThrow();
-    const noReader = new GcsSourceObjectStore({ bucket: "embody-sources", signerEmail: "signer@p.iam.gserviceaccount.com" });
+    const noReader = new GcsSourceObjectStore({
+      bucket: "embody-sources",
+      signerEmail: "signer@p.iam.gserviceaccount.com",
+    });
     expect(() =>
-      noReader.canonical({ objectKey: key, expiresAt: new Date(Date.now() + 60_000), method: "GET" }),
+      noReader.canonical({
+        objectKey: key,
+        expiresAt: new Date(Date.now() + 60_000),
+        method: "GET",
+      }),
     ).toThrow(/not configured/);
   });
 });

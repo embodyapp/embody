@@ -97,6 +97,22 @@ Build logs are written by the provider to `gs://<outputs>/logs/<ws>/<app>/<artif
 
 M16 schedules the sweeps. Recommended backstops: an outputs-bucket lifecycle rule deleting `logs/` after 15 days, and Artifact Registry cleanup policies that never delete tagged versions referenced by pinned artifacts.
 
+## Cost (worksheet delta)
+
+List prices for `us-central1`, captured 2026-10-18 from [Cloud Build pricing](https://cloud.google.com/build/pricing): default pool `e2-standard-2` at **$0.006 per build-minute**, no idle or fixed cost; 2,500 free build-minutes per billing account per month (ignored below, so the numbers err high). Artifact Registry $0.000136986 per GiB-hour and Cloud Storage as in the [M09 worksheet](./M09-QUALIFICATION.md#cost-worksheet).
+
+| Line item | Basis | USD/month |
+|---|---|---|
+| Cloud Build | 5 apps × 20 deployments × 5 build-minutes (local runs take 2–4 minutes) | 3.00 |
+| App images | about 5 GiB retained (30-day inactive retention, shared base layers) beyond M09's 2 GiB | 0.50 |
+| Recipe image | about 0.3 GiB, one per platform release | 0.04 |
+| Build outputs and logs | Cloud Storage, a few MiB per build, 14-day log retention | < 0.01 |
+| **Delta** | | **≈ 3.54** |
+
+That moves the approved M09 running baseline from about $16.49 to about **$20.03/month** (ceiling $50). Container scanning and private pools are not used, so there is no per-image or fixed build cost.
+
+**One-off live qualification (`test:mvp:cloud` suite m11), conservative:** 16 builds each charged at the full 600-second timeout (16 × 10 × $0.006 = $0.96) plus $0.25 for repositories, buckets, the Cloud Run job, logs and egress: **$1.21**. The suite refuses to start if its projection exceeds the approved budget (proposed cap $5) and fails if the measured estimate does.
+
 ## Troubleshooting
 
 | Code | Cause | Fix |

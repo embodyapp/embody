@@ -320,7 +320,9 @@ export interface BuildProvider {
   readLog(buildId: string, logsBucket: string, maxBytes: number): Promise<string | null>;
   /** Idempotent; deletes one image version by digest under `<repository>/<ws>/<app>`. */
   deleteImage(path: string, digest: string): Promise<void>;
-  listImages(path: string): Promise<readonly { readonly digest: string; readonly createdAt: string }[]>;
+  listImages(
+    path: string,
+  ): Promise<readonly { readonly digest: string; readonly createdAt: string }[]>;
 }
 export class BuildProviderError extends Error {
   public constructor(message: string) {
@@ -525,15 +527,15 @@ export async function decideAdmission(input: {
   if (auditBlocks(prepared.audit)) return reject("VULNERABILITY_POLICY");
   if (build.images.length !== 1 || !pushedDigest) return reject("IMAGE_INVALID");
   const assembled = parseJson(build.stepOutputs[2]) as
-    | { manifestDigest?: unknown; outputBytes?: unknown }
-    | undefined;
+    { manifestDigest?: unknown; outputBytes?: unknown } | undefined;
   if (
     !assembled ||
     !DigestSchema.safeParse(assembled.manifestDigest).success ||
     !isCount(assembled.outputBytes)
   )
     return reject("PROVENANCE_INVALID");
-  if ((assembled.outputBytes as number) > BUILD_RECIPE.maxOutputBytes) return reject("OUTPUT_LIMIT");
+  if ((assembled.outputBytes as number) > BUILD_RECIPE.maxOutputBytes)
+    return reject("OUTPUT_LIMIT");
 
   const manifestBytes = await input.readOutput(
     `${plan.outputPrefix}manifest.json`,
@@ -600,7 +602,7 @@ export async function decideAdmission(input: {
     imageDigest: pushedDigest,
     imageReference: `${repository}@${pushedDigest}`,
     manifest: manifest.data,
-    manifestDigest: assembled.manifestDigest as string,
+    manifestDigest: assembled.manifestDigest,
     sbomDigest: prepared.sbomDigest,
     audit: prepared.audit,
   };
@@ -692,7 +694,9 @@ export class BuildAdmission {
           outputPrefix: plan.outputPrefix,
           logsBucket: plan.config.logsBucket,
           createdAt: now.toISOString(),
-          retainUntil: new Date(now.getTime() + HOSTED_PROFILE.deploymentRetentionDays * DAY).toISOString(),
+          retainUntil: new Date(
+            now.getTime() + HOSTED_PROFILE.deploymentRetentionDays * DAY,
+          ).toISOString(),
         });
       } catch (error) {
         if (!(error instanceof ConflictError)) throw error;
@@ -732,7 +736,13 @@ export class BuildAdmission {
     source: SourceRecord,
   ): Promise<ArtifactRecord> {
     if (record.buildId || record.state !== "building") return record;
-    const plan = this.plan(submission, record.deploymentId, record.artifactId, source, "https://pending");
+    const plan = this.plan(
+      submission,
+      record.deploymentId,
+      record.artifactId,
+      source,
+      "https://pending",
+    );
     // Crash between submit and record: the provider tag finds the earlier build.
     let buildId = await this.options.provider.find(plan.tag);
     if (!buildId) {
@@ -740,8 +750,15 @@ export class BuildAdmission {
         objectKey: source.objectKey,
         expiresAt: new Date(this.clock.now().getTime() + SOURCE_READ_SECONDS * 1000),
       });
-      const real = this.plan(submission, record.deploymentId, record.artifactId, source, access.url);
-      if (real.configDigest !== record.configDigest) throw new BuildAdmissionError("PROVENANCE_INVALID");
+      const real = this.plan(
+        submission,
+        record.deploymentId,
+        record.artifactId,
+        source,
+        access.url,
+      );
+      if (real.configDigest !== record.configDigest)
+        throw new BuildAdmissionError("PROVENANCE_INVALID");
       buildId = (await this.options.provider.submit(real.config)).buildId;
     }
     return this.options.store.updateArtifact({ ...record, buildId }, record.revision);
@@ -764,7 +781,11 @@ export class BuildAdmission {
     )
       throw new BuildAdmissionError("SOURCE_INVALID");
     if (!record.buildId) {
-      const source = await this.options.store.source(record.workspaceId, record.appId, record.sourceUploadId);
+      const source = await this.options.store.source(
+        record.workspaceId,
+        record.appId,
+        record.sourceUploadId,
+      );
       if (!source) return this.reject(record, "SOURCE_INVALID");
       return this.ensureSubmitted(record, submission, source);
     }
@@ -803,7 +824,9 @@ export class BuildAdmission {
           ...(build.finishTime ? { finishTime: build.finishTime } : {}),
         },
         finishedAt: finished,
-        retainUntil: new Date(now.getTime() + HOSTED_PROFILE.inactiveReleaseRetentionDays * DAY).toISOString(),
+        retainUntil: new Date(
+          now.getTime() + HOSTED_PROFILE.inactiveReleaseRetentionDays * DAY,
+        ).toISOString(),
       },
       record.revision,
     );
@@ -879,7 +902,10 @@ export async function purgeArtifacts(options: {
           continue;
         }
         try {
-          fenced = await options.store.updateArtifact({ ...record, purging: true }, record.revision);
+          fenced = await options.store.updateArtifact(
+            { ...record, purging: true },
+            record.revision,
+          );
         } catch (error) {
           if (error instanceof ConflictError) {
             skipped += 1;

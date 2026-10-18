@@ -190,7 +190,10 @@ export const ArtifactStatusSchema = z
     manifest: ArtifactManifestSchema.optional(),
     error: BuildErrorSchema.optional(),
   })
-  .refine((s) => (s.state === "rejected") === (s.error !== undefined), "Only rejections carry errors")
+  .refine(
+    (s) => (s.state === "rejected") === (s.error !== undefined),
+    "Only rejections carry errors",
+  )
   .refine(
     (s) => (s.state === "admitted") === (s.imageDigest !== undefined && s.manifest !== undefined),
     "Admitted artifacts carry their image digest and manifest",
@@ -236,7 +239,8 @@ const FORBIDDEN_PACKAGE_FIELDS = [
 ];
 const FORBIDDEN_LOCK_FIELDS = ["overrides", "patchedDependencies", "pnpmfileChecksum", "catalogs"];
 const INTEGRITY = /^sha512-[A-Za-z0-9+/]{86}==$/;
-const PACKAGE_KEY = /^((?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*)@(\d+\.\d+\.\d+[0-9A-Za-z.+-]*)$/;
+const PACKAGE_KEY =
+  /^((?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*)@(\d+\.\d+\.\d+[0-9A-Za-z.+-]*)$/;
 const sha = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 interface Doc {
   [key: string]: unknown;
@@ -283,10 +287,7 @@ export function checkBuildInputs(input: {
   if (pkg.type !== "module") reject("INPUT_REJECTED", 'package.json must set "type": "module"');
   if (!isRecord(pkg.scripts) || typeof pkg.scripts.build !== "string")
     reject("INPUT_REJECTED", "package.json needs a build script");
-  if (
-    pkg.packageManager !== undefined &&
-    pkg.packageManager !== `pnpm@${BUILD_RECIPE.pnpmVersion}`
-  )
+  if (pkg.packageManager !== undefined && pkg.packageManager !== `pnpm@${BUILD_RECIPE.pnpmVersion}`)
     reject("UNSUPPORTED_RUNTIME", `packageManager must be pnpm@${BUILD_RECIPE.pnpmVersion}`);
   const declared = new Map<string, string>();
   for (const field of DEPENDENCY_FIELDS) {
@@ -300,7 +301,10 @@ export function checkBuildInputs(input: {
     }
   }
   const frameworkByName = new Map(input.framework.map((p) => [p.name, p]));
-  for (const required of [`${BUILD_RECIPE.frameworkScope}/core`, `${BUILD_RECIPE.frameworkScope}/host`])
+  for (const required of [
+    `${BUILD_RECIPE.frameworkScope}/core`,
+    `${BUILD_RECIPE.frameworkScope}/host`,
+  ])
     if (!isRecord(pkg.dependencies) || !(required in pkg.dependencies))
       reject("UNSUPPORTED_RUNTIME", `dependencies must include ${required}`);
 
@@ -351,7 +355,8 @@ export function checkBuildInputs(input: {
   const locked: LockedPackage[] = [];
   for (const key of keys) {
     const match = PACKAGE_KEY.exec(key);
-    if (!match) return reject("LOCKFILE_REJECTED", `${key.slice(0, 120)} is not a registry package`);
+    if (!match)
+      return reject("LOCKFILE_REJECTED", `${key.slice(0, 120)} is not a registry package`);
     const entry = packages[key];
     if (!isRecord(entry) || !isRecord(entry.resolution))
       return reject("LOCKFILE_REJECTED", `${key} has no resolution`);

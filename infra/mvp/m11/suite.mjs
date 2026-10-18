@@ -7,6 +7,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { M11_FIXTURES, createFixture } from "./fixtures.mjs";
 
+const { Buffer } = globalThis;
 const sha = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const DAY = 86_400_000;
 
@@ -145,7 +146,11 @@ export async function runM11Cases(deps) {
     workspaceId,
     appId: entry.appId,
     idempotencyKey: `m11-${run}-${entry.appId}`,
-    source: { uploadId: entry.source.uploadId, digest: entry.packed.digest, bytes: entry.packed.bytes },
+    source: {
+      uploadId: entry.source.uploadId,
+      digest: entry.packed.digest,
+      bytes: entry.packed.bytes,
+    },
     expectedGeneration: 0,
     capabilities: caps,
     secretReferences: [],
@@ -160,7 +165,10 @@ export async function runM11Cases(deps) {
     registryUrl: deps.registryUrl,
   };
   const kinds = deps.kinds ?? Object.keys(M11_FIXTURES);
-  await admitSource("request-only", await createFixture("request-only", join(fixturesRoot, "request-only"), fixtureDeps));
+  await admitSource(
+    "request-only",
+    await createFixture("request-only", join(fixturesRoot, "request-only"), fixtureDeps),
+  );
   const foreign = await deps.sources.createReadAccess({
     objectKey: sources["request-only"].source.objectKey,
     expiresAt: new Date(Date.now() + 15 * 60_000),
@@ -180,19 +188,34 @@ export async function runM11Cases(deps) {
   const jobs = kinds.map((kind) => ({
     name: kind,
     entry: sources[kind],
-    caps: M11_FIXTURES[kind].profile === "durable" ? capabilities.durable() : capabilities.requestOnly,
+    caps:
+      M11_FIXTURES[kind].profile === "durable" ? capabilities.durable() : capabilities.requestOnly,
     expect: M11_FIXTURES[kind].expect,
   }));
   if (sources.durable) {
-    jobs.push({ name: "durable-as-request-only", entry: sources.durable, caps: capabilities.requestOnly, expect: "UNSUPPORTED_PROFILE" });
-    jobs.push({ name: "durable-undeclared-workflows", entry: sources.durable, caps: capabilities.durable({ workflows: false }), expect: "CAPABILITY_MISMATCH" });
+    jobs.push({
+      name: "durable-as-request-only",
+      entry: sources.durable,
+      caps: capabilities.requestOnly,
+      expect: "UNSUPPORTED_PROFILE",
+    });
+    jobs.push({
+      name: "durable-undeclared-workflows",
+      entry: sources.durable,
+      caps: capabilities.durable({ workflows: false }),
+      expect: "CAPABILITY_MISMATCH",
+    });
   }
   const results = {};
   let deployment = 0;
   for (const job of jobs) {
     job.submission = submission(job.entry, job.caps);
     job.deploymentId = `dep_m11${run}${String(deployment++).padStart(2, "0")}`;
-    job.record = await admission.start({ submission: job.submission, deploymentId: job.deploymentId, attempt: 1 });
+    job.record = await admission.start({
+      submission: job.submission,
+      deploymentId: job.deploymentId,
+      attempt: 1,
+    });
   }
   const started = Date.now();
   const deadline = started + (deps.buildWaitMs ?? 40 * 60_000);
@@ -229,15 +252,23 @@ export async function runM11Cases(deps) {
   await record("M11.idempotent-start", async () => {
     const first = jobs[0];
     const before = deps.provider.submitted.length;
-    const again = await admission.start({ submission: first.submission, deploymentId: first.deploymentId, attempt: 1 });
+    const again = await admission.start({
+      submission: first.submission,
+      deploymentId: first.deploymentId,
+      attempt: 1,
+    });
     return {
-      pass: again.artifactId === first.record.artifactId && deps.provider.submitted.length === before,
+      pass:
+        again.artifactId === first.record.artifactId && deps.provider.submitted.length === before,
       submittedBefore: before,
       submittedAfter: deps.provider.submitted.length,
     };
   });
 
-  for (const [name, profile] of [["request-only", "request-only-v1"], ["durable", "durable-v1"]]) {
+  for (const [name, profile] of [
+    ["request-only", "request-only-v1"],
+    ["durable", "durable-v1"],
+  ]) {
     if (!job(name)) continue;
     await record(`M11.c.scaffold-${name}`, async () => {
       const r = job(name).record;
@@ -285,7 +316,11 @@ export async function runM11Cases(deps) {
   await record("M11.a.resource-bounds", async () => {
     const checks = {};
     for (const name of ["memory-hog", "oversized"]) if (job(name)) checks[name] = decided(name);
-    return { pass: Object.keys(checks).length > 0 && Object.values(checks).every(Boolean), checks, results };
+    return {
+      pass: Object.keys(checks).length > 0 && Object.values(checks).every(Boolean),
+      checks,
+      results,
+    };
   });
 
   await record("M11.b.inputs-and-failures", async () => {
@@ -332,12 +367,24 @@ export async function runM11Cases(deps) {
           build: { ...build, images: [{ name: `${r.image}x`, digest: build.images[0]?.digest }] },
         }),
         extraImage: await decide({
-          build: { ...build, images: [...build.images, { name: r.image.replace(r.appId, "app_other0000"), digest: `sha256:${"0".repeat(64)}` }] },
+          build: {
+            ...build,
+            images: [
+              ...build.images,
+              {
+                name: r.image.replace(r.appId, "app_other0000"),
+                digest: `sha256:${"0".repeat(64)}`,
+              },
+            ],
+          },
         }),
         config: await decide({
           build: {
             ...build,
-            config: { ...build.config, serviceAccount: "projects/x/serviceAccounts/attacker@x.iam.gserviceaccount.com" },
+            config: {
+              ...build.config,
+              serviceAccount: "projects/x/serviceAccounts/attacker@x.iam.gserviceaccount.com",
+            },
           },
         }),
         source: await decide({ record: { sourceDigest: sha("other") } }),
@@ -362,7 +409,9 @@ export async function runM11Cases(deps) {
     for (const j of rejected) {
       const images = await deps.provider.listImages(`${workspaceId}/${j.entry.appId}`);
       const known = new Set(
-        jobs.filter((x) => x.entry.appId === j.entry.appId && x.record.state === "admitted").map((x) => x.record.imageDigest),
+        jobs
+          .filter((x) => x.entry.appId === j.entry.appId && x.record.state === "admitted")
+          .map((x) => x.record.imageDigest),
       );
       for (const image of images) if (!known.has(image.digest)) leftovers.push(j.name);
     }
@@ -377,17 +426,33 @@ export async function runM11Cases(deps) {
 
   await record("M11.step5.retention", async () => {
     const future = new Date(Date.now() + 91 * DAY);
-    const purged = await g.purgeArtifacts({ store: deps.store, provider: deps.provider, now: future, limit: 1000 });
+    const purged = await g.purgeArtifacts({
+      store: deps.store,
+      provider: deps.provider,
+      now: future,
+      limit: 1000,
+    });
     const remaining = [];
     for (const j of jobs)
-      if (await deps.store.artifact(workspaceId, j.entry.appId, j.record.artifactId)) remaining.push(j.name);
+      if (await deps.store.artifact(workspaceId, j.entry.appId, j.record.artifactId))
+        remaining.push(j.name);
     const images = [];
     for (const kind of Object.keys(sources))
       images.push(...(await deps.provider.listImages(`${workspaceId}/${sources[kind].appId}`)));
-    const checks = { purgedAll: purged.failed === 0 && remaining.length === 0, imagesGone: images.length === 0 };
+    const checks = {
+      purgedAll: purged.failed === 0 && remaining.length === 0,
+      imagesGone: images.length === 0,
+    };
     return { pass: Object.values(checks).every(Boolean), checks, purged, remaining };
   });
 
   const pass = Object.values(cases).every((value) => value.pass === true);
-  return { pass, run, cases, results, buildSeconds: Math.round((Date.now() - started) / 1000), builds: jobs.length };
+  return {
+    pass,
+    run,
+    cases,
+    results,
+    buildSeconds: Math.round((Date.now() - started) / 1000),
+    builds: jobs.length,
+  };
 }

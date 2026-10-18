@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-const { setTimeout, clearTimeout } = globalThis;
+const { Buffer, setTimeout, clearTimeout } = globalThis;
 
 function docker(args, options = {}) {
   const result = spawnSync("docker", args, { encoding: "utf8", ...options });
@@ -23,7 +23,14 @@ export class LocalBuildProvider {
    * `scratch`: a directory Docker can bind-mount. `rewriteSourceUrl(url)`: maps the signed URL
    * to one the prepare container can reach. `dockerSteps`: images that get the Docker socket.
    */
-  constructor({ scratch, outputBucket, dockerImage, rewriteSourceUrl, cleanupImage, imageAliases = {} }) {
+  constructor({
+    scratch,
+    outputBucket,
+    dockerImage,
+    rewriteSourceUrl,
+    cleanupImage,
+    imageAliases = {},
+  }) {
     this.imageAliases = imageAliases;
     this.slots = 2;
     this.queue = [];
@@ -46,9 +53,9 @@ export class LocalBuildProvider {
       .then(() => this.run(build))
       .finally(() => this.release())
       .catch((error) => {
-      build.status = "INTERNAL_ERROR";
-      build.log += `\nemulator error: ${error.message}\n`;
-    });
+        build.status = "INTERNAL_ERROR";
+        build.log += `\nemulator error: ${error.message}\n`;
+      });
     this.running.add(run);
     void run.finally(() => this.running.delete(run));
     return { buildId: id };
@@ -80,11 +87,17 @@ export class LocalBuildProvider {
       const outputs = join(root, `outputs-${index}`);
       await mkdir(outputs, { recursive: true });
       const alias = (value) => {
-        for (const [from, to] of Object.entries(this.imageAliases)) value = value.replaceAll(from, to);
+        for (const [from, to] of Object.entries(this.imageAliases))
+          value = value.replaceAll(from, to);
         return value;
       };
       const env = step.env.map((pair) =>
-        alias(pair.replace("$_SOURCE_URL", this.rewriteSourceUrl(build.config.substitutions._SOURCE_URL))),
+        alias(
+          pair.replace(
+            "$_SOURCE_URL",
+            this.rewriteSourceUrl(build.config.substitutions._SOURCE_URL),
+          ),
+        ),
       );
       const args = [
         "run",
@@ -176,9 +189,22 @@ export class LocalBuildProvider {
     const { writeFile } = await import("node:fs/promises");
     await writeFile(logFile, build.log);
     // Workspace files may be owned by container users; remove them from a container.
-    docker(["run", "--rm", "-v", `${root}:/target`, "--entrypoint", "rm", this.cleanupImage, "-rf", "/target/workspace"], {
-      allowFailure: true,
-    });
+    docker(
+      [
+        "run",
+        "--rm",
+        "-v",
+        `${root}:/target`,
+        "--entrypoint",
+        "rm",
+        this.cleanupImage,
+        "-rf",
+        "/target/workspace",
+      ],
+      {
+        allowFailure: true,
+      },
+    );
     await rm(root, { recursive: true, force: true }).catch(() => undefined);
   }
   async find(tag) {

@@ -115,6 +115,10 @@ Deletes made by a rejecting completion are pinned to the object generation it in
 
 A bucket lifecycle rule on the `sources/` prefix (age > retention + 1 day) is a recommended backstop only while nothing is pinned; M12/M13 must move or exempt pinned objects before relying on it.
 
+## Builder read access (M11)
+
+The isolated builder fetches source by a V4 signed **GET** for exactly one object, valid for 10 minutes and signed by a separate read signer (`readSignerEmail`, object read on the bucket only), so the upload signer stays create-only. Only the trusted prepare step of the build receives the URL; customer code in the sandbox has no network. See [BUILDS](./BUILDS.md).
+
 ## Storage adapters
 
 - `MemorySourceObjectStore`: local fake for tests and development. HMAC-signed PUT URLs with GCS-like semantics (key, exact length, content type, create-only, expiry); everything else is refused. Not durable.
