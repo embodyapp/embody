@@ -5,9 +5,16 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { commitDropProxy } from "./commit-drop-proxy.js";
 import { promisify } from "node:util";
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import { describe, expect, it, vi } from "vitest";
-import { PostgresGatewayStore, newCredential, createWorkspaceGateway } from "../src/index.js";
+import {
+  PostgresGatewayStore,
+  newCredential,
+  createWorkspaceGateway,
+  purgeExpiredSources,
+  type SourceAdmitInput,
+  type SourceRecord,
+} from "../src/index.js";
 import { appRecord, credentialInput, storeConformance } from "./store-conformance.js";
 import { sourceStoreConformance } from "./source-store-conformance.js";
 import { createSourceArchive } from "@embody/cloud-contracts";
@@ -99,6 +106,151 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
       }
     } finally {
       await gateway.close();
+      await store.close();
+    }
+  });
+  it("M10 admitSource upsert is a CAS: a sweep fence or completion in its window is never overwritten (F1)", async () => {
+    const workspace = `ws_${randomUUID().replaceAll("-", "")}`;
+    const store = new PostgresGatewayStore(url!);
+    const pool = (store as unknown as { pool: Pool }).pool;
+    const connect = pool.connect.bind(pool) as (cb?: unknown) => Promise<PoolClient>;
+    /** Runs `between` after admitSource read the row and before its upsert, once. */
+    const interleave = async <T>(between: () => Promise<unknown>, admit: () => Promise<T>) => {
+      let armed = true;
+      // pool.query checks out through connect(callback); only transactions use the promise form.
+      (pool as unknown as { connect: (cb?: unknown) => unknown }).connect = (cb?: unknown) =>
+        cb ? connect(cb) : connect().then(wrap);
+      const wrap = (client: PoolClient) => {
+        const query = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
+        (client as unknown as { query: unknown }).query = async (...args: unknown[]) => {
+          if (
+            armed &&
+            typeof args[0] === "string" &&
+            args[0].includes("INSERT INTO embody_platform_sources")
+          ) {
+            armed = false;
+            await between();
+          }
+          return query(...args);
+        };
+        return client;
+      };
+      try {
+        return await admit();
+      } finally {
+        (pool as unknown as { connect: unknown }).connect = connect;
+      }
+    };
+    const rows = async () =>
+      (
+        await pool.query<{ upload_id: string; purging: boolean; doc_purging: string | null }>(
+          "SELECT upload_id, purging, document->>'purging' AS doc_purging FROM embody_platform_sources WHERE workspace_id=$1 ORDER BY retain_until",
+          [workspace],
+        )
+      ).rows;
+    const deletedKeys: string[] = [];
+    const objects = {
+      delete: (key: string) => {
+        deletedKeys.push(key);
+        return Promise.resolve();
+      },
+    };
+    const failing = { delete: () => Promise.reject(new Error("storage down")) };
+    const mine = {
+      expiredSources: async (now: Date, limit: number) =>
+        (await store.expiredSources(now, limit)).filter((r) => r.workspaceId === workspace),
+      updateSource: (next: SourceRecord, expected: number) => store.updateSource(next, expected),
+      deleteSource: (record: SourceRecord) => store.deleteSource(record),
+    };
+    const t0 = new Date("2030-01-01T00:00:00.000Z");
+    const input = (key: string, now: Date): SourceAdmitInput => ({
+      workspaceId: workspace,
+      appId: "app_kanban0001",
+      idempotencyKey: key,
+      digest: `sha256:${"1".padStart(64, "0")}`,
+      bytes: 1000,
+      actorId: "alice",
+      now,
+    });
+    try {
+      await store.createWorkspace(workspace);
+      // 1. The sweep fences an expired verified record while a re-run is renewing it in place.
+      const { record } = await store.admitSource(input("sha256_key_fenced_0001", t0));
+      const verified = await store.updateSource(
+        { ...record, state: "verified", files: 2, expandedBytes: 10, treeDigest: record.digest },
+        record.revision,
+      );
+      const after = new Date(Date.parse(record.retainUntil) + 1000);
+      const [listed] = await mine.expiredSources(after, 1000);
+      const rerun = await interleave(
+        () => store.updateSource({ ...listed!, purging: true }, listed!.revision),
+        () => store.admitSource(input("sha256_key_fenced_0001", after)),
+      );
+      // The renewal lost its CAS and re-read: a fresh identity, never the fenced row.
+      expect(rerun.replay).toBe(false);
+      expect(rerun.record.uploadId).not.toBe(record.uploadId);
+      expect(rerun.record.objectKey).not.toBe(record.objectKey);
+      expect(await rows()).toEqual([
+        { upload_id: record.uploadId, purging: true, doc_purging: "true" },
+        { upload_id: rerun.record.uploadId, purging: false, doc_purging: null },
+      ]);
+      // An interrupted sweep leaves a tombstone that the next sweep purges.
+      expect(await purgeExpiredSources({ store: mine, objects: failing, now: after })).toEqual({
+        deleted: 0,
+        failed: 1,
+        skipped: 0,
+      });
+      expect(await purgeExpiredSources({ store: mine, objects, now: after })).toEqual({
+        deleted: 1,
+        failed: 0,
+        skipped: 0,
+      });
+      expect(deletedKeys).toEqual([verified.objectKey]);
+      expect((await rows()).map((r) => r.upload_id)).toEqual([rerun.record.uploadId]);
+
+      // 2. A completion verifies a pending record while a re-run is renewing its access.
+      const pending = (await store.admitSource(input("sha256_key_complete_01", t0))).record;
+      const later = new Date(t0.getTime() + 60_000);
+      const renewed = await interleave(
+        () =>
+          store.updateSource(
+            {
+              ...pending,
+              state: "verified",
+              files: 2,
+              expandedBytes: 10,
+              treeDigest: pending.digest,
+            },
+            pending.revision,
+          ),
+        () => store.admitSource(input("sha256_key_complete_01", later)),
+      );
+      expect(renewed).toMatchObject({
+        replay: true,
+        record: { uploadId: pending.uploadId, state: "verified", revision: pending.revision + 1 },
+      });
+      expect(await store.source(workspace, "app_kanban0001", pending.uploadId)).toMatchObject({
+        state: "verified",
+      });
+
+      // 3. A row whose column says purging but whose document does not is still purged.
+      await pool.query(
+        "UPDATE embody_platform_sources SET purging=true WHERE workspace_id=$1 AND upload_id=$2",
+        [workspace, pending.uploadId],
+      );
+      const swept = new Date(Date.parse(pending.retainUntil));
+      const stranded = (await mine.expiredSources(swept, 1000)).find(
+        (r) => r.uploadId === pending.uploadId,
+      );
+      expect(stranded?.purging).toBe(true);
+      deletedKeys.length = 0;
+      expect(await purgeExpiredSources({ store: mine, objects, now: swept })).toEqual({
+        deleted: 1,
+        failed: 0,
+        skipped: 0,
+      });
+      expect(deletedKeys).toEqual([pending.objectKey]);
+    } finally {
       await store.close();
     }
   });

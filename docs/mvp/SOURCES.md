@@ -12,7 +12,7 @@ M10 admits and stores source only. It never builds, deploys, imports or evaluate
 4. `POST …/sources/:uploadId/complete`. The gateway reads the stored object (bounded to the declared size and pinned to the object generation), recomputes SHA-256, compares size and digest with the persisted record, then inspects the archive as data. The result is persisted as `verified` or `rejected`.
 5. `GET …/sources/:uploadId` (requires `deployment:read`) returns status. There is no download or list endpoint.
 
-Upload access is a bearer capability, so it is bounded: one server-derived object key (`sources/<ws>/<app>/<src>.tar.gz`), exact size (`x-goog-content-length-range: N,N`), create-only (`x-goog-if-generation-match: 0`), content type `application/gzip`, and a 10-minute expiry. It grants no read, list or delete. The CLI never prints it.
+Upload access is a bearer capability, so it is bounded: one server-derived object key (`sources/<ws>/<app>/<src>.tar.gz`), exact size (`x-goog-content-length-range: N,N`), create-only (`x-goog-if-generation-match: 0`), content type `application/gzip`, and a 10-minute expiry, never later than the record's `retainUntil` (so no URL outlives the record and lets a late PUT leave an object the sweep cannot see). It grants no read, list or delete. The CLI never prints it.
 
 ## Retries and interrupted uploads
 
@@ -103,11 +103,11 @@ CLI exit codes: `0` verified, `2` usage/packaging, `3` authentication, `4` permi
 
 Each record stores `createdAt`, `accessExpiresAt`, `retainUntil`, actor, digest, size, tree digest and the optional `pinnedBy`. `purgeExpiredSources` (M16 schedules it) handles each expired, unpinned record in three steps:
 
-1. It fences the record by CAS (`purging`). If the record was renewed or pinned after the sweep listed it, the CAS fails and the record is skipped.
+1. It fences the record by CAS (`purging`). If the record was renewed or pinned after the sweep listed it, the CAS fails and the record is skipped. A record whose upload access is still live is also skipped until that access expires.
 2. It deletes the object.
 3. It deletes the tombstone (CAS).
 
-A tombstone is invisible: status, completion and `verifySubmissionSource` return not found, and nothing can update or pin it. A re-run with the same key therefore gets a fresh upload ID and object key instead of renewing the record being purged. A sweep interrupted after the fence leaves the tombstone listed for the next sweep. So no live record points at a deleted object, and no object is orphaned by a failed sweep. Tombstones do not count toward quotas.
+A tombstone is invisible: status, completion and `verifySubmissionSource` return not found, and no writer can update, renew or pin it. Completions and pins are revision CAS updates that refuse a tombstone, and admission's write is a CAS on the revision it read and on the row not being a tombstone. When admission loses that race (the sweep fenced the row, or a completion advanced it), it re-reads and decides again. A re-run with the same key therefore gets a fresh upload ID and object key instead of renewing the record being purged. A sweep interrupted after the fence leaves the tombstone listed for the next sweep, which treats the stored `purging` column as authoritative. So no live record points at a deleted object, and no object is orphaned by a failed sweep. Tombstones do not count toward quotas.
 
 Deletes made by a rejecting completion are pinned to the object generation it inspected (GCS `ifGenerationMatch`; a `412` means a newer re-upload owns the key and is left alone). A stale completion therefore cannot delete a re-armed upload.
 

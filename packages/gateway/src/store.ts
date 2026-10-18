@@ -535,6 +535,18 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore {
     input: SourceAdmitInput,
   ): Promise<{ record: SourceRecord; replay: boolean }> {
     validateSourceInput(input);
+    // The sweep's fence and completions CAS the row without the workspace lock, so the upsert is
+    // revision-checked; a lost race re-reads (a fenced row is then ignored and a fresh identity
+    // allocated, a completed one replayed).
+    for (let attempt = 1; ; attempt += 1) {
+      const admitted = await this.tryAdmitSource(input);
+      if (admitted) return admitted;
+      if (attempt >= 3) throw new ConflictError("Revision conflict");
+    }
+  }
+  private async tryAdmitSource(
+    input: SourceAdmitInput,
+  ): Promise<{ record: SourceRecord; replay: boolean } | null> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -567,10 +579,11 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore {
         return { record: existing!, replay: decision.replay };
       }
       const next: SourceRecord = { ...decision.record, revision: (existing?.revision ?? 0) + 1 };
-      await client.query(
+      const written = await client.query(
         `INSERT INTO embody_platform_sources(workspace_id,upload_id,app_id,idempotency_key,state,bytes,access_expires_at,retain_until,pinned,revision,document)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-        ON CONFLICT(workspace_id,upload_id) DO UPDATE SET state=EXCLUDED.state,access_expires_at=EXCLUDED.access_expires_at,retain_until=EXCLUDED.retain_until,pinned=EXCLUDED.pinned,revision=EXCLUDED.revision,document=EXCLUDED.document`,
+        ON CONFLICT(workspace_id,upload_id) DO UPDATE SET state=EXCLUDED.state,access_expires_at=EXCLUDED.access_expires_at,retain_until=EXCLUDED.retain_until,pinned=EXCLUDED.pinned,revision=EXCLUDED.revision,document=EXCLUDED.document
+        WHERE embody_platform_sources.revision=$12 AND NOT embody_platform_sources.purging`,
         [
           next.workspaceId,
           next.uploadId,
@@ -583,8 +596,14 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore {
           Boolean(next.pinnedBy),
           next.revision,
           next,
+          existing?.revision ?? 0,
         ],
       );
+      if (!written.rowCount) {
+        // Fenced by the sweep or advanced by a completion since it was read.
+        await client.query("ROLLBACK");
+        return null;
+      }
       await client.query("COMMIT");
       return { record: next, replay: decision.replay };
     } catch (error) {
@@ -642,11 +661,11 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore {
   }
   public async expiredSources(now: Date, limit: number): Promise<SourceRecord[]> {
     return (
-      await this.pool.query<{ document: SourceRecord }>(
-        "SELECT document FROM embody_platform_sources WHERE retain_until<=$1 AND NOT pinned ORDER BY retain_until LIMIT $2",
+      await this.pool.query<{ document: SourceRecord; purging: boolean }>(
+        "SELECT document,purging FROM embody_platform_sources WHERE retain_until<=$1 AND NOT pinned ORDER BY retain_until LIMIT $2",
         [now, Math.max(1, Math.min(1000, Math.trunc(limit)))],
       )
-    ).rows.map((row) => row.document);
+    ).rows.map((row) => (row.purging ? { ...row.document, purging: true } : row.document));
   }
   public async deleteSource(record: SourceRecord): Promise<boolean> {
     const result = await this.pool.query(

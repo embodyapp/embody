@@ -691,4 +691,53 @@ describe("authenticated source admission API (M10)", () => {
     expect(await f.store.source(f.workspace, APP, done.uploadId)).toBeNull();
     expect(f.objects.keys()).toEqual([pinnedRecord.objectKey]);
   });
+
+  it("never issues upload access that outlives the record's retention (F2)", async () => {
+    const f = await fixture();
+    const archive = validArchive();
+    const first = (await f.create(f.request(archive))).json<SourceStatus>();
+    // Renew access a minute before retention ends: the URL expires with the record, not after it.
+    f.advance(Date.parse(first.retainUntil) - f.clock.now().getTime() - 60_000);
+    const renewed = (await f.create(f.request(archive))).json<SourceStatus>();
+    expect(renewed).toMatchObject({ uploadId: first.uploadId, retainUntil: first.retainUntil });
+    expect(renewed.upload!.expiresAt).toBe(first.retainUntil);
+    const record = (await f.store.source(f.workspace, APP, first.uploadId))!;
+    expect(record.accessExpiresAt).toBe(first.retainUntil);
+    // Re-arming after a mismatch is capped the same way.
+    const corrupt = Buffer.from(archive);
+    corrupt[corrupt.length - 1] = corrupt[corrupt.length - 1]! ^ 0xff;
+    expect((await f.put(renewed, corrupt)).status).toBe(200);
+    expect((await f.complete(first.uploadId)).statusCode).toBe(400);
+    f.advance(30_000);
+    const rearmed = (await f.create(f.request(archive))).json<SourceStatus>();
+    expect(rearmed).toMatchObject({ uploadId: first.uploadId, attempt: 2 });
+    expect(rearmed.upload!.expiresAt).toBe(first.retainUntil);
+    // Once the sweep has run, the old URL is dead: no PUT can orphan an object.
+    f.advance(Date.parse(first.retainUntil) - f.clock.now().getTime());
+    expect(
+      await purgeExpiredSources({ store: f.store, objects: f.objects, now: f.clock.now() }),
+    ).toEqual({ deleted: 1, failed: 0, skipped: 0 });
+    expect((await f.put(rearmed, archive)).status).not.toBe(200);
+    expect(f.objects.keys()).toEqual([]);
+  });
+
+  it("leaves a record whose upload access is still live for a later sweep (F2)", async () => {
+    const f = await fixture();
+    const archive = validArchive();
+    const status = (await f.create(f.request(archive))).json<SourceStatus>();
+    const record = (await f.store.source(f.workspace, APP, status.uploadId))!;
+    // A record written before access was capped can hold a URL past its retention.
+    const late = new Date(Date.parse(record.retainUntil) + 600_000).toISOString();
+    await f.store.updateSource({ ...record, accessExpiresAt: late }, record.revision);
+    const after = new Date(Date.parse(record.retainUntil));
+    expect(await purgeExpiredSources({ store: f.store, objects: f.objects, now: after })).toEqual({
+      deleted: 0,
+      failed: 0,
+      skipped: 1,
+    });
+    expect(await f.store.source(f.workspace, APP, status.uploadId)).not.toBeNull();
+    expect(
+      await purgeExpiredSources({ store: f.store, objects: f.objects, now: new Date(late) }),
+    ).toEqual({ deleted: 1, failed: 0, skipped: 0 });
+  });
 });
