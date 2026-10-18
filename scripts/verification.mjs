@@ -170,8 +170,33 @@ export function containerImageIdentity(container) {
     .map((value) => JSON.parse(value));
   return { ...imageIdentity(imageId), name: "postgres-service", containerId };
 }
+/**
+ * Identity of the PostgreSQL server under test: a local Docker fixture container, or (M09) a
+ * managed Cloud SQL instance named by connection name. Exactly one must be configured.
+ */
+export function databaseServiceIdentity(env = process.env) {
+  const container = env.EMBODY_POSTGRES_TEST_CONTAINER?.trim();
+  const instance = env.EMBODY_POSTGRES_PROVIDER_INSTANCE?.trim();
+  if (container && instance)
+    throw new Error("Configure either a fixture container or a provider instance, not both");
+  if (instance) {
+    if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]:us-central1:embody-test-[a-z0-9-]+$/u.test(instance))
+      throw new Error(
+        "Provider PostgreSQL instance must be a dedicated embody-test Cloud SQL fixture",
+      );
+    return { name: "postgres-service", provider: "cloudsql", instance };
+  }
+  requireVariables(["EMBODY_POSTGRES_TEST_CONTAINER"], env);
+  return containerImageIdentity(container);
+}
 export async function evidence(gate, status, counts = null, images = [], details = {}) {
-  const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" }).stdout.trim();
+  // Fixture images have no .git (M09 in-region SQL job); they record their labelled source SHA.
+  const git = (...args) => {
+    const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+    return result.status === 0 ? result.stdout.trim() : null;
+  };
+  const commit = git("rev-parse", "HEAD");
+  const changes = commit === null ? null : git("status", "--porcelain", "--untracked-files=normal");
   const hash = async (path) =>
     createHash("sha256")
       .update(await readFile(resolve(root, path)))
@@ -185,8 +210,12 @@ export async function evidence(gate, status, counts = null, images = [], details
     gate,
     status,
     timestamp: new Date().toISOString(),
-    commit: git("rev-parse", "HEAD"),
-    dirty: Boolean(git("status", "--porcelain", "--untracked-files=normal")),
+    commit:
+      commit ??
+      (/^[a-f0-9]{40}$/u.test(process.env.EMBODY_SOURCE_SHA ?? "")
+        ? process.env.EMBODY_SOURCE_SHA
+        : null),
+    dirty: changes === null ? null : Boolean(changes),
     node: process.version,
     lockfileSha256: await hash("pnpm-lock.yaml"),
     schemaSourceSha256: await hash("packages/storage/src/index.ts"),

@@ -4,18 +4,27 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 const exec = promisify(execFile);
 const { fetch, AbortSignal } = globalThis;
+// M05 foundation by default; M09 reuses the same bucket under its own state prefix (MD06 $25).
+const STATES = {
+  "mvp/m05/foundation": 10,
+  "mvp/m09/baseline": 25,
+};
 export async function bootstrapState(
-  { project, region = "us-central1", budget, approved },
+  { project, region = "us-central1", budget, approved, statePrefix = "mvp/m05/foundation" },
   { fetcher = fetch, command = exec } = {},
 ) {
+  const maxBudget = STATES[statePrefix];
+  if (maxBudget === undefined) throw new Error("Unknown state prefix");
   if (
     !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(project ?? "") ||
     approved !== "true" ||
     !Number.isFinite(Number(budget)) ||
     Number(budget) <= 0 ||
-    Number(budget) > 10
+    Number(budget) > maxBudget
   )
-    throw new Error("Approved dedicated project and positive budget at most $10 required");
+    throw new Error(
+      `Approved dedicated project and positive budget at most $${maxBudget} required`,
+    );
   if (region !== "us-central1")
     throw new Error("State bootstrap currently qualified only for us-central1");
   const { stdout: projectJson } = await command("gcloud", [
@@ -74,13 +83,16 @@ export async function bootstrapState(
     throw new Error(
       "Existing state bucket is not the owned private/versioned bootstrap; refusing adoption",
     );
-  return { project, bucket, prefix: "mvp/m05/foundation", region, budgetUsd: Number(budget) };
+  return { project, bucket, prefix: statePrefix, region, budgetUsd: Number(budget) };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   bootstrapState({
     project: process.env.EMBODY_MVP_CLOUD_PROJECT,
     budget: process.env.EMBODY_MVP_CLOUD_BUDGET_USD,
     approved: process.env.EMBODY_MVP_CLOUD_BUDGET_APPROVED,
+    ...(process.env.EMBODY_MVP_CLOUD_RESOURCE_PREFIX === "embody-test-m09"
+      ? { statePrefix: "mvp/m09/baseline" }
+      : {}),
   })
     .then((result) => console.log(JSON.stringify(result)))
     .catch(() => {

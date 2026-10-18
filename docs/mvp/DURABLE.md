@@ -178,7 +178,7 @@ fails once instead of looping.
 
 ## Not yet proven
 
-- **Real queue (M09).** The Cloud Tasks adapter is unit-tested only. M09 must qualify the
+- **Real queue (M09): now qualified live** ([evidence](./evidence/M09-live-3ef5f28/README.md)): duplicate names 409 before and after execution, the 30-day horizon, 503 retries with backoff, `email`/`email_verified` in OIDC tokens, per-app queue/invoker isolation, the runtime's enqueue/actAs grants and the real adapter. The items below in this bullet remain as written for the record. M09 must qualify the
   de-duplication window, 30-day schedule limit, retry ceilings for `503` (uncommitted) answers,
   whether OIDC tokens carry `email` and `email_verified` for the invoker, audience and IAM. The app
   runtime needs `cloudtasks.tasks.create` on its own queue and `actAs` on the invoker identity;

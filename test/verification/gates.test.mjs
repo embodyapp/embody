@@ -243,7 +243,8 @@ test("cloud gate rejects unapproved budget and never returns a placeholder succe
     env.EMBODY_MVP_CLOUD_BUDGET_APPROVED = "true";
     result = run();
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /not implemented yet.*no resources created/);
+    // M09 is implemented; it still needs its baseline/image/proxy before loading provider code.
+    assert.match(result.stderr, /Missing required configuration: EMBODY_M09_BASELINE/);
     assert.doesNotMatch(result.stderr, /fixture.json/);
   } finally {
     await rm(directory, { recursive: true, force: true });

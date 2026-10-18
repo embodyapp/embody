@@ -19,6 +19,9 @@ jobs:
       - run: terraform -chdir=infra/mvp/m05 fmt -check -recursive
       - run: terraform -chdir=infra/mvp/m05 init -backend=false -lockfile=readonly
       - run: terraform -chdir=infra/mvp/m05 validate
+      - run: terraform -chdir=infra/mvp/m09 fmt -check -recursive
+      - run: terraform -chdir=infra/mvp/m09 init -backend=false -lockfile=readonly
+      - run: terraform -chdir=infra/mvp/m09 validate
 
   quality:
     runs-on: ubuntu-latest
