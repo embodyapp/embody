@@ -109,6 +109,9 @@ export function decideSourceAdmission(
   const now = input.now.getTime();
   const access = new Date(now + SOURCE_ADMISSION.uploadAccessSeconds * 1000).toISOString();
   const retain = new Date(now + SOURCE_ADMISSION.retentionDays * DAY).toISOString();
+  // Upload access never outlives the record: a PUT after the sweep would orphan an object.
+  const accessWithin = (retainUntil: string) =>
+    Date.parse(access) <= Date.parse(retainUntil) ? access : retainUntil;
   const quota = () => {
     if (usage.pendingForApp >= SOURCE_ADMISSION.maxPendingUploadsPerApp)
       throw new SourceAdmissionError("LIMIT_EXCEEDED");
@@ -138,7 +141,11 @@ export function decideSourceAdmission(
     }
     if (existing.state === "pending") {
       if (Date.parse(existing.accessExpiresAt) <= now) quota();
-      return { record: { ...prior, accessExpiresAt: access }, replay: true, write: true };
+      return {
+        record: { ...prior, accessExpiresAt: accessWithin(existing.retainUntil) },
+        replay: true,
+        write: true,
+      };
     }
     if (
       existing.state === "rejected" &&
@@ -153,7 +160,7 @@ export function decideSourceAdmission(
           ...rest,
           state: "pending",
           attempt: existing.attempt + 1,
-          accessExpiresAt: access,
+          accessExpiresAt: accessWithin(existing.retainUntil),
         },
         replay: true,
         write: true,
@@ -237,7 +244,8 @@ export async function verifySubmissionSource(
  * Retention sweep (M16 schedules it). Each record is first fenced by CAS (`purging`), so a
  * concurrent renewal either wins the CAS (the record is skipped) or, once fenced, gets a fresh
  * identity and object key. Only then is the object deleted, and the tombstone last, so no live
- * record ever points at a deleted object and a failed sweep leaves a tombstone to retry.
+ * record ever points at a deleted object and a failed sweep leaves a tombstone to retry. Records
+ * whose upload access is still live are left for a later sweep.
  */
 export async function purgeExpiredSources(options: {
   store: Pick<SourceStore, "expiredSources" | "deleteSource" | "updateSource">;
@@ -245,10 +253,8 @@ export async function purgeExpiredSources(options: {
   now?: Date;
   limit?: number;
 }): Promise<{ deleted: number; failed: number; skipped: number }> {
-  const records = await options.store.expiredSources(
-    options.now ?? new Date(),
-    options.limit ?? 100,
-  );
+  const now = options.now ?? new Date();
+  const records = await options.store.expiredSources(now, options.limit ?? 100);
   let deleted = 0;
   let failed = 0;
   let skipped = 0;
@@ -256,6 +262,12 @@ export async function purgeExpiredSources(options: {
     try {
       let fenced = record;
       if (!record.purging) {
+        // Upload access is capped at retainUntil; a record from before that cap may still hold a
+        // live signed URL, and deleting under it would let a late PUT orphan an object.
+        if (Date.parse(record.accessExpiresAt) > now.getTime()) {
+          skipped += 1;
+          continue;
+        }
         try {
           fenced = await options.store.updateSource({ ...record, purging: true }, record.revision);
         } catch (error) {
