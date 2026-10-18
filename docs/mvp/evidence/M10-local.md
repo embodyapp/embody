@@ -23,7 +23,7 @@ Two quick mutation checks confirmed the HTTP suite bites: disabling the digest c
 
 ## Residuals and open items
 
-- Live GCS: signed-URL acceptance, `x-goog-content-length-range`/`x-goog-if-generation-match` enforcement, bucket privacy and IAM are verified only against the local fake and unit tests with a local RSA signer. Phase 2 must prove them on the provider.
-- Retention default (7 days unpromoted, pinned while referenced) is a proposal pending owner confirmation (MD10).
+- Live GCS (phase 2) is now covered by [live evidence](./M10-live-f7b1423/README.md).
+- Retention default (7 days unpromoted, pinned while referenced) was approved by the owner as MD15 on 2026-10-18.
 - No source is built or deployed (MD09/M11). M12 must call `verifySubmissionSource` inside submission and pin sources; M16 must schedule `purgeExpiredSources`.
 - The gateway reads up to 10 MiB per completion in memory; the 20-in-flight workspace admission bounds the concurrency.
