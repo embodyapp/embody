@@ -450,9 +450,14 @@ export function createM11GcpProvider({
           }),
           { mode: 0o600 },
         );
-        await run("docker", ["buildx", "imagetools", "create", "-t", image, source], {
-          env: { ...process.env, DOCKER_CONFIG: config, DOCKER_HOST: dockerHost.trim() },
-        });
+        // A single manifest, like a real push (the default would wrap it in a new index).
+        await run(
+          "docker",
+          ["buildx", "imagetools", "create", "--prefer-index=false", "-t", image, source],
+          {
+            env: { ...process.env, DOCKER_CONFIG: config, DOCKER_HOST: dockerHost.trim() },
+          },
+        );
       } finally {
         await rm(config, { recursive: true, force: true });
       }
