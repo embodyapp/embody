@@ -424,6 +424,34 @@ export async function runM11Cases(deps) {
     return { pass: Object.values(checks).every(Boolean), checks, leftovers };
   });
 
+  // Tags are mutable and never deployed. Repointing an admitted artifact's tag at another image
+  // (what a stolen builder token could do) changes neither its record nor a fresh decision.
+  if (
+    deps.retag &&
+    job("durable")?.record.state === "admitted" &&
+    job("request-only")?.record.state === "admitted"
+  )
+    await record("M11.b.retag", async () => {
+      const durable = job("durable");
+      const other = job("request-only").record;
+      await deps.retag(durable.record.image, other.imageReference);
+      const decision = await g.decideAdmission({
+        plan: durable.record,
+        record: durable.record,
+        submission: durable.submission,
+        build: await deps.provider.get(durable.record.buildId),
+        readOutput: (path, max) => deps.provider.readOutput(path, max),
+      });
+      const checks = {
+        referenceUnchanged: durable.record.imageReference.endsWith(
+          `@${durable.record.imageDigest}`,
+        ),
+        redecidedSameDigest:
+          decision.admitted === true && decision.imageDigest === durable.record.imageDigest,
+      };
+      return { pass: Object.values(checks).every(Boolean), checks };
+    });
+
   await record("M11.step5.retention", async () => {
     const future = new Date(Date.now() + 91 * DAY);
     const purged = await g.purgeArtifacts({

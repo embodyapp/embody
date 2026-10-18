@@ -5,6 +5,7 @@
 // pool in the region as the builder. Tokens, signed URLs and payloads are never printed.
 import { execFile, spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
@@ -212,10 +213,10 @@ export function createM11GcpProvider({
           accountId: account.id,
           serviceAccount: { displayName: `Embody M11 qualification ${label} (disposable)` },
         });
-      for (const [repo, immutable] of [
-        [n.recipeRepo, false],
-        [n.buildsRepo, true],
-      ])
+      // Mutable tags: Artifact Registry refuses to delete a tagged version in an immutable-tag
+      // repository (FAILED_PRECONDITION), which retention and rejection cleanup need. Nothing
+      // deploys by tag: admission binds the provider-reported digest.
+      for (const repo of [n.recipeRepo, n.buildsRepo])
         await operation(
           await api(
             `${AR}/projects/${project}/locations/${M11_REGION}/repositories?repositoryId=${repo}`,
@@ -223,7 +224,7 @@ export function createM11GcpProvider({
             {
               format: "DOCKER",
               labels: { embody: "m11-qualification", run: runId },
-              dockerConfig: { immutableTags: immutable },
+              dockerConfig: { immutableTags: false },
             },
           ),
         );
@@ -424,9 +425,37 @@ export function createM11GcpProvider({
         ),
       ].sort();
     },
-    async repositoryConfig(context) {
-      const repo = await api(`${AR}/${repoPath(context.buildsRepo)}`);
-      return { immutableTags: repo?.dockerConfig?.immutableTags === true };
+    /** Points an admitted image's tag at another image (as a builder-token holder could). */
+    async retag(context, image, source) {
+      const config = await mkdtemp(join(tmpdir(), "embody-m11-retag-"));
+      try {
+        const { stdout: dockerHost } = await exec("docker", [
+          "context",
+          "inspect",
+          "--format",
+          "{{.Endpoints.docker.Host}}",
+        ]);
+        await writeFile(
+          join(config, "config.json"),
+          JSON.stringify({
+            cliPluginsExtraDirs: [
+              join(process.env.HOME ?? "", ".docker/cli-plugins"),
+              "/Applications/Docker.app/Contents/Resources/cli-plugins",
+            ],
+            auths: {
+              [repoHost]: {
+                auth: Buffer.from(`oauth2accesstoken:${await accessToken()}`).toString("base64"),
+              },
+            },
+          }),
+          { mode: 0o600 },
+        );
+        await run("docker", ["buildx", "imagetools", "create", "-t", image, source], {
+          env: { ...process.env, DOCKER_CONFIG: config, DOCKER_HOST: dockerHost.trim() },
+        });
+      } finally {
+        await rm(config, { recursive: true, force: true });
+      }
     },
     /**
      * Runs an admitted image as a one-off Cloud Run job under the no-role runtime identity. The

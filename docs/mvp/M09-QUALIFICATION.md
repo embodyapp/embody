@@ -74,7 +74,7 @@ A transaction pooler would need a separate qualification of `SET LOCAL`/RLS and 
   the fixture).
 - **Images:** bound tagged versions too (the KEEP rule only protects); per-app repositories or
   immutable tags so a build cannot overwrite another app's or the gateway's tag (M11). **M11:** app
-  images go to a separate builds repository with immutable tags, admission binds digests from the
+  images go to a separate builds repository (mutable tags, because immutable tags block deletes; nothing deploys by tag), admission binds digests from the
   provider record, and `purgeArtifacts`/`cleanupOrphanedImages` bound retained versions
   ([BUILDS](./BUILDS.md#retention-and-cleanup)); the platform repository stays builder read-only.
 - **Secrets:** no secret-version lifecycle.

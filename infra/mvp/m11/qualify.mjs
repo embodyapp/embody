@@ -55,7 +55,7 @@ export const M11_PROVIDER_METHODS = Object.freeze([
   "sources",
   "putSource",
   "builderBindings",
-  "repositoryConfig",
+  "retag",
   "runImage",
   "projectIam",
   "buildMinutes",
@@ -183,10 +183,6 @@ export async function runM11Suite(env, provider, deps) {
     await record("M11.a.builder-iam", async () =>
       evaluateBuilderBindings(await provider.builderBindings(context)),
     );
-    await record("M11.a.immutable-tags", async () => {
-      const repo = await provider.repositoryConfig(context);
-      return { pass: repo.immutableTags, ...repo };
-    });
     // A fresh read signer's tokenCreator grant propagates slowly (M10 saw minutes).
     const sources = provider.sources(context);
     await record("propagation", async () => {
@@ -222,6 +218,7 @@ export async function runM11Suite(env, provider, deps) {
       wait: (ms) => provider.wait(ms),
       pollMs: 15_000,
       buildWaitMs: M11_LIMITS.buildWaitMs,
+      retag: (image, source) => provider.retag(context, image, source),
       runnable: async (artifact) => {
         const result = await provider.runImage(context, artifact.imageReference, {
           script: RUNTIME_PROBE,
