@@ -257,7 +257,7 @@ describe("M11 build plan (trusted recipe, no customer Dockerfile)", () => {
     const script = sandboxScript();
     for (const flag of [
       "--network none",
-      "--user node:node",
+      "--user node ",
       "--cap-drop ALL",
       "--security-opt no-new-privileges",
       `--memory ${BUILD_RECIPE.sandbox.memoryBytes}`,

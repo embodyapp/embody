@@ -36,8 +36,8 @@ export const BUILD_RECIPE = Object.freeze({
   maxLockedPackages: 3_000,
   sandbox: Object.freeze({
     network: "none",
-    /** uid/gid 1000 in the pinned Node base image (named: older daemons resolve names only). */
-    user: "node:node",
+    /** uid 1000, primary gid 1000, in the pinned Node base image. A bare name: the Cloud Build daemon resolves the whole `--user` string as one passwd entry when copying into the container. */
+    user: "node",
     memoryBytes: 4 * 1024 * 1024 * 1024,
     pids: 512,
     cpus: 2,
