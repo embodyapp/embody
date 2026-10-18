@@ -788,6 +788,15 @@ describe("M11 provider adapters (request shape only; not provider evidence)", ()
     await expect(
       succeeding.deleteImage("ws_build00001/app_build00001", pin("img")),
     ).resolves.toBeUndefined();
+    const gone = [op(true, { code: 5, message: "not found" })];
+    const deleted = new CloudBuildProvider({
+      recipe,
+      accessToken: () => Promise.resolve("token-1"),
+      fetch: () => Promise.resolve(gone.shift()!),
+    });
+    await expect(
+      deleted.deleteImage("ws_build00001/app_build00001", pin("img")),
+    ).resolves.toBeUndefined();
     await expect(provider.readOutput("../etc/passwd", 10)).rejects.toThrow();
     const record = toProviderBuild({
       id: "0b1c2d3e-aaaa",

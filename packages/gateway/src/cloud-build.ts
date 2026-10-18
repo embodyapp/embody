@@ -208,6 +208,8 @@ export class CloudBuildProvider implements BuildProvider {
     }
     if (operation.error !== undefined) {
       const code = (operation.error as { code?: unknown }).code;
+      // NOT_FOUND: already deleted (for example at rejection, then again by retention).
+      if (code === 5) return;
       throw new BuildProviderError(
         `Image delete failed${Number.isInteger(code) ? ` (${String(code)})` : ""}`,
       );
