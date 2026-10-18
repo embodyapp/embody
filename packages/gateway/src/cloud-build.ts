@@ -15,6 +15,9 @@ export interface CloudBuildProviderOptions {
   readonly accessToken?: () => Promise<string>;
   readonly fetch?: typeof fetch;
   readonly timeoutMs?: number;
+  /** Bound on waiting for an image delete operation (default 120 s). */
+  readonly deleteWaitMs?: number;
+  readonly pollMs?: number;
 }
 const STATUSES: readonly ProviderBuildStatus[] = [
   "QUEUED",
@@ -41,7 +44,11 @@ export class CloudBuildProvider implements BuildProvider {
   private readonly token: () => Promise<string>;
   private readonly timeoutMs: number;
   private readonly recipe: BuildRecipeConfig;
+  private readonly deleteWaitMs: number;
+  private readonly pollMs: number;
   public constructor(options: CloudBuildProviderOptions) {
+    this.deleteWaitMs = options.deleteWaitMs ?? 120_000;
+    this.pollMs = options.pollMs ?? 2_000;
     this.recipe = options.recipe;
     this.fetcher = options.fetch ?? fetch;
     this.token = options.accessToken ?? metadataAccessToken(this.fetcher);
@@ -180,8 +187,28 @@ export class CloudBuildProvider implements BuildProvider {
       `${this.packageUrl(path)}/versions/${encodeURIComponent(digest)}?force=true`,
       { method: "DELETE" },
     );
-    if (!response.ok && response.status !== 404)
-      throw new BuildProviderError("Image delete failed");
+    if (response.status === 404) return;
+    if (!response.ok) throw new BuildProviderError("Image delete failed");
+    // A long-running operation: it can still fail (for example a manifest with a parent index),
+    // so wait for it rather than treat the accepted request as a deletion.
+    let operation = (await response.json().catch(() => ({}))) as {
+      name?: unknown;
+      done?: unknown;
+      error?: unknown;
+    };
+    const name = str(operation.name);
+    const deadline = Date.now() + this.deleteWaitMs;
+    while (
+      operation.done !== true &&
+      /^projects\/[a-z0-9-]+\/locations\/[a-z0-9-]+\/operations\/[A-Za-z0-9-]+$/.test(name)
+    ) {
+      if (Date.now() > deadline) throw new BuildProviderError("Image delete still running");
+      await new Promise((resolve) => setTimeout(resolve, this.pollMs));
+      operation = (await this.json(
+        `https://artifactregistry.googleapis.com/v1/${name}`,
+      )) as typeof operation;
+    }
+    if (operation.error !== undefined) throw new BuildProviderError("Image delete failed");
   }
   public async listImages(path: string): Promise<readonly ImageVersion[]> {
     this.packageUrl(path);

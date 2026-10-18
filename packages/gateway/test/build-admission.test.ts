@@ -758,6 +758,36 @@ describe("M11 provider adapters (request shape only; not provider evidence)", ()
       `https://artifactregistry.googleapis.com/v1/projects/embody-cloud/locations/us-central1/repositories/builds/packages/ws_build00001%2Fapp_build00001/versions/${encodeURIComponent(pin("img"))}?force=true`,
     );
     await expect(provider.deleteImage("../other", pin("img"))).rejects.toThrow();
+    // Deletes are operations: a failed one is an error, not a deletion.
+    const op = (done: boolean, error?: unknown) =>
+      Response.json({
+        name: "projects/embody-cloud/locations/us-central1/operations/op-1",
+        done,
+        ...(error ? { error } : {}),
+      });
+    const replies = [
+      op(false),
+      op(true, { code: 9, message: "manifest is referenced by parent manifests" }),
+    ];
+    const failing = new CloudBuildProvider({
+      recipe,
+      accessToken: () => Promise.resolve("token-1"),
+      pollMs: 1,
+      fetch: () => Promise.resolve(replies.shift()!),
+    });
+    await expect(failing.deleteImage("ws_build00001/app_build00001", pin("img"))).rejects.toThrow(
+      "Image delete failed",
+    );
+    const ok = [op(false), op(true)];
+    const succeeding = new CloudBuildProvider({
+      recipe,
+      accessToken: () => Promise.resolve("token-1"),
+      pollMs: 1,
+      fetch: () => Promise.resolve(ok.shift()!),
+    });
+    await expect(
+      succeeding.deleteImage("ws_build00001/app_build00001", pin("img")),
+    ).resolves.toBeUndefined();
     await expect(provider.readOutput("../etc/passwd", 10)).rejects.toThrow();
     const record = toProviderBuild({
       id: "0b1c2d3e-aaaa",
