@@ -1,1074 +1,136 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>embody — Turn Vibes into Value | The Anti-Rot Business Framework</title>
-  <meta name="description" content="Define your business data and rules once. Embody turns them into a database, command-line tools, and safe tools for AI agents." />
-
-  <!-- Fonts: Rhymezlikedimez 70s display + clean sans + monospace -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;0,700;1,400&family=Outfit:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <meta name="theme-color" content="#fdf8f2" />
+  <title>Embody — Small software. A whole new way to work.</title>
+  <meta name="description" content="A future where every team has software that fits. Explore how Embody connects purpose-built apps, business workflows, and AI on one shared foundation." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 </head>
-<body class="halftone-bg">
-  <!-- Subtle Film Grain Overlay -->
-  <div class="grain-overlay"></div>
-
-  <!-- Navigation Bar -->
-  <header class="navbar">
-    <div class="container navbar-inner">
-      <a href="#" class="brand-logo">
-        <svg width="34" height="34" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="2" y="2" width="32" height="32" rx="10" fill="#FDB849" stroke="#2C2230" stroke-width="2.5"/>
-          <path d="M10 12H26M10 18H22M10 24H26" stroke="#2C2230" stroke-width="2.5" stroke-linecap="round"/>
-          <circle cx="25" cy="18" r="3" fill="#F27A3D" stroke="#2C2230" stroke-width="2"/>
-        </svg>
-        <span>embody</span>
-        <span class="brand-badge">v1.0</span>
-      </a>
-
-      <nav class="nav-links">
-        <a href="#philosophy" class="nav-link">Why Embdy?</a>
-        <a href="#extendability" class="nav-link">The Solution</a>
-        <a href="#agents" class="nav-link">Agentic First</a>
-        <a href="#playground" class="nav-link">How it works</a>
-      </nav>
-
-      <div class="nav-actions">
-        <a href="https://skills.sh/embodyapp/embody/embody" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm cta-track" data-cta="nav_skill">Install skill</a>
-        <a href="https://github.com/embodyapp/embody" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm cta-track" data-cta="nav_github" aria-label="Star Embody on GitHub">
-          <span aria-hidden="true">★</span>
-          <span>Star</span>
-        </a>
-      </div>
-    </div>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header id="top" class="site-header wrap">
+    <a class="brand" href="#top" aria-label="Embody home"><span class="brand-mark" aria-hidden="true">e</span>embody<span class="brand-period">.</span></a>
+    <nav aria-label="Main navigation"><a href="#workday">Why Embody</a><a href="#personal-software">Personal apps</a><a href="#conversation">One chat</a><a href="#foundation">For companies</a></nav>
+    <a class="button button-small button-outline" href="https://github.com/embodyapp/embody" target="_blank" rel="noopener noreferrer">For builders <span aria-hidden="true">↗</span></a>
   </header>
+  <main id="main">
+    <section class="hero wrap">
+      <div class="eyebrow"><span class="sun-icon" aria-hidden="true">✳</span> THE CLOUD FOR SMALL SOFTWARE</div>
+      <h1>Big possibilities.<br /><span class="hand-underline">Small software.</span></h1>
+      <p class="hero-copy">Your people don’t all work the same way.<br class="desktop-break" /> Their software shouldn’t either.</p>
+      <p class="hero-detail">A new home for purpose-built apps and workflows.<br />Personal to every team. Connected to one business.</p>
+      <div class="hero-actions"><a href="#workday" class="button button-primary">Step into the future of work <span aria-hidden="true">↘</span></a><a href="#start" class="text-link">Bring your first workflow <span aria-hidden="true">↗</span></a></div>
+      <div class="hero-note"><span class="little-dot"></span> Small tools. Shared foundations. A lot less friction.</div>
+      <svg class="hero-doodle doodle-left" viewBox="0 0 120 160" fill="none" aria-hidden="true"><path d="M58 150V66M58 100C15 111 8 74 20 59C46 56 59 81 58 100ZM58 78C97 83 113 50 99 35C70 35 59 55 58 78Z" stroke="currentColor" stroke-width="3"/><path d="M19 150H99L90 111H28Z" fill="#d9bce4" stroke="currentColor" stroke-width="3"/><path d="M30 12l3 12m-19-7 10 6m80 93 10 5m-6-20-3 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <svg class="hero-doodle doodle-right" viewBox="0 0 150 150" fill="none" aria-hidden="true"><circle cx="75" cy="67" r="28" fill="#fdb849" stroke="currentColor" stroke-width="2.5"/><path d="M75 14v12m0 82v12M22 67h12m82 0h12M38 30l9 9m57 57 9 9M38 104l9-9m57-57 9-9M62 69c6 9 20 9 26 0" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><circle cx="65" cy="58" r="2" fill="currentColor"/><circle cx="85" cy="58" r="2" fill="currentColor"/><path d="M111 133c-12-5-22-5-34 0" stroke="currentColor" stroke-width="2"/></svg>
+    </section>
 
-  <!-- Hero Section -->
-  <section class="section hero-section">
-    <div class="container hero-grid">
-      
-      <!-- Hero Content -->
-      <div class="hero-content">
-        <div class="hero-sticker-row">
-          <span class="sticker badge-sun">Build Over Buy</span>
-          <span class="sticker badge-mint">One Source of Truth</span>
-          <span class="sticker badge-purple">Built for AI Agents</span>
-        </div>
-
-        <h1 class="hero-title">
-          BUILD APPS<br />
-          <span class="text-gradient-sun">FOR AGENTS.</span>
-        </h1>
-
-        <h2 class="hero-description">
-          Building the application layer for AI-native businesses.
-        </h2>
-
-        <div class="hero-cta-group">
-          <button type="button" class="btn btn-primary btn-lg copy-command-btn" data-copy="npx skills add embodyapp/embody --skill embody" title="Copy skill install command" aria-label="Copy skill install command">npx skills add embodyapp/embody --skill embody</button>
-          <a href="https://github.com/embodyapp/embody" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-lg cta-track" data-cta="hero_github"><span aria-hidden="true">★</span> Star on GitHub</a>
-        </div>
-        <p class="hero-install-subtext">One command gives your coding agent the Embody workflow, patterns, and safety guidance.</p>
-
-        <div class="hero-metrics-row">
-          <div class="metric-card">
-            <span class="metric-value">Define it once</span>
-            <span class="metric-label">Your data, actions, and rules</span>
-          </div>
-          <div class="metric-card">
-            <span class="metric-value">Use it anywhere</span>
-            <span class="metric-label">Database, command line, and AI tools</span>
-          </div>
-          <div class="metric-card">
-            <span class="metric-value">Stay in control</span>
-            <span class="metric-label">Permissions, approvals, and spending limits</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Hero Visual (Rhymezlikedimez Coastal Sunset & Lo-Fi Vinyl Deck) -->
-      <div class="hero-visual">
-        <div class="visual-art-card">
-          <div class="art-canvas-frame" id="hero-art-canvas">
-            <!-- Custom Vector SVG Scene -->
-            <svg id="hero-art-svg" viewBox="0 0 500 360" width="100%" height="100%" role="img" aria-labelledby="hero-scene-title hero-scene-desc" xmlns="http://www.w3.org/2000/svg">
-              <title id="hero-scene-title">Coastal cruise at golden hour</title>
-              <desc id="hero-scene-desc">A terracotta convertible drives along a coastal road past a mid-century villa, lavender hills and swaying palms.</desc>
-              <defs>
-                <!-- Sky Gradient: Day -> Sunset -> Night -> Dawn -->
-                <linearGradient id="skyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop id="skyStopTop" offset="0%" stop-color="#7BB8D4" />
-                  <stop id="skyStopMid" offset="55%" stop-color="#FDB849" />
-                  <stop id="skyStopBottom" offset="100%" stop-color="#F27A3D" />
-                </linearGradient>
-
-                <!-- Sun Radial Gradient -->
-                <radialGradient id="sunGlow" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stop-color="#FFFDF9" stop-opacity="1" />
-                  <stop offset="40%" stop-color="#FDB849" stop-opacity="0.9" />
-                  <stop offset="100%" stop-color="#F27A3D" stop-opacity="0" />
-                </radialGradient>
-
-                <!-- Moon Radial Glow -->
-                <radialGradient id="moonGlow" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stop-color="#FFFBEA" stop-opacity="0.9" />
-                  <stop offset="50%" stop-color="#D5E3F7" stop-opacity="0.5" />
-                  <stop offset="100%" stop-color="#1E1B4B" stop-opacity="0" />
-                </radialGradient>
-
-                <!-- Ocean Linear Gradient -->
-                <linearGradient id="seaGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop id="seaStopTop" offset="0%" stop-color="#7BB8D4" />
-                  <stop id="seaStopBottom" offset="100%" stop-color="#4E9B8F" />
-                </linearGradient>
-
-                <!-- Headlight Beam Linear Gradient -->
-                <linearGradient id="headlightGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stop-color="#FFFBEA" stop-opacity="0.9" />
-                  <stop offset="60%" stop-color="#FFF5C2" stop-opacity="0.35" />
-                  <stop offset="100%" stop-color="#FAF3E8" stop-opacity="0" />
-                </linearGradient>
-
-                <!-- Distant Mountain Gradients (Day & Night) -->
-                <linearGradient id="mountainGrad1" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop id="mount1Stop1" offset="0%" stop-color="#A084B6" />
-                  <stop id="mount1Stop2" offset="100%" stop-color="#7A5E96" />
-                </linearGradient>
-                <linearGradient id="mountainGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop id="mount2Stop1" offset="0%" stop-color="#56486E" />
-                  <stop id="mount2Stop2" offset="100%" stop-color="#3A2D4F" />
-                </linearGradient>
-              </defs>
-
-              <!-- Sky Backdrop -->
-              <rect id="sky-backdrop" x="0" y="0" width="500" height="360" fill="url(#skyGrad)" />
-
-              <!-- Stars Group (Hidden in day, sparkles in night) -->
-              <g id="sky-stars" opacity="0">
-                <circle cx="45" cy="35" r="1.5" fill="#FFFDF9" class="canvas-star star-1" />
-                <circle cx="85" cy="65" r="1" fill="#FFFDF9" class="canvas-star star-2" />
-                <circle cx="130" cy="25" r="2" fill="#FFFDF9" class="canvas-star star-3" />
-                <circle cx="170" cy="75" r="1.2" fill="#FAF3E8" class="canvas-star star-1" />
-                <circle cx="210" cy="40" r="1.8" fill="#FFFDF9" class="canvas-star star-2" />
-                <circle cx="265" cy="20" r="1" fill="#FAF3E8" class="canvas-star star-3" />
-                <circle cx="310" cy="55" r="2.2" fill="#FFFDF9" class="canvas-star star-1" />
-                <circle cx="350" cy="30" r="1.4" fill="#FFFDF9" class="canvas-star star-2" />
-                <circle cx="395" cy="60" r="1" fill="#FAF3E8" class="canvas-star star-3" />
-                <circle cx="440" cy="25" r="1.6" fill="#FFFDF9" class="canvas-star star-1" />
-                <circle cx="475" cy="70" r="1.2" fill="#FFFDF9" class="canvas-star star-2" />
-                <circle cx="110" cy="110" r="1.2" fill="#FAF3E8" class="canvas-star star-3" />
-                <circle cx="370" cy="95" r="1.5" fill="#FFFDF9" class="canvas-star star-1" />
-                <!-- 4-point cross sparkles -->
-                <path d="M 130 20 L 130 30 M 125 25 L 135 25" stroke="#FFFDF9" stroke-width="0.8" opacity="0.9" />
-                <path d="M 310 50 L 310 60 M 305 55 L 315 55" stroke="#FFFDF9" stroke-width="0.8" opacity="0.9" />
-              </g>
-
-              <!-- Sun Group (Sets behind mountains in dusk) -->
-              <g id="sky-sun" transform="translate(0, 0)">
-                <circle id="sun-glow-circle" cx="250" cy="140" r="95" fill="url(#sunGlow)" />
-                <circle id="sun-core" cx="250" cy="140" r="50" fill="#FFFBEA" stroke="#2C2230" stroke-width="2.5" />
-              </g>
-
-              <!-- Moon Group (Rises in night) -->
-              <g id="sky-moon" opacity="0" transform="translate(250, 190)">
-                <circle cx="0" cy="0" r="45" fill="url(#moonGlow)" />
-                <circle cx="0" cy="0" r="22" fill="#FFFBEA" stroke="#2C2230" stroke-width="2.5" />
-                <!-- Moon craters / subtle textures -->
-                <circle cx="-5" cy="-4" r="4" fill="#E2E8F0" opacity="0.7" />
-                <circle cx="6" cy="6" r="3.5" fill="#E2E8F0" opacity="0.7" />
-                <circle cx="7" cy="-7" r="2.5" fill="#E2E8F0" opacity="0.6" />
-              </g>
-
-              <!-- Quiet graphic clouds and little birds keep the sky spacious -->
-              <g id="scene-clouds" fill="#FFF8EB" stroke="#2C2230" stroke-width="2" stroke-linejoin="round" opacity="0.82">
-                <path d="M25 77 Q29 68 39 70 Q44 59 56 62 Q65 63 67 71 Q78 68 82 77 Z" />
-                <path d="M373 92 Q378 84 390 85 Q394 75 407 77 Q417 79 419 86 Q429 83 434 92 Z" />
-              </g>
-              <g fill="none" stroke="#56486E" stroke-width="1.8" stroke-linecap="round">
-                <path d="M315 118 q5 -5 10 0 q5 -5 10 0" />
-                <path d="M343 128 q4 -4 8 0 q4 -4 8 0" />
-              </g>
-
-              <!-- Hand-drawn sun rings: restrained print-poster detail -->
-              <g fill="none" stroke="#FFF8EB" stroke-linecap="round" opacity="0.65">
-                <path d="M188 143 a62 62 0 0 1 124 0" stroke-width="1.5" />
-                <path d="M178 143 a72 72 0 0 1 144 0" stroke-width="1" />
-              </g>
-
-              <!-- Distant Coastal Mountains & Mid-century Silhouettes -->
-              <path id="mountains-far" d="M-10 230 Q 120 180 250 220 T 510 200 L 510 260 L -10 260 Z" fill="url(#mountainGrad1)" stroke="#2C2230" stroke-width="2.5" />
-              <path id="mountains-near" d="M-10 240 Q 180 200 360 245 T 510 230 L 510 270 L -10 270 Z" fill="url(#mountainGrad2)" stroke="#2C2230" stroke-width="2.5" />
-
-              <!-- Distant shoreline, drawn as clear-cut layers -->
-              <path d="M0 247 Q90 224 171 244 Q223 230 268 248 L0 255 Z" fill="#D66248" stroke="#2C2230" stroke-width="2" />
-
-              <!-- Mid Century Cantilever Villa Deck on Cliff -->
-              <g id="villa-structure">
-                <path d="M14 194 L121 194 L135 201 L15 201 Z" fill="#56486E" stroke="#2C2230" stroke-width="2" stroke-linejoin="round" />
-                <rect x="20" y="201" width="110" height="5" rx="2" fill="#FAF3E8" stroke="#2C2230" stroke-width="2" />
-                <rect x="35" y="203" width="80" height="24" fill="#FAF3E8" stroke="#2C2230" stroke-width="2" />
-                <line x1="50" y1="203" x2="50" y2="227" stroke="#2C2230" stroke-width="1.5" />
-                <line x1="75" y1="203" x2="75" y2="227" stroke="#2C2230" stroke-width="1.5" />
-                <!-- Villa Warm Windows (Light up at night) -->
-                <rect class="villa-window" x="40" y="208" width="8" height="14" rx="1" fill="#2C2230" stroke="#2C2230" stroke-width="1" />
-                <rect class="villa-window" x="55" y="208" width="15" height="14" rx="1" fill="#2C2230" stroke="#2C2230" stroke-width="1" />
-                <rect class="villa-window" x="80" y="208" width="15" height="14" rx="1" fill="#2C2230" stroke="#2C2230" stroke-width="1" />
-                <rect class="villa-window" x="100" y="208" width="8" height="14" rx="1" fill="#2C2230" stroke="#2C2230" stroke-width="1" />
-              </g>
-
-              <!-- Ocean Horizon -->
-              <g id="ocean-group">
-                <rect id="ocean-body" x="-10" y="250" width="520" height="40" fill="url(#seaGrad)" stroke="#2C2230" stroke-width="2.5" />
-                <line class="ocean-wave wave-1" x1="80" y1="265" x2="160" y2="265" stroke="#FFFDF9" stroke-width="2" stroke-linecap="round" />
-                <line class="ocean-wave wave-2" x1="260" y1="272" x2="380" y2="272" stroke="#FFFDF9" stroke-width="2" stroke-linecap="round" />
-                <line class="ocean-wave wave-3" x1="30" y1="280" x2="90" y2="280" stroke="#FFFDF9" stroke-width="1.5" stroke-linecap="round" opacity="0.6" />
-                <line class="ocean-wave wave-4" x1="410" y1="262" x2="470" y2="262" stroke="#FFFDF9" stroke-width="1.5" stroke-linecap="round" opacity="0.6" />
-              </g>
-
-              <!-- Sunlit ripples and a tucked-away sailboat -->
-              <path d="M216 257 l9 -11 v11 Z" fill="#FFFDF9" stroke="#2C2230" stroke-width="1.4" />
-              <path d="M211 259 h20 l-4 3 h-12 Z" fill="#D66248" stroke="#2C2230" stroke-width="1.4" />
-              <g fill="none" stroke="#FFFBEA" stroke-linecap="round" opacity="0.65">
-                <path d="M225 274 h40 M116 271 h28 M398 279 h31" />
-              </g>
-
-              <!-- Coastal Highway -->
-              <g id="highway-group">
-                <path id="road-body" d="M -10 360 Q 200 275 510 320 L 510 360 Z" fill="#EADBC8" stroke="#2C2230" stroke-width="3" />
-                <path d="M0 349 Q205 269 500 313" fill="none" stroke="#FFFDF9" stroke-width="2" opacity="0.8" />
-                <!-- Dashed Center Lines -->
-                <path id="road-lines" d="M -10 360 Q 200 275 510 320" stroke="#FDB849" stroke-width="3.5" stroke-dasharray="16 14" stroke-linecap="round" fill="none" />
-              </g>
-
-              <!-- Headlight Projection Beam (Casts onto highway in front of car at dusk/night) -->
-              <g id="headlight-beam" opacity="0">
-                <polygon points="382,307 510,290 510,345 382,312" fill="url(#headlightGrad)" />
-              </g>
-
-              <!-- Classic Convertible Sports Car (Rhymezlikedimez Ligne Claire style) -->
-              <g id="hero-convertible" transform="translate(190, 275)">
-                <!-- Car Chassis with Suspension Bounce & Tilt -->
-                <g id="car-chassis">
-                  <!-- Exhaust Puff Particles -->
-                  <g id="car-exhaust" transform="translate(0, 42)">
-                    <circle cx="-5" cy="-2" r="3" fill="#FAF3E8" opacity="0" class="exhaust-puff puff-1" />
-                    <circle cx="-14" cy="-5" r="4.5" fill="#FAF3E8" opacity="0" class="exhaust-puff puff-2" />
-                    <circle cx="-24" cy="-8" r="6" fill="#FAF3E8" opacity="0" class="exhaust-puff puff-3" />
-                  </g>
-
-                  <!-- The dropped shadow grounds the car on the road -->
-                  <ellipse cx="105" cy="59" rx="98" ry="6" fill="#2C2230" opacity="0.18" />
-                  <!-- Car Body -->
-                  <path d="M 15 28 C 30 18 70 16 110 18 C 125 10 145 10 160 18 L 185 24 C 198 28 205 38 198 48 C 190 54 20 54 10 48 C 4 42 6 32 15 28 Z" fill="#F27A3D" stroke="#2C2230" stroke-width="2.5" />
-                  <!-- Broad cel-shaded door, trim and a little rear light -->
-                  <path d="M19 33 Q73 25 113 28 L175 28" fill="none" stroke="#FFB37B" stroke-width="3" stroke-linecap="round" />
-                  <path d="M68 29 L65 48 M65 48 H132" fill="none" stroke="#2C2230" stroke-width="1.8" stroke-linecap="round" />
-                  <path d="M79 32 h12" stroke="#2C2230" stroke-width="2" stroke-linecap="round" />
-                  <path d="M12 37 h10" stroke="#FFF1D0" stroke-width="4" stroke-linecap="round" />
-                  <path d="M116 51 h40" stroke="#FFE0B2" stroke-width="2" stroke-linecap="round" />
-                  <!-- Windshield -->
-                  <path d="M 110 18 L 125 4 L 148 4 L 146 18 Z" fill="#A3D9C9" stroke="#2C2230" stroke-width="2.5" />
-                  <!-- Relaxed Character Driver with Bucket Hat & Shades -->
-                  <g id="driver-character">
-                    <circle cx="105" cy="4" r="8" fill="#FDB849" stroke="#2C2230" stroke-width="2" />
-                    <path d="M 97 -1 Q 105 -7 113 -1 L 115 2 L 95 2 Z" fill="#56486E" stroke="#2C2230" stroke-width="2" />
-                    <line x1="102" y1="4" x2="108" y2="4" stroke="#2C2230" stroke-width="2" stroke-linecap="round" />
-                  </g>
-                  <!-- Steering Wheel -->
-                  <ellipse cx="118" cy="14" rx="4" ry="7" fill="none" stroke="#2C2230" stroke-width="2" />
-                  <!-- Chrome Bumper & Headlight -->
-                  <circle id="car-headlight-bulb" cx="192" cy="32" r="5" fill="#FFFDF9" stroke="#2C2230" stroke-width="2" />
-                </g>
-
-                <!-- Wheels (Separated from chassis so wheels stay planted on road while rotating) -->
-                <!-- Rear Wheel -->
-                <g class="wheel-assembly" transform="translate(45, 50)">
-                  <circle cx="0" cy="0" r="14" fill="#2C2230" stroke="#2C2230" stroke-width="2" />
-                  <g class="car-wheel-hub">
-                    <circle cx="0" cy="0" r="6" fill="#FAF3E8" stroke="#2C2230" stroke-width="2" />
-                    <line x1="-5" y1="0" x2="5" y2="0" stroke="#2C2230" stroke-width="1.8" stroke-linecap="round" />
-                    <line x1="0" y1="-5" x2="0" y2="5" stroke="#2C2230" stroke-width="1.8" stroke-linecap="round" />
-                  </g>
-                </g>
-                <!-- Front Wheel -->
-                <g class="wheel-assembly" transform="translate(165, 50)">
-                  <circle cx="0" cy="0" r="14" fill="#2C2230" stroke="#2C2230" stroke-width="2" />
-                  <g class="car-wheel-hub">
-                    <circle cx="0" cy="0" r="6" fill="#FAF3E8" stroke="#2C2230" stroke-width="2" />
-                    <line x1="-5" y1="0" x2="5" y2="0" stroke="#2C2230" stroke-width="1.8" stroke-linecap="round" />
-                    <line x1="0" y1="-5" x2="0" y2="5" stroke="#2C2230" stroke-width="1.8" stroke-linecap="round" />
-                  </g>
-                </g>
-              </g>
-
-              <!-- Tropical Palm Tree (Ligne claire) -->
-              <g id="palm-tree" transform="translate(420, 160)">
-                <!-- Trunk -->
-                <path d="M 30 180 Q 20 100 35 15" fill="none" stroke="#2C2230" stroke-width="9" stroke-linecap="round" />
-                <path d="M 30 180 Q 20 100 35 15" fill="none" stroke="#D66248" stroke-width="5" stroke-linecap="round" />
-                <path d="M26 120 l8 -4 M26 103 l8 -4 M28 85 l8 -4 M31 67 l8 -4" fill="none" stroke="#2C2230" stroke-width="1.3" stroke-linecap="round" />
-                <!-- Fronds -->
-                <g id="palm-fronds">
-                  <path d="M 35 15 Q 10 -25 -40 -10 Q 0 -5 35 15 Z" fill="#4E9B8F" stroke="#2C2230" stroke-width="2.5" />
-                  <path d="M 35 15 Q 65 -35 105 -15 Q 70 -5 35 15 Z" fill="#4E9B8F" stroke="#2C2230" stroke-width="2.5" />
-                  <path d="M 35 15 Q -15 0 -55 35 Q -20 20 35 15 Z" fill="#A3D9C9" stroke="#2C2230" stroke-width="2.5" />
-                  <path d="M 35 15 Q 80 10 110 50 Q 75 30 35 15 Z" fill="#A3D9C9" stroke="#2C2230" stroke-width="2.5" />
-                </g>
-                <!-- Coconuts -->
-                <circle cx="30" cy="18" r="4" fill="#56486E" stroke="#2C2230" stroke-width="1.5" />
-                <circle cx="37" cy="19" r="4" fill="#56486E" stroke="#2C2230" stroke-width="1.5" />
-              </g>
-              <!-- Foreground dune plants make the road feel set into the coast -->
-              <g fill="none" stroke="#2C2230" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M16 354 q-8 -11 -6 -17 M16 354 q4 -15 12 -17 M16 354 q-1 -17 2 -22" />
-                <path d="M465 359 q-5 -13 -4 -21 M465 359 q7 -16 15 -19 M465 359 q-1 -15 4 -22" />
-              </g>
-            </svg>
-          </div>
-
-          <!-- Turntable Player Audio Widget -->
-          <div class="turntable-card">
-            <div class="turntable-info">
-              <div class="vinyl-disc" id="vinyl-disc"></div>
-              <div class="track-meta">
-                <span class="track-title">Coastline FM · Sunset Drive</span>
-                <span class="track-artist" id="vinyl-status" aria-live="polite">Original groove · press play to listen</span>
-              </div>
-            </div>
-            <button type="button" class="btn btn-secondary btn-sm" id="vinyl-toggle" aria-label="Play Coastline FM" aria-pressed="false">Play</button>
-          </div>
-        </div>
-      </div>
-
-    </div>
-  </section>
-
-  <!-- Agent and MCP compatibility -->
-  <section class="integration-strip" aria-labelledby="integrations-title">
-    <div class="container">
-      <div class="integration-intro">
-        <div>
-          <span class="integration-eyebrow">Use the tools you already know</span>
-          <h2 id="integrations-title">Build with your favorite coding agent.</h2>
-        </div>
-        <p>Install the Embody skill while you build, then connect MCP-compatible agents to the apps you create.</p>
-      </div>
-
-      <ul class="integration-logos" aria-label="Compatible coding agents and protocols">
-        <li class="integration-logo-card">
-          <img src="/integrations/openai.svg" alt="OpenAI logo" />
-          <span><strong>Codex</strong><small>OpenAI</small></span>
-        </li>
-        <li class="integration-logo-card">
-          <img src="/integrations/anthropic.svg" alt="Anthropic logo" />
-          <span><strong>Claude Code</strong><small>Anthropic</small></span>
-        </li>
-        <li class="integration-logo-card">
-          <img src="/integrations/antigravity.png" alt="Google Antigravity logo" />
-          <span><strong>Antigravity</strong><small>Google</small></span>
-        </li>
-        <li class="integration-logo-card">
-          <img src="/integrations/pi.svg" alt="Pi logo" />
-          <span><strong>Pi</strong><small>Earendil</small></span>
-        </li>
-        <li class="integration-logo-card">
-          <img src="/integrations/cursor.svg" alt="Cursor logo" />
-          <span><strong>Cursor</strong><small>Anysphere</small></span>
-        </li>
-        <li class="integration-logo-card integration-logo-mcp">
-          <img src="/integrations/mcp.svg" alt="Model Context Protocol logo" />
-          <span><strong>Any MCP client</strong><small>Open standard</small></span>
-        </li>
+    <section class="agent-section wrap" aria-labelledby="agents-heading">
+      <div class="agent-intro"><div><span class="eyebrow">YOUR AGENT. YOUR IDEAS.</span><h2 id="agents-heading">Build with your favorite coding agent.</h2></div><p>Build with the Embody skill.<br />Connect your apps to MCP-compatible agents.</p></div>
+      <ul class="agent-logos" aria-label="Coding agents and protocols">
+        <li><img src="/integrations/anthropic.svg" alt="" width="32" height="32" /><span><strong>Claude Code</strong><small>Anthropic</small></span></li>
+        <li><img src="/integrations/openai.svg" alt="" width="32" height="32" /><span><strong>Codex</strong><small>OpenAI</small></span></li>
+        <li><img src="/integrations/antigravity.png" alt="" width="32" height="32" /><span><strong>Antigravity</strong><small>Google</small></span></li>
+        <li><img src="/integrations/pi.svg" alt="" width="32" height="32" /><span><strong>Pi</strong><small>Earendil</small></span></li>
+        <li><img src="/integrations/cursor.svg" alt="" width="32" height="32" /><span><strong>Cursor</strong><small>Anysphere</small></span></li>
+        <li><img src="/integrations/mcp.svg" alt="" width="32" height="32" /><span><strong>Any MCP client</strong><small>Open standard</small></span></li>
       </ul>
-    </div>
-  </section>
+    </section>
 
-  <!-- Customer testimonials -->
-  <section class="section testimonials-section" id="testimonials" aria-labelledby="testimonials-title">
-    <div class="container">
-      <div class="testimonials-heading-row gsap-reveal">
-        <div class="section-header testimonials-header">
-          <span class="badge-tag badge-purple">Built for real work</span>
-          <h2 id="testimonials-title">HOW PEOPLE USE EMBODY</h2>
-          <p class="lead">Build tools around your work, automate routine tasks, and stay in control.</p>
+    <section id="workday" class="workday-section wrap" aria-labelledby="workday-heading">
+      <div class="guided-heading"><span class="eyebrow">FROM “IT WORKS” TO “WE USE IT”</span><h2 id="workday-heading">From “it works” to “we use it.”</h2><p>Same AI-built app. A very different road to your team.</p></div>
+      <div class="demo-shell comparison-shell">
+        <div class="cloud-comparison">
+          <article class="comparison-side side-without" aria-labelledby="without-heading">
+            <span class="comparison-label">WITHOUT EMBODY</span>
+            <h3 id="without-heading">Build the app.<br />Then build everything around it.</h3>
+            <div class="process-start"><span aria-hidden="true">✓</span> Your AI-built app <strong>READY</strong></div>
+            <ol class="deployment-path long-path" aria-label="Illustrative enterprise deployment handoffs without a shared platform">
+              <li><span class="path-node" aria-hidden="true">1</span><div><span class="handoff-owner">YOU → DEVOPS</span><strong>Open a ticket. Wait for capacity.</strong><small>Hosting · Database · Deployment pipeline</small></div></li>
+              <li><span class="path-node" aria-hidden="true">2</span><div><span class="handoff-owner">DEVOPS ↔ YOU</span><strong>Make it work in production.</strong><small>Environment · Secrets · Build failures</small></div></li>
+              <li><span class="path-node" aria-hidden="true">3</span><div><span class="handoff-owner">YOU ↔ SECURITY</span><strong>Review. Fix findings. Review again.</strong><small>Code · Dependencies · Customer-data exposure</small></div></li>
+              <li><span class="path-node" aria-hidden="true">4</span><div><span class="handoff-owner">IT + DATA OWNER</span><strong>Get sign-off on who can access what.</strong><small>SSO · CRM permissions · Approved data use</small><span class="path-risk">Work around the process? Shadow AI risk.</span></div></li>
+              <li><span class="path-node" aria-hidden="true">5</span><div><span class="handoff-owner">RELEASE + OPERATIONS</span><strong>Get it approved for launch.</strong><small>Testing · Monitoring · Rollback · Support owner</small></div></li>
+              <li class="path-finish"><span class="path-node" aria-hidden="true">→</span><div><strong>Finally, share with the team.</strong><small>Keep it patched, monitored, and supported.</small></div></li>
+            </ol>
+            <p class="process-bottom">A small app. A whole delivery process.</p>
+          </article>
+          <article class="comparison-side side-with" aria-labelledby="with-heading">
+            <span class="comparison-label"><span aria-hidden="true">✳</span> WITH EMBODY</span>
+            <h3 id="with-heading">Build the app.<br />Give it a shared home.</h3>
+            <div class="process-start"><span aria-hidden="true">✓</span> Your AI-built app <strong>READY</strong></div>
+            <ol class="deployment-path short-path" aria-label="Embody cloud preview: configure, deploy, and share">
+              <li class="platform-step"><span class="path-node" aria-hidden="true">1</span><div><strong>Configure it on Embody</strong><small>Connect data · Choose people · Assign owner</small><div class="process-platform"><span class="brand-mark small-mark" aria-hidden="true">e</span><span>Shared runtime<br /><small>Hosting · Access · Lifecycle</small></span></div></div></li>
+              <li><span class="path-node" aria-hidden="true">2</span><div><span class="handoff-owner">YOUR ENTERPRISE CONTROLS STILL APPLY</span><strong>Review the app. Approve its access.</strong><small>App-specific security, data, and release checks.</small></div></li>
+              <li class="path-finish"><span class="path-node" aria-hidden="true">✓</span><div><strong>Deploy. Let the team use it.</strong><small>Reuse the operating foundation—not the setup work.</small></div></li>
+            </ol>
+            <div class="time-back"><span aria-hidden="true">✳</span><strong>Back to your actual work.</strong><p>Less repeated setup. Fewer infrastructure handoffs.<br />Not fewer responsibilities.</p></div>
+            <p class="process-bottom">Next app? Same foundation.</p>
+          </article>
         </div>
-        <div class="testimonial-controls" aria-label="Testimonial controls">
-          <button class="testimonial-arrow" id="testimonial-prev" type="button" aria-label="Previous testimonial">←</button>
-          <button class="testimonial-arrow" id="testimonial-next" type="button" aria-label="Next testimonial">→</button>
-        </div>
+        <div class="comparison-disclosure"><strong>Cloud experience preview</strong> · Illustrative enterprise process; requirements vary. Shared infrastructure does not replace app-specific security review, approvals, or ongoing maintenance. Managed-cloud experience is a preview.</div>
       </div>
+      <div class="demo-takeaway"><h3>Small apps. Not another infrastructure job.</h3><p>A shared home to run your apps, control access, and keep track of who owns what.</p></div>
 
-      <div class="testimonial-carousel gsap-reveal" aria-roledescription="carousel">
-        <div class="testimonial-viewport" id="testimonial-viewport">
-          <div class="testimonial-track" id="testimonial-track">
-            <article class="testimonial-card">
-              <blockquote>“I used Embody to build an internal app around the way my team already works. I didn’t have to change my process to fit another software product.”</blockquote>
-              <div class="testimonial-person">
-                <a class="testimonial-avatar testimonial-avatar-fallback" href="https://www.linkedin.com/in/oribentov" target="_blank" rel="noopener noreferrer" aria-label="Ori Bentov on LinkedIn">OB</a>
-                <div class="testimonial-person-copy">
-                  <strong>Ori Bentov</strong>
-                </div>
-              </div>
-            </article>
+    </section>
 
-            <article class="testimonial-card">
-              <blockquote>“As my needs changed, I could add new steps and information without rebuilding the whole app. Embody made it easy for the software to grow with me.”</blockquote>
-              <div class="testimonial-person">
-                <a href="https://www.linkedin.com/in/noam-ginsberg" target="_blank" rel="noopener noreferrer" aria-label="Noam Ginsberg on LinkedIn">
-                  <img class="testimonial-avatar" src="/testimonials/noam-ginsberg.jpg" alt="Noam Ginsberg" />
-                </a>
-                <div class="testimonial-person-copy">
-                  <strong>Noam Ginsberg</strong>
-                </div>
-              </div>
-            </article>
-
-            <article class="testimonial-card">
-              <blockquote>“Embody gave my AI agent one reliable place to find information and complete routine work. That meant fewer manual updates and less back-and-forth for me.”</blockquote>
-              <div class="testimonial-person">
-                <a class="testimonial-avatar testimonial-avatar-fallback avatar-purple" href="https://www.linkedin.com/in/avibiko" target="_blank" rel="noopener noreferrer" aria-label="Avishay Bikowsky on LinkedIn">AB</a>
-                <div class="testimonial-person-copy">
-                  <strong>Avishay Bikowsky</strong>
-                </div>
-              </div>
-            </article>
-
-            <article class="testimonial-card">
-              <blockquote>“I could give an AI agent access to everyday tasks while keeping important actions behind an approval. It helped me automate work without giving up control.”</blockquote>
-              <div class="testimonial-person">
-                <a href="https://www.linkedin.com/in/nimrod-feldman-7a1682123" target="_blank" rel="noopener noreferrer" aria-label="Nimrod Feldman on LinkedIn">
-                  <img class="testimonial-avatar" src="/testimonials/nimrod-feldman.jpg" alt="Nimrod Feldman" />
-                </a>
-                <div class="testimonial-person-copy">
-                  <strong>Nimrod Feldman</strong>
-                </div>
-              </div>
-            </article>
-          </div>
-        </div>
-        <div class="testimonial-dots" id="testimonial-dots" aria-label="Choose testimonial page"></div>
+    <section id="personal-software" class="possibility-section wrap" aria-labelledby="possibility-heading">
+      <div class="section-heading"><span class="eyebrow">SMALL SOFTWARE. PERSONAL BY DESIGN.</span><h2 id="possibility-heading">Same business.<br />Software that fits each person.</h2></div>
+      <div class="personalization-picture">
+        <div class="one-size"><h3>One size fits nobody.</h3><div class="one-screen" aria-label="One generic CRM screen for everyone"><span>Company CRM</span><div class="generic-lines" aria-hidden="true"><i></i><i></i><i></i></div></div><div class="people-branch" aria-hidden="true"></div><div class="same-people" aria-label="Maya, Sam, and Alex share the same interface"><span>M</span><span>S</span><span>A</span></div></div>
+        <span class="personalization-arrow" aria-hidden="true">→</span>
+        <div class="each-person"><h3>To each, their own.</h3><div class="personal-tools">
+          <div class="personal-tool tool-peach"><div class="tool-person"><span aria-hidden="true">M</span><strong>Maya</strong></div><div class="tiny-tool"><h4>My pipeline</h4><div class="tiny-board" aria-hidden="true"><i></i><i></i><i></i></div></div></div>
+          <div class="personal-tool tool-mint"><div class="tool-person"><span aria-hidden="true">S</span><strong>Sam</strong></div><div class="tiny-tool"><h4>My onboardings</h4><div class="tiny-checks" aria-hidden="true"><span>✓ <i></i></span><span>✓ <i></i></span><span>□ <i></i></span></div></div></div>
+          <div class="personal-tool tool-lavender"><div class="tool-person"><span aria-hidden="true">A</span><strong>Alex</strong></div><div class="tiny-tool"><h4>My forecast</h4><div class="tiny-chart" aria-hidden="true"><i></i><i></i><i></i><i></i></div></div></div>
+        </div><div class="personal-data">One shared CRM. Three personal apps.</div></div>
       </div>
-    </div>
-  </section>
+      <p class="personalization-note">Illustrative custom apps · Shared data, explicitly configured access.</p>
+    </section>
 
-  <!-- The Two Traps vs The Commons Section -->
-  <section class="section" id="philosophy">
-    <div class="container">
-      <div class="section-header gsap-reveal">
-        <span class="badge-tag badge-terracotta">Pain vs. Solution Architecture</span>
-        <h2>WHY VIBE APPS FAIL?</h2>
-        <p class="lead">AI-generated apps often end up with separate databases, permissions, and rules. Embody keeps everything working from the same definition.</p>
-      </div>
-
-      <!-- Two Comparison Diagrams: Pain vs Solution -->
-      <div class="pain-solution-diagrams-grid">
-
-        <!-- ====================================================
-             DIAGRAM 1: THE PAIN (Before embody: Spaghetti Chaos)
-             ==================================================== -->
-        <div class="diagram-comparison-card pain-card gsap-stagger-item">
-          <div class="diagram-card-header">
-            <div class="diagram-badge-row">
-              <span class="badge-tag badge-terracotta">❌ The Pain: Vibe-Coding Without embody</span>
+    <section id="conversation" class="conversation-section" aria-labelledby="conversation-heading">
+      <div class="wrap chat-control-layout">
+        <div class="chat-control-copy"><span class="eyebrow">STOP SWITCHING TABS.</span><h2 id="conversation-heading">All your business apps.<br />One chat.</h2><p>Tell it what you need.<br />Act across your connected apps.</p></div>
+        <figure class="chat-control-visual" aria-label="One chat request prepares actions in CRM, tasks, and billing">
+          <div class="business-chat">
+            <div class="business-chat-header"><span class="brand-mark small-mark" aria-hidden="true">e</span><strong>embody</strong><span class="chat-preview-label">CHAT PREVIEW</span></div>
+            <div class="business-chat-thread">
+              <div class="chat-message user-message"><span class="chat-speaker">You</span><div class="chat-bubble"><p>Close the Acme deal, start onboarding, and draft the invoice.</p></div></div>
+              <div class="chat-message assistant-message"><span class="chat-speaker"><span class="chat-assistant-icon" aria-hidden="true">✳</span> Embody</span><div class="chat-bubble"><p>Ready across your three apps.<br />Review these before I go ahead.</p>
+                <div class="chat-app-actions" aria-label="Actions awaiting your approval">
+                  <div class="chat-app-action chat-crm"><span class="chat-app-icon" aria-hidden="true">↗</span><strong>CRM</strong><span>Close Acme deal</span></div>
+                  <div class="chat-app-action chat-tasks"><span class="chat-app-icon" aria-hidden="true">✓</span><strong>Tasks</strong><span>Start onboarding</span></div>
+                  <div class="chat-app-action chat-billing"><span class="chat-app-icon" aria-hidden="true">▤</span><strong>Billing</strong><span>Draft invoice</span></div>
+                </div>
+                <div class="chat-review"><span class="chat-approval-preview">Approve 3 actions <span aria-hidden="true">↗</span></span><span>You approve. Nothing runs yet.</span></div>
+              </div></div>
             </div>
-            <h3>Fragmented Silos &amp; Drifting Schemas</h3>
-            <p class="diagram-desc">Isolated databases, duplicate auth, and drifting schemas. Every prompt adds technical debt.</p>
+            <div class="chat-composer" aria-label="Illustrative message composer, not interactive"><span>Ask about your business…</span><span class="chat-send-preview" aria-hidden="true">↑</span></div>
           </div>
-
-          <!-- Visual SVG Architecture Diagram: Spaghetti & Collision -->
-          <div class="diagram-canvas canvas-pain">
-
-            <!-- SVG Network Graph: Spaghetti Mesh -->
-            <div class="svg-diagram-wrapper">
-              <svg viewBox="0 0 520 260" class="arch-network-svg" preserveAspectRatio="xMidYMid meet">
-                <defs>
-                  <!-- Glow filter for error points -->
-                  <filter id="red-glow" x="-20%" y="-20%" width="140%" height="140%">
-                    <feGaussianBlur stdDeviation="3" result="blur" />
-                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                  </filter>
-                </defs>
-
-                <!-- Tangled Broken Connection Lines -->
-                <!-- App 1 to various outputs -->
-                <path d="M 85 45 C 85 110, 390 90, 435 215" class="wire-broken wire-dashed-1" />
-                <path d="M 85 45 C 85 130, 160 120, 175 215" class="wire-broken" />
-                <path d="M 85 45 C 130 90, 270 110, 305 215" class="wire-broken wire-dashed-2" />
-
-                <!-- App 2 to various outputs -->
-                <path d="M 260 45 C 260 110, 85 130, 45 215" class="wire-broken wire-dashed-2" />
-                <path d="M 260 45 C 220 130, 190 120, 175 215" class="wire-broken" />
-                <path d="M 260 45 C 300 120, 410 130, 435 215" class="wire-broken wire-dashed-1" />
-
-                <!-- App 3 to various outputs -->
-                <path d="M 435 45 C 435 110, 70 110, 45 215" class="wire-broken" />
-                <path d="M 435 45 C 380 130, 320 130, 305 215" class="wire-broken wire-dashed-2" />
-                <path d="M 435 45 C 435 120, 435 140, 435 215" class="wire-broken wire-dashed-1" />
-
-                <!-- Central Collision & Fracture Alert Hubs -->
-                <g transform="translate(195, 110)">
-                  <rect x="-65" y="-14" width="130" height="28" rx="14" class="alert-box-rect" />
-                  <text x="0" y="4" text-anchor="middle" class="alert-box-text">💥 Schema Drift</text>
-                </g>
-
-                <g transform="translate(345, 125)">
-                  <rect x="-70" y="-14" width="140" height="28" rx="14" class="alert-box-rect" />
-                  <text x="0" y="4" text-anchor="middle" class="alert-box-text">⚠️ 3x Auth Re-invented</text>
-                </g>
-
-                <!-- TOP ROW NODES: Uncoordinated Apps -->
-                <!-- App 1 -->
-                <g transform="translate(85, 30)" class="svg-node-group">
-                  <rect x="-65" y="-22" width="130" height="44" rx="8" class="svg-node-bg bg-danger-node" />
-                  <text x="-48" y="4" class="node-emoji">🤖</text>
-                  <text x="-25" y="-3" class="node-title-svg">CRM App</text>
-                  <text x="-25" y="11" class="node-sub-svg">Claude prompt</text>
-                </g>
-
-                <!-- App 2 -->
-                <g transform="translate(260, 30)" class="svg-node-group">
-                  <rect x="-65" y="-22" width="130" height="44" rx="8" class="svg-node-bg bg-danger-node" />
-                  <text x="-48" y="4" class="node-emoji">⚡</text>
-                  <text x="-25" y="-3" class="node-title-svg">Support App</text>
-                  <text x="-25" y="11" class="node-sub-svg">Cursor prompt</text>
-                </g>
-
-                <!-- App 3 -->
-                <g transform="translate(435, 30)" class="svg-node-group">
-                  <rect x="-65" y="-22" width="130" height="44" rx="8" class="svg-node-bg bg-danger-node" />
-                  <text x="-48" y="4" class="node-emoji">💬</text>
-                  <text x="-25" y="-3" class="node-title-svg">Billing App</text>
-                  <text x="-25" y="11" class="node-sub-svg">v0 prompt</text>
-                </g>
-
-                <!-- BOTTOM ROW NODES: Fragmented Production Surfaces -->
-                <!-- DB 1 -->
-                <g transform="translate(45, 230)" class="svg-node-group">
-                  <rect x="-40" y="-18" width="80" height="36" rx="6" class="svg-node-bg bg-broken-output" />
-                  <text x="0" y="-2" text-anchor="middle" class="node-title-sm">DB Silo 1</text>
-                  <text x="0" y="10" text-anchor="middle" class="node-status-fail">❌ Desynced</text>
-                </g>
-
-                <!-- Broken MCP -->
-                <g transform="translate(175, 230)" class="svg-node-group">
-                  <rect x="-55" y="-18" width="110" height="36" rx="6" class="svg-node-bg bg-broken-output" />
-                  <text x="0" y="-2" text-anchor="middle" class="node-title-sm">MCP Agent Tools</text>
-                  <text x="0" y="10" text-anchor="middle" class="node-status-fail">❌ Hallucinating</text>
-                </g>
-
-                <!-- DB 2 -->
-                <g transform="translate(305, 230)" class="svg-node-group">
-                  <rect x="-40" y="-18" width="80" height="36" rx="6" class="svg-node-bg bg-broken-output" />
-                  <text x="0" y="-2" text-anchor="middle" class="node-title-sm">DB Silo 2</text>
-                  <text x="0" y="10" text-anchor="middle" class="node-status-fail">❌ Type Conflict</text>
-                </g>
-
-                <!-- Custom APIs -->
-                <g transform="translate(435, 230)" class="svg-node-group">
-                  <rect x="-50" y="-18" width="100" height="36" rx="6" class="svg-node-bg bg-broken-output" />
-                  <text x="0" y="-2" text-anchor="middle" class="node-title-sm">Ad-hoc APIs</text>
-                  <text x="0" y="10" text-anchor="middle" class="node-status-fail">❌ Breaking Payloads</text>
-                </g>
-              </svg>
-            </div>
-
-          </div>
-
-        </div>
-
-
-        <!-- ====================================================
-             DIAGRAM 2: THE SOLUTION (With embody: Unified Commons Hub)
-             ==================================================== -->
-        <div class="diagram-comparison-card solution-card gsap-stagger-item">
-          <div class="diagram-card-header">
-            <div class="diagram-badge-row">
-              <span class="badge-tag badge-mint">✅ The Solution: With embody</span>
-            </div>
-            <h3>Single Declarative Commons &amp; CI Locks</h3>
-            <p class="diagram-desc">Declare once in typed data. embody compiles and locks your database, MCP agents, CLI, and UI in sync.</p>
-          </div>
-
-          <!-- Visual SVG Architecture Diagram: Hub & Deterministic Pipelines -->
-          <div class="diagram-canvas canvas-solution">
-
-            <!-- SVG Network Graph: Hub & Spoke Projection -->
-            <div class="svg-diagram-wrapper">
-              <svg viewBox="0 0 520 260" class="arch-network-svg" preserveAspectRatio="xMidYMid meet">
-                <defs>
-                  <!-- Laser gradient for pipelines -->
-                  <linearGradient id="laser-green" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stop-color="#4E9B8F" />
-                    <stop offset="100%" stop-color="#27AE60" />
-                  </linearGradient>
-                </defs>
-
-                <!-- Clean Converging Inflow Lines (Apps -> Hub) -->
-                <path d="M 85 45 C 85 85, 220 85, 260 100" class="wire-clean wire-inflow" />
-                <path d="M 260 45 L 260 100" class="wire-clean wire-inflow" />
-                <path d="M 435 45 C 435 85, 300 85, 260 100" class="wire-clean wire-inflow" />
-
-                <!-- Clean Diverging Projection Pipelines (Hub -> 5 Surfaces) -->
-                <path d="M 260 155 C 220 175, 60 185, 52 215" class="wire-clean wire-projection" />
-                <path d="M 260 155 C 230 180, 160 185, 156 215" class="wire-clean wire-projection" />
-                <path d="M 260 155 L 260 215" class="wire-clean wire-projection" />
-                <path d="M 260 155 C 290 180, 360 185, 364 215" class="wire-clean wire-projection" />
-                <path d="M 260 155 C 300 175, 460 185, 468 215" class="wire-clean wire-projection" />
-
-                <!-- TOP ROW NODES: Pure Declarative App Manifests -->
-                <!-- App 1 -->
-                <g transform="translate(85, 30)" class="svg-node-group">
-                  <rect x="-65" y="-22" width="130" height="44" rx="8" class="svg-node-bg bg-success-node" />
-                  <text x="-48" y="4" class="node-emoji">💼</text>
-                  <text x="-25" y="-3" class="node-title-svg">CRM App</text>
-                  <text x="-25" y="11" class="node-sub-svg">@embody/crm</text>
-                </g>
-
-                <!-- App 2 -->
-                <g transform="translate(260, 30)" class="svg-node-group">
-                  <rect x="-65" y="-22" width="130" height="44" rx="8" class="svg-node-bg bg-success-node" />
-                  <text x="-48" y="4" class="node-emoji">📌</text>
-                  <text x="-25" y="-3" class="node-title-svg">Support App</text>
-                  <text x="-25" y="11" class="node-sub-svg">@embody/support</text>
-                </g>
-
-                <!-- App 3 -->
-                <g transform="translate(435, 30)" class="svg-node-group">
-                  <rect x="-65" y="-22" width="130" height="44" rx="8" class="svg-node-bg bg-success-node" />
-                  <text x="-48" y="4" class="node-emoji">💳</text>
-                  <text x="-25" y="-3" class="node-title-svg">Billing App</text>
-                  <text x="-25" y="11" class="node-sub-svg">@embody/billing</text>
-                </g>
-
-                <!-- CENTRAL COMMONS HUB (THE CORE) -->
-                <g transform="translate(260, 128)" class="svg-hub-group">
-                  <rect x="-140" y="-28" width="280" height="56" rx="14" class="hub-main-box" />
-                  <text x="-35" y="2" class="hub-logo">embody</text>
-                </g>
-
-                <!-- BOTTOM ROW NODES: 5 Synchronized Projections -->
-                <!-- PostgreSQL -->
-                <g transform="translate(52, 230)" class="svg-node-group">
-                  <rect x="-42" y="-18" width="84" height="36" rx="6" class="svg-node-bg bg-verified-output" />
-                  <text x="0" y="-2" text-anchor="middle" class="node-title-sm">🐘 PostgreSQL</text>
-                  <text x="0" y="10" text-anchor="middle" class="node-status-ok">✔ Auto-RLS</text>
-                </g>
-
-                <!-- Type-Safe MCP -->
-                <g transform="translate(156, 230)" class="svg-node-group">
-                  <rect x="-48" y="-18" width="96" height="36" rx="6" class="svg-node-bg bg-verified-output" />
-                  <text x="0" y="-2" text-anchor="middle" class="node-title-sm">🤖 Agent MCP</text>
-                  <text x="0" y="10" text-anchor="middle" class="node-status-ok">✔ Validated</text>
-                </g>
-
-                <!-- Developer CLI -->
-                <g transform="translate(260, 230)" class="svg-node-group">
-                  <rect x="-44" y="-18" width="88" height="36" rx="6" class="svg-node-bg bg-verified-output" />
-                  <text x="0" y="-2" text-anchor="middle" class="node-title-sm">💻 Dev CLI</text>
-                  <text x="0" y="10" text-anchor="middle" class="node-status-ok">✔ Interactive</text>
-                </g>
-
-                <!-- REST / GraphQL -->
-                <g transform="translate(364, 230)" class="svg-node-group">
-                  <rect x="-48" y="-18" width="96" height="36" rx="6" class="svg-node-bg bg-verified-output" />
-                  <text x="0" y="-2" text-anchor="middle" class="node-title-sm">🌐 REST / GQL</text>
-                  <text x="0" y="10" text-anchor="middle" class="node-status-ok">✔ Auto-Typed</text>
-                </g>
-
-                <!-- UI Schema -->
-                <g transform="translate(468, 230)" class="svg-node-group">
-                  <rect x="-44" y="-18" width="88" height="36" rx="6" class="svg-node-bg bg-verified-output" />
-                  <text x="0" y="-2" text-anchor="middle" class="node-title-sm">🎨 UI Schema</text>
-                  <text x="0" y="10" text-anchor="middle" class="node-status-ok">✔ Reactive</text>
-                </g>
-              </svg>
-            </div>
-
-          </div>
-        </div>
-
+          <figcaption>Chat experience preview · Configured apps and permitted actions only. Nothing executed.</figcaption>
+        </figure>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Extendability Showcase Section (Base CRM -> B2B SaaS vs E-Commerce) -->
-  <section class="section" id="extendability">
-    <div class="container">
-      <div class="section-header gsap-reveal">
-        <span class="badge-tag badge-mint">Customize Everything</span>
-        <h2>ONE BASE APP. INFINITE SPECIALIZATIONS.</h2>
-        <p class="lead">Specialize a single core module for B2B SaaS or E-Commerce—without forking or breaking upstream updates.</p>
-      </div>  
-
-      <!-- The Abstract Visual Architecture Topology Diagram -->
-      <div class="extend-visual-canvas gsap-reveal" id="extend-canvas">
-
-        <!-- Upstream Core Base Header Card (Center Top) -->
-        <div class="extend-core-node">
-          <div class="core-node-badge">
-            <span class="badge-tag badge-sun">Base Template</span>
-            <span class="core-lock-tag">@embody/crm</span>
-          </div>
-          <div class="core-node-body">
-            <div class="core-node-icon">📦</div>
-            <div class="core-node-text">
-              <h3>Generic CRM Engine</h3>
-              <p>Canonical models for contacts, pipelines, activity, and RBAC.</p>
-            </div>
-            <div class="core-primitives-pills">
-              <span class="prim-chip">👤 Contact &amp; Account</span>
-              <span class="prim-chip">📊 Pipeline Machine</span>
-              <span class="prim-chip">📝 Activity Ledger</span>
-              <span class="prim-chip">🛡️ Base RBAC</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- SVG Split/Branching Visual Pipeline Vectors (Desktop) -->
-        <div class="extend-svg-branching-wrapper">
-          <svg viewBox="0 0 1000 120" class="extend-branch-svg" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="b2b-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#FDB849" />
-                <stop offset="100%" stop-color="#A084B6" />
-              </linearGradient>
-              <linearGradient id="ecom-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#FDB849" />
-                <stop offset="100%" stop-color="#4E9B8F" />
-              </linearGradient>
-            </defs>
-
-            <!-- Center Source Point: (500, 0) -->
-            <!-- Left Splice to B2B: (500, 0) -> (250, 110) -->
-            <path d="M 500 10 C 500 65, 250 45, 250 110" class="branch-wire branch-wire-b2b" />
-            <!-- Right Splice to E-Commerce: (500, 0) -> (750, 110) -->
-            <path d="M 500 10 C 500 65, 750 45, 750 110" class="branch-wire branch-wire-ecom" />
-
-            <!-- Splicing Badges in SVG -->
-            <g transform="translate(340, 50)" class="splice-badge-group">
-              <rect x="-70" y="-12" width="140" height="24" rx="12" class="svg-splice-pill b2b-splice-pill" />
-              <text x="0" y="4" text-anchor="middle" class="svg-splice-text">+ .extend(b2bSaas)</text>
-            </g>
-
-            <g transform="translate(660, 50)" class="splice-badge-group">
-              <rect x="-70" y="-12" width="140" height="24" rx="12" class="svg-splice-pill ecom-splice-pill" />
-              <text x="0" y="4" text-anchor="middle" class="svg-splice-text">+ .extend(ecomRetail)</text>
-            </g>
-          </svg>
-        </div>
-
-        <!-- Mobile Vertical Branch Connector (Visible <= 900px) -->
-        <div class="extend-mobile-branch-connector">
-          <div class="mobile-branch-line"></div>
-          <div class="mobile-branch-pills">
-            <span class="mobile-splice-pill b2b-mobile-pill">
-              <span class="splice-icon">🏢</span> + .extend(b2bSaas)
-            </span>
-            <span class="mobile-splice-pill ecom-mobile-pill">
-              <span class="splice-icon">🛒</span> + .extend(ecomRetail)
-            </span>
-          </div>
-          <div class="mobile-branch-line"></div>
-        </div>
-
-        <!-- Two Specialized Branches Grid (B2B vs ECOM) -->
-        <div class="extend-branches-grid">
-
-          <!-- ============================================
-               BRANCH 1: B2B ENTERPRISE SAAS CRM
-               ============================================ -->
-          <div class="ext-branch-card b2b-branch-card" id="card-b2b">
-            <div class="branch-card-header">
-              <div class="branch-title-row">
-                <div class="branch-avatar b2b-avatar">🏢</div>
-                <div>
-                  <span class="branch-category-pill pill-purple">High-Touch B2B SaaS</span>
-                  <h3>Enterprise SaaS CRM</h3>
-                </div>
-              </div>
-              <span class="badge-tag badge-purple">Multi-Seat &bull; ARR Deals</span>
-            </div>
-
-            <p class="branch-summary">
-              Adds multi-stakeholder buying committees, ARR tracking, and legal approval stages.
-            </p>
-
-            <!-- Extension Layer Cards -->
-            <div class="branch-features-stack">
-              <!-- Feature 1: Data Widening -->
-              <div class="feature-item">
-                <div class="feature-head">
-                  <span class="feature-icon">💎</span>
-                  <strong>Entity Widening</strong>
-                </div>
-                <div class="feature-chips-list">
-                  <span class="ext-chip">+ ARR &amp; Contract Value</span>
-                  <span class="ext-chip">+ Multi-Seat Licenses</span>
-                </div>
-              </div>
-
-              <!-- Feature 2: Injected Lifecycle States -->
-              <div class="feature-item">
-                <div class="feature-head">
-                  <span class="feature-icon">🔄</span>
-                  <strong>Injected Lifecycle Steps</strong>
-                </div>
-                <div class="lifecycle-track">
-                  <span class="stage-pill stage-base">Lead</span>
-                  <span class="stage-arrow">&rarr;</span>
-                  <span class="stage-pill stage-custom">Security Review</span>
-                  <span class="stage-arrow">&rarr;</span>
-                  <span class="stage-pill stage-custom">Legal Redline</span>
-                  <span class="stage-arrow">&rarr;</span>
-                  <span class="stage-pill stage-base">Closed Won</span>
-                </div>
-              </div>
-
-              <!-- Feature 5: Native Connectors -->
-              <div class="feature-item">
-                <div class="feature-head">
-                  <span class="feature-icon">🔌</span>
-                  <strong>Ecosystem Connectors</strong>
-                </div>
-                <div class="connectors-row">
-                  <span class="connector-badge">Okta SAML/SCIM</span>
-                  <span class="connector-badge">DocuSign Webhook</span>
-                  <span class="connector-badge">Salesforce Sync</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ============================================
-               BRANCH 2: E-COMMERCE & DTC RETAIL CRM
-               ============================================ -->
-          <div class="ext-branch-card ecom-branch-card" id="card-ecom">
-            <div class="branch-card-header">
-              <div class="branch-title-row">
-                <div class="branch-avatar ecom-avatar">🛒</div>
-                <div>
-                  <span class="branch-category-pill pill-teal">High-Velocity DTC Retail</span>
-                  <h3>E-Commerce &amp; Retail CRM</h3>
-                </div>
-              </div>
-              <span class="badge-tag badge-mint">Instant Checkout &bull; LTV Growth</span>
-            </div>
-
-            <p class="branch-summary">
-              Adds cart telemetry, SKU order history, RFM segments, and recovery triggers.
-            </p>
-
-            <!-- Extension Layer Cards -->
-            <div class="branch-features-stack">
-              <!-- Feature 1: Data Widening -->
-              <div class="feature-item">
-                <div class="feature-head">
-                  <span class="feature-icon">🛍️</span>
-                  <strong>Entity Widening</strong>
-                </div>
-                <div class="feature-chips-list">
-                  <span class="ext-chip">+ Live Cart State</span>
-                  <span class="ext-chip">+ Lifetime Value (LTV)</span>
-                </div>
-              </div>
-
-              <!-- Feature 2: Injected Lifecycle States -->
-              <div class="feature-item">
-                <div class="feature-head">
-                  <span class="feature-icon">🔄</span>
-                  <strong>Injected Lifecycle Steps</strong>
-                </div>
-                <div class="lifecycle-track">
-                  <span class="stage-pill stage-base">Browse</span>
-                  <span class="stage-arrow">&rarr;</span>
-                  <span class="stage-pill stage-custom">Cart Abandoned</span>
-                  <span class="stage-arrow">&rarr;</span>
-                  <span class="stage-pill stage-custom">SMS Recovery Nudge</span>
-                  <span class="stage-arrow">&rarr;</span>
-                  <span class="stage-pill stage-base">Repeat Buyer</span>
-                </div>
-              </div>
-
-
-              <!-- Feature 5: Native Connectors -->
-              <div class="feature-item">
-                <div class="feature-head">
-                  <span class="feature-icon">🔌</span>
-                  <strong>Ecosystem Connectors</strong>
-                </div>
-                <div class="connectors-row">
-                  <span class="connector-badge">Shopify Webhooks</span>
-                  <span class="connector-badge">Stripe Payments</span>
-                  <span class="connector-badge">Klaviyo Campaigns</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-        </div>
+    <section id="testimonials" class="testimonials-section wrap" aria-labelledby="testimonials-heading">
+      <div class="section-heading"><span class="eyebrow">THEIR WORK. THEIR SOFTWARE.</span><h2 id="testimonials-heading">Software that fits.<br />In their own words.</h2><p>Personal tools. Room to evolve. Control over what AI can do.<br />Experiences with the Embody framework today—not the cloud preview.</p></div>
+      <div class="testimonial-grid">
+        <figure class="testimonial-card"><h3>My process. Not a software vendor’s.</h3><blockquote>“I used Embody to build an internal app around the way my team already works. I didn’t have to change my process to fit another software product.”</blockquote><figcaption><a class="testimonial-avatar testimonial-initials" href="https://www.linkedin.com/in/oribentov" target="_blank" rel="noopener noreferrer" aria-label="Ori Bentov on LinkedIn">OB</a><strong>Ori Bentov</strong></figcaption></figure>
+        <figure class="testimonial-card"><h3>Small software that grows with me.</h3><blockquote>“As my needs changed, I could add new steps and information without rebuilding the whole app. Embody made it easy for the software to grow with me.”</blockquote><figcaption><a href="https://www.linkedin.com/in/noam-ginsberg" target="_blank" rel="noopener noreferrer" aria-label="Noam Ginsberg on LinkedIn"><img class="testimonial-avatar" src="/testimonials/noam-ginsberg.jpg" alt="" width="44" height="44" loading="lazy" /></a><strong>Noam Ginsberg</strong></figcaption></figure>
+        <figure class="testimonial-card"><h3>My agent, connected to my work.</h3><blockquote>“Embody gave my AI agent one reliable place to find information and complete routine work. That meant fewer manual updates and less back-and-forth for me.”</blockquote><figcaption><a class="testimonial-avatar testimonial-initials initials-purple" href="https://www.linkedin.com/in/avibiko" target="_blank" rel="noopener noreferrer" aria-label="Avishay Bikowsky on LinkedIn">AB</a><strong>Avishay Bikowsky</strong></figcaption></figure>
+        <figure class="testimonial-card"><h3>Useful AI. With me in control.</h3><blockquote>“I could give an AI agent access to everyday tasks while keeping important actions behind an approval. It helped me automate work without giving up control.”</blockquote><figcaption><a href="https://www.linkedin.com/in/nimrod-feldman-7a1682123" target="_blank" rel="noopener noreferrer" aria-label="Nimrod Feldman on LinkedIn"><img class="testimonial-avatar" src="/testimonials/nimrod-feldman.jpg" alt="" width="44" height="44" loading="lazy" /></a><strong>Nimrod Feldman</strong></figcaption></figure>
       </div>
+    </section>
 
-    </div>
-  </section>
+    <section id="foundation" class="control-section wrap"><div class="control-copy"><span class="eyebrow">FREEDOM, WITH A FOUNDATION</span><h2>Personal for your people.<br />Manageable for<br />your company.</h2><p>A world of small apps shouldn’t mean a world of mystery software. Give each app an owner, a purpose, and explicit boundaries.</p><ul class="check-list"><li>Purpose-built applications, not disconnected silos</li><li>Defined actions instead of unrestricted agent access</li><li>Business rules and approval gates where they matter</li></ul><p class="concept-note">Illustrative admin view. Managed cloud and lifecycle experience are a product vision, not a general-availability claim.</p></div><div class="admin-card"><div class="admin-top"><span class="company-symbol" aria-hidden="true">✳</span><strong>Your small software, together.</strong><span class="pill">ADMIN PREVIEW</span></div><div class="admin-stats"><div><strong>3</strong><span>purpose-built apps</span></div><div><strong>1</strong><span>shared foundation</span></div></div><div class="admin-table"><div class="admin-row admin-labels"><span>APPLICATION / OWNER</span><span>AUDIENCE</span></div><div class="admin-row"><span><i class="app-icon peach" aria-hidden="true">↗</i><span><strong>Renewal desk</strong><small>Maya · Sales</small></span></span><span class="audience">Sales team</span></div><div class="admin-row"><span><i class="app-icon mint" aria-hidden="true">✓</i><span><strong>Onboarding room</strong><small>Sam · Customer Success</small></span></span><span class="audience">Success team</span></div><div class="admin-row"><span><i class="app-icon lavender" aria-hidden="true">⇄</i><span><strong>Exception queue</strong><small>Alex · Operations</small></span></span><span class="audience">Operations</span></div></div><div class="admin-bottom"><span class="connected-dot"></span> Explicit access. Accountable ownership.</div></div></section>
 
-  <!-- Agentic MCP & Rex the Replenishment Agent Sandbox -->
-  <section class="section" id="agents">
-    <div class="container">
-      <div class="section-header gsap-reveal">
-        <span class="badge-tag badge-mint">First-Class AI Principals</span>
-        <h2>Agentic First: Access Control & Policy</h2>
-        <p class="lead">Agents are first-class principals with hard spend limits, dry-run safety gates, and hash-chained audit trails.</p>
-      </div>
-
-      <div class="sandbox-card gsap-reveal">
-        <!-- Controls -->
-        <div class="sandbox-controls">
-          <div>
-            <span class="badge-tag badge-sun" style="margin-bottom: 0.5rem;">Interactive Simulator</span>
-            <h3>Test Agent Access</h3>
-            <p>Agent credential scoped to a strict $500/day spend limit.</p>
-          </div>
-
-          <div class="control-group">
-            <label>
-              <span>Order Amount (USD)</span>
-              <strong id="rex-amount-display">$180.00</strong>
-            </label>
-            <input type="range" id="rex-order-amount" class="slider-input" min="50" max="800" step="10" value="180" />
-            <small style="color: var(--text-muted);">Hard cap: $500.00 / day</small>
-          </div>
-
-
-          <button class="btn btn-primary" id="rex-execute-btn">
-            <span>Dispatch MCP Tool Call</span>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-              <polyline points="12 5 19 12 12 19"></polyline>
-            </svg>
-          </button>
-        </div>
-
-        <!-- Terminal Output -->
-        <div class="sandbox-terminal">
-          <div class="terminal-header-dots">
-            <div class="dot dot-red"></div>
-            <div class="dot dot-yellow"></div>
-            <div class="dot dot-green"></div>
-          </div>
-          <pre id="rex-terminal-output" style="line-height: 1.6; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.8125rem;">
-<span class="token-comment">// Adjust the spend slider and dispatch the MCP tool call.</span>
-<span class="token-comment">// Spend limits are mechanically enforced before execution.</span>
-          </pre>
-          <div style="font-size: 0.75rem; color: #786C82; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.5rem;">
-            🔒 Mechanical attenuation engine &bull; SHA-256 ledger integrity
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Interactive Multi-Surface Projection Playground (CRM Pipeline App) -->
-  <section class="section" id="playground">
-    <div class="container">
-      <div class="section-header gsap-reveal">
-        <span class="badge-tag badge-sun">Embody Surfaces</span>
-        <h2>Build For Both Agents & Humans</h2>
-        <p class="lead">One TypeScript definition automatically powers your CLI, AI agent tools, APIs, and UI schemas.</p>
-      </div>
-
-      <div class="playground-wrapper gsap-reveal">
-        <!-- Navigation Tabs -->
-        <div class="playground-nav">
-          <div class="tab-buttons">
-            <button class="tab-btn active" data-tab="declaration">01. Declaration</button>
-            <button class="tab-btn" data-tab="cli">02. CLI</button>
-            <button class="tab-btn" data-tab="mcp">03. MCP Agent Tools</button>
-            <button class="tab-btn" data-tab="api">04. REST / GraphQL API</button>
-            <button class="tab-btn" data-tab="uischema">05. UI Schema</button>
-          </div>
-
-          <button class="btn btn-secondary btn-sm" id="copy-playground-code">Copy Code</button>
-        </div>
-
-        <!-- Meta Header -->
-        <div class="playground-meta">
-          <div class="meta-info">
-            <h4>
-              <span id="playground-title">01. Declaration</span>
-              <span class="badge-tag badge-sun" id="playground-badge">Single Source of Truth</span>
-            </h4>
-            <p id="playground-desc">Define deals, pipeline stages, discount policies, and stage guards once in pure typed data.</p>
-          </div>
-          <div class="hero-terminal-pill" style="background: rgba(0,0,0,0.4); border-color: rgba(255,255,255,0.15); color: #A3D9C9;">
-            <span id="playground-filename">crm.decl.ts</span>
-          </div>
-        </div>
-
-        <!-- Code View Area -->
-        <div class="code-container">
-          <pre><code id="playground-code"></code></pre>
-        </div>
-      </div>
-    </div>
-  </section>
-
-
-  <!-- Quickstart & Final CTA Banner -->
-  <section class="section" id="get-started">
-    <div class="container">
-      <div class="cta-banner gsap-reveal">
-        <span class="badge-tag badge-terracotta" style="margin-bottom: 1rem;">Install the Embody skill</span>
-        <h2>Give your coding agent the Embody workflow.</h2>
-        <p>Install the skill in one command, then star the project to follow what ships next.</p>
-
-        <div class="cta-command hero-terminal-pill">
-          <code>npx skills add embodyapp/embody --skill embody</code>
-          <button class="copy-btn" data-copy="npx skills add embodyapp/embody --skill embody" title="Copy skill install command" aria-label="Copy skill install command">Copy command</button>
-        </div>
-
-        <div class="hero-cta-group cta-actions">
-          <a href="https://skills.sh/embodyapp/embody/embody" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-lg cta-track" data-cta="banner_skill">View skill on skills.sh</a>
-          <a href="https://github.com/embodyapp/embody" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-lg cta-track" data-cta="banner_github">★ Star Embody on GitHub</a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Footer -->
-  <footer class="footer">
-    <div class="container">
-      <div class="footer-simple-row">
-        <div class="footer-brand-col">
-          <a href="#" class="brand-logo" style="margin-bottom: 0.75rem;">
-            <svg width="28" height="28" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="2" y="2" width="32" height="32" rx="10" fill="#FDB849" stroke="#2C2230" stroke-width="2.5"/>
-              <path d="M10 12H26M10 18H22M10 24H26" stroke="#2C2230" stroke-width="2.5" stroke-linecap="round"/>
-            </svg>
-            <span>embody</span>
-          </a>
-          <p class="footer-tagline">
-            Define your business once. Use it everywhere—by people and AI agents.
-          </p>
-        </div>
-
-        <nav class="footer-nav" aria-label="Footer navigation">
-          <a href="#philosophy">Why Embdy?</a>
-          <a href="#extendability">The Solution</a>
-          <a href="#agents">Agentic First</a>
-          <a href="#playground">How it works</a>
-          <a href="https://skills.sh/embodyapp/embody/embody" target="_blank" rel="noopener noreferrer" class="footer-nav-highlight cta-track" data-cta="footer_skill">Install the skill</a>
-          <a href="https://github.com/embodyapp/embody" target="_blank" rel="noopener noreferrer" class="cta-track" data-cta="footer_github">Star on GitHub</a>
-        </nav>
-      </div>
-
-      <div class="footer-bottom">
-        <span>&copy; 2026 embody. All rights reserved.</span>
-      </div>
-    </div>
-  </footer>
-
+    <section id="start" class="start-section wrap"><span class="eyebrow">YOUR NEXT SMALL, BIG THING</span><h2>What’s the tool your team<br />has always needed?</h2><p>Start with a real workflow. Let’s imagine what it could become.</p><div class="workflow-options" role="group" aria-label="Choose your workflow"><button type="button" aria-pressed="true" data-interest="A better workflow around our CRM">A better workflow around our CRM</button><button type="button" aria-pressed="false" data-interest="A spreadsheet we have outgrown">A spreadsheet we’ve outgrown</button><button type="button" aria-pressed="false" data-interest="An approval process buried in messages">Approvals buried in messages</button><button type="button" aria-pressed="false" data-interest="Something only our team understands">Something only our team understands</button></div><a id="workflow-cta" class="button button-primary" href="https://github.com/embodyapp/embody/discussions/new?category=ideas&title=Workflow%20idea%3A%20A%20better%20workflow%20around%20our%20CRM" target="_blank" rel="noopener noreferrer">Share your workflow idea <span aria-hidden="true">↗</span></a><p class="start-note">Opens a GitHub discussion · Prefer to build? <a href="https://github.com/embodyapp/embody#-quickstart" target="_blank" rel="noopener noreferrer">Start with the framework ↗</a></p></section>
+  </main>
+  <footer class="site-footer wrap"><a class="brand" href="#top" aria-label="Embody home"><span class="brand-mark" aria-hidden="true">e</span>embody<span class="brand-period">.</span></a><p>Small software. A whole new way to work.</p><div><a href="https://github.com/embodyapp/embody" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a href="https://github.com/embodyapp/embody#readme" target="_blank" rel="noopener noreferrer">Documentation ↗</a><span>© 2026 Embody</span></div></footer>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
