@@ -190,7 +190,13 @@ export function databaseServiceIdentity(env = process.env) {
   return containerImageIdentity(container);
 }
 export async function evidence(gate, status, counts = null, images = [], details = {}) {
-  const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" }).stdout.trim();
+  // Fixture images have no .git (M09 in-region SQL job); they record their labelled source SHA.
+  const git = (...args) => {
+    const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+    return result.status === 0 ? result.stdout.trim() : null;
+  };
+  const commit = git("rev-parse", "HEAD");
+  const changes = commit === null ? null : git("status", "--porcelain", "--untracked-files=normal");
   const hash = async (path) =>
     createHash("sha256")
       .update(await readFile(resolve(root, path)))
@@ -204,8 +210,12 @@ export async function evidence(gate, status, counts = null, images = [], details
     gate,
     status,
     timestamp: new Date().toISOString(),
-    commit: git("rev-parse", "HEAD"),
-    dirty: Boolean(git("status", "--porcelain", "--untracked-files=normal")),
+    commit:
+      commit ??
+      (/^[a-f0-9]{40}$/u.test(process.env.EMBODY_SOURCE_SHA ?? "")
+        ? process.env.EMBODY_SOURCE_SHA
+        : null),
+    dirty: changes === null ? null : Boolean(changes),
     node: process.version,
     lockfileSha256: await hash("pnpm-lock.yaml"),
     schemaSourceSha256: await hash("packages/storage/src/index.ts"),

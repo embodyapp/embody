@@ -80,6 +80,16 @@ export function schemaStatements() {
     ]),
   );
 }
+/**
+ * The M03 conformance suites open many connections (20 concurrent cold boots), so the fixture
+ * runs them without role limits and applies the per-app limit before the storm.
+ */
+export function stormLimitStatements(limits = SQL_LIMITS) {
+  return [
+    `ALTER ROLE "embody_runtime" CONNECTION LIMIT ${Number(limits.runtimeConnectionLimit)}`,
+    `ALTER ROLE "embody_platform_runtime" CONNECTION LIMIT ${Number(limits.runtimeConnectionLimit)}`,
+  ];
+}
 /** After the schemas: the admin gives up owner membership again. */
 export function releaseStatements() {
   return DATABASES.map(([, owner]) => `REVOKE ${ident(owner)} FROM CURRENT_USER`);

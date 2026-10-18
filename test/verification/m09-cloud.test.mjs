@@ -35,6 +35,7 @@ import {
   dropStatements,
   schemaStatements,
   releaseStatements,
+  stormLimitStatements,
 } from "../../infra/mvp/m09/sql.mjs";
 
 const env = {
@@ -497,6 +498,17 @@ test("SQL bootstrap limits connections and timeouts, revokes PUBLIC and escapes 
   ]);
   assert.doesNotMatch(statements, /SUPERUSER(?! )|BYPASSRLS(?! )/);
   assert.throws(() => bootstrapStatements({}), /Missing fixture password/);
+  const unlimited = bootstrapStatements(passwords, {
+    runtimeConnectionLimit: -1,
+    migratorConnectionLimit: -1,
+    statementTimeoutMs: 30000,
+    idleInTransactionTimeoutMs: 30000,
+  }).join(";\n");
+  assert.match(unlimited, /"embody_runtime" .*CONNECTION LIMIT -1/);
+  assert.deepEqual(stormLimitStatements(), [
+    'ALTER ROLE "embody_runtime" CONNECTION LIMIT 5',
+    'ALTER ROLE "embody_platform_runtime" CONNECTION LIMIT 5',
+  ]);
 });
 test("connection storm, denials, latency and restore fail closed", () => {
   const ok = { ok: true };
@@ -705,4 +717,24 @@ test("in-region SQL suite accepts only an embody-test instance and loopback prox
       () => parseSqlSecret(JSON.stringify({ ...good, ...change })),
       /embody-test instance/,
     );
+});
+
+test("evidence without git (fixture image) records the labelled source SHA, never a guess", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "embody-m09-nogit-"));
+  try {
+    const script = `import { evidence } from ${JSON.stringify(join(root, "scripts/verification.mjs"))};
+await evidence("nogit", "passed", { passed: 1, failed: 0, skipped: 0 });`;
+    const sha = "a".repeat(40);
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+      cwd: root,
+      env: { EMBODY_TEST_EVIDENCE_DIR: directory, EMBODY_SOURCE_SHA: sha, PATH: "" },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(await readFile(join(directory, "nogit.json"), "utf8"));
+    assert.equal(report.commit, sha);
+    assert.equal(report.dirty, null);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

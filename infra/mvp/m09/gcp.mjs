@@ -28,6 +28,7 @@ import {
   FIXTURE_ROLES,
   dropStatements,
   releaseStatements,
+  stormLimitStatements,
 } from "./sql.mjs";
 const exec = promisify(execFile);
 const { fetch, AbortSignal, AbortController, Response } = globalThis;
@@ -649,7 +650,14 @@ export function createGcpProvider({
       await dropFixture(connect);
       const admin = await connect("postgres", "postgres");
       try {
-        for (const statement of bootstrapStatements(passwords)) await admin.query(statement);
+        // No role limits while the conformance suites run; the storm applies them.
+        const unlimited = {
+          ...SQL_LIMITS,
+          runtimeConnectionLimit: -1,
+          migratorConnectionLimit: -1,
+        };
+        for (const statement of bootstrapStatements(passwords, unlimited))
+          await admin.query(statement);
       } finally {
         await admin.end();
       }
@@ -697,6 +705,12 @@ export function createGcpProvider({
         denials.push({ target, code: result.ok ? "connected" : result.code });
       }
       results["connect-denials"] = evaluateConnectDenials(denials);
+      const limiter = await connect("postgres", "postgres");
+      try {
+        for (const statement of stormLimitStatements()) await limiter.query(statement);
+      } finally {
+        await limiter.end();
+      }
       const storm = await Promise.all(
         Array.from({ length: SQL_LIMITS.runtimeConnectionLimit + 5 }, () =>
           attempt("embody_runtime", "embody_test"),
