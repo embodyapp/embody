@@ -1,11 +1,12 @@
 import { access } from "node:fs/promises";
 import { evidence, main, requireVariables, SuiteFailure } from "./verification.mjs";
 import { m09Approval, runM09Suite } from "../infra/mvp/m09/qualify.mjs";
+import { m10Approval } from "../infra/mvp/m10/qualify.mjs";
 
-// Real-provider qualification. Only M09 exists; later suites (M10–M17, M19–M21 cloud cases) must
-// be added here before this gate can stand for a release (M18). Requesting one fails closed.
-const IMPLEMENTED = ["m09"];
-const PENDING = ["m10", "m11", "m12", "m13", "m14", "m15", "m16", "m17", "m20", "m21"];
+// Real-provider qualification. M09 and M10 exist; later suites (M11–M17, M20, M21 cloud cases)
+// must be added here before this gate can stand for a release (M18). Requesting one fails closed.
+const IMPLEMENTED = ["m09", "m10"];
+const PENDING = ["m11", "m12", "m13", "m14", "m15", "m16", "m17", "m20", "m21"];
 
 await main("mvp-cloud", async () => {
   requireVariables([
@@ -14,7 +15,11 @@ await main("mvp-cloud", async () => {
     "EMBODY_MVP_CLOUD_BUDGET_USD",
     "EMBODY_MVP_CLOUD_BUDGET_APPROVED",
   ]);
-  m09Approval(process.env);
+  const suites = (process.env.EMBODY_MVP_CLOUD_SUITES ?? "m09")
+    .split(",")
+    .map((value) => value.trim());
+  if (suites.includes("m09")) m09Approval(process.env);
+  if (suites.includes("m10")) m10Approval(process.env);
   // Either the operator's own gcloud login (no key file, as in M05) or a credential file.
   if (process.env.EMBODY_MVP_CLOUD_CREDENTIALS !== "gcloud") {
     requireVariables(["GOOGLE_APPLICATION_CREDENTIALS"]);
@@ -24,21 +29,48 @@ await main("mvp-cloud", async () => {
       throw new Error("Cloud credential file unavailable (path redacted)");
     }
   }
-  const suites = (process.env.EMBODY_MVP_CLOUD_SUITES ?? "m09")
-    .split(",")
-    .map((value) => value.trim());
   const unimplemented = suites.filter((suite) => !IMPLEMENTED.includes(suite));
   if (unimplemented.length)
     throw new Error(
       `Cloud qualification suites are not implemented yet (${unimplemented.join(", ")}); no resources created`,
     );
+  if (suites.length !== 1)
+    throw new Error("Run one cloud suite per invocation; no resources created");
+  const credentials = process.env.EMBODY_MVP_CLOUD_CREDENTIALS === "gcloud" ? "gcloud" : "adc";
+  if (suites[0] === "m10") {
+    // Imported only now: the guards above never load provider code or contact a cloud API.
+    const [{ createM10GcpProvider }, { runM10Suite }, gateway, contracts] = await Promise.all([
+      import("../infra/mvp/m10/gcp.mjs"),
+      import("../infra/mvp/m10/qualify.mjs"),
+      import("../packages/gateway/dist/index.js"),
+      import("../packages/cloud-contracts/dist/index.js"),
+    ]);
+    const provider = createM10GcpProvider({
+      project: process.env.EMBODY_MVP_CLOUD_PROJECT,
+      gateway,
+      credentials,
+    });
+    const result = await runM10Suite(process.env, provider, { gateway, contracts });
+    const outcomes = Object.values(result.cases);
+    const counts = {
+      passed: outcomes.filter((value) => value.pass === true).length,
+      failed: outcomes.filter((value) => value.pass !== true).length,
+      skipped: 0,
+    };
+    const details = { suites, releaseGate: false, pendingSuites: PENDING, m10: result };
+    if (!result.pass) {
+      await evidence("mvp-cloud-m10", "failed", counts, [], details);
+      throw new SuiteFailure("M10 cloud qualification failed; see sanitized case results", counts);
+    }
+    await evidence("mvp-cloud-m10", "passed", counts, [], details);
+    return;
+  }
   requireVariables(["EMBODY_M09_BASELINE", "EMBODY_M09_IMAGE", "EMBODY_CLOUD_SQL_PROXY"]);
-  // Imported only now: the guards above never load provider code or contact a cloud API.
   const { createGcpProvider, loadBaseline } = await import("../infra/mvp/m09/gcp.mjs");
   const provider = createGcpProvider({
     baseline: await loadBaseline(process.env.EMBODY_M09_BASELINE),
     image: process.env.EMBODY_M09_IMAGE,
-    credentials: process.env.EMBODY_MVP_CLOUD_CREDENTIALS === "gcloud" ? "gcloud" : "adc",
+    credentials,
   });
   const result = await runM09Suite(process.env, provider);
   const outcomes = Object.values(result.cases);
