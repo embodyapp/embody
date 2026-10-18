@@ -10,13 +10,13 @@ pending. Task definition: [IMPLEMENTATION M09](./IMPLEMENTATION.md#m09--qualify-
 |---|---|---|
 | Region / project | `us-central1`, one dedicated project | MD04 |
 | Database | Cloud SQL for PostgreSQL 16, one shared `db-f1-micro` Enterprise zonal instance, 10 GiB HDD, one database and least-privilege roles per app; Neon is the fallback if Cloud SQL misses cost or latency | MD05 |
-| DB connections | Cloud SQL connector/Auth Proxy with IAM; no authorized networks; `ENCRYPTED_ONLY`; per-role `CONNECTION LIMIT` (runtime 5, migrator 2), `statement_timeout` and `idle_in_transaction_session_timeout` 30 s; PUBLIC revoked on every database and schema | M03 roles, M08 hosted pool limits |
+| DB connections | Cloud SQL connector/Auth Proxy with IAM; no authorized networks; `ENCRYPTED_ONLY`; per-role `CONNECTION LIMIT` (runtime 5, migrator 2), `statement_timeout` and `idle_in_transaction_session_timeout` 30 s (set, not exercised live); PUBLIC revoked on each **app and platform** database and its `public` schema (not on `postgres`/`template1`; see below) | M03 roles, M08 hosted pool limits |
 | Backups | Automated daily backup, one retained, no point-in-time recovery for the MVP; restore drill is part of the suite | MD05 (tier chosen here) |
 | Runtime | Cloud Run services: request billing (`cpuIdle`), min 0, max 1, concurrency 4, 60 s timeout, internal ingress plus Cloud Run IAM | MD02, M08 |
 | Wake queue | One Cloud Tasks queue and one invoker identity **per app** (below) | MD12, M20 |
-| Images | One Artifact Registry repository; keep five recent versions, delete untagged after a day | step 5 |
+| Images | One Artifact Registry repository; untagged versions are deleted after a day. The KEEP-5 rule only protects the five newest; tagged versions beyond five are **not** deleted (open item) | step 5 |
 | Budget | Alerts at 50/80/100% of $50/month when the operator can manage the billing account; not a cap | MD06 |
-| Emergency stop | Pause every app's wake queue (`provider/cloud-tasks.mjs` `pause`); tasks are kept and dispatched on resume. Admission stop for deployments arrives with M10/M12 | step 5 |
+| Emergency stop | Pause an app's wake queue (`provider/cloud-tasks.mjs` `pause`, per app; there is no pause-all command yet); tasks are kept and dispatched on resume, and a pause takes seconds to apply. Admission stop for deployments arrives with M10/M12 | step 5 |
 
 IaC and commands: [infra/mvp/m09](../../infra/mvp/m09/README.md).
 
@@ -39,6 +39,51 @@ storm case). Allowing 3 instances per app (15 connections) would not fit at all 
 Options when the MVP needs more: smaller hosted pools (code change, no cost), or `db-g1-small`
 (50 connections, +$0.0245/h ≈ **+$17.89/month**, baseline about $34.38, inside the $50 ceiling).
 The controller (M13) must set each app role's limit to pool × max instances.
+
+## Pooling semantics
+
+The selected pooling is **application-side `pg` pools** (at most 5 connections per gateway or app
+instance, idle connections closed after 1 s) through the Cloud SQL connector or Auth Proxy. There
+is no server-side transaction pooler (no PgBouncer, no Cloud SQL managed pooling), so every
+checkout is a full PostgreSQL session: `SET ROLE`, `SET LOCAL` tenant context for RLS, GUCs and
+advisory locks behave exactly as in the M03 fixture. The live run exercised this through the
+storage (16) and gateway-store (43) conformance suites on Cloud SQL and the connection storm.
+A transaction pooler would need a separate qualification of `SET LOCAL`/RLS and advisory locks.
+
+## Shared-instance privileges
+
+- PUBLIC `CONNECT`/`TEMP` is revoked on each app and platform database and PUBLIC is revoked on
+  their `public` schemas, as the owner (live: cross-database CONNECT is `42501`).
+- **Not revoked:** the `postgres` and `template1` databases keep PostgreSQL's default PUBLIC
+  `CONNECT`/`TEMP`, so an app runtime role can connect to `postgres`. **M13 must revoke PUBLIC
+  `CONNECT` on `postgres` and `template1`** when it provisions the shared instance.
+- **Accepted residual:** cluster-wide catalogs (`pg_database`, `pg_roles`, `pg_stat_activity`)
+  let any app role see other apps' database and role names and whether sessions exist (not query
+  text or data). Database and role names must therefore never carry customer data.
+- `ALTER DEFAULT PRIVILEGES` is not used; PUBLIC `EXECUTE` on functions follows PostgreSQL
+  defaults, and the storage migrations grant only `STORAGE_RUNTIME_FUNCTIONS` explicitly. M13
+  should review function `EXECUTE` grants per app.
+- Fixture passwords are set with `CREATE ROLE ... PASSWORD`; if such a statement errors it can
+  reach `postgres.log`. The M13 controller must set passwords so they stay out of statement logs.
+
+## Open items before real tenants (step 5, owned by M10–M16/M18)
+
+- **Alerts:** no budget alert exists (needs a billing account) and no Monitoring alert policy.
+- **Emergency stop:** per-app queue pause only; add pause-all and the deployment admission stop.
+- **Logs:** no exclusion, retention or volume bound (`log_connections=on`, task log sampling 1 in
+  the fixture).
+- **Images:** bound tagged versions too (the KEEP rule only protects); per-app repositories or
+  immutable tags so a build cannot overwrite another app's or the gateway's tag (M11).
+- **Secrets:** no secret-version lifecycle.
+- **Builds and source storage:** not present yet (M10/M11).
+- **Restore:** Cloud SQL restores the whole shared instance (about 15 minutes, every app rolled
+  back). Per-app recovery needs restore-to-new-instance plus a per-database copy (M16).
+- **Invoker tokens:** each app can make Cloud Tasks mint its own invoker's OIDC token for any
+  audience, so nothing but that app's own drain may ever trust a wake-invoker token.
+- **Evaluator hardening:** the emergency-stop check should compare the delivery time with the
+  resume time; isolation should count any non-403 status as allowed; identity negatives should
+  record the error reason (403 can also mean a disabled API).
+- **Builder scope:** the check does not cover who may act as the builder or the state bucket.
 
 ## Wake queue design
 
