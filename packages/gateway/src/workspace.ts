@@ -6,11 +6,18 @@ import { credentialHash, type GatewayStore, type WorkspaceCredential } from "./s
 import { publicSigningKeys } from "./identity.js";
 import { publicEndpointFetch } from "./safe-fetch.js";
 import { jsonLineAuditSink } from "./dispatch.js";
+import type { CatalogApp } from "./store.js";
+import {
+  registerSourceRoutes,
+  type SourceAdmissionOptions,
+  type SourceStore,
+} from "./source-admission.js";
 
 interface RequestContext {
   credential: WorkspaceCredential;
   principal: Principal;
   apps: readonly RegisteredApp[];
+  catalog: readonly CatalogApp[];
 }
 export interface WorkspaceGatewayOptions extends Omit<
   GatewayOptions,
@@ -18,6 +25,8 @@ export interface WorkspaceGatewayOptions extends Omit<
 > {
   readonly store: GatewayStore;
   readonly clock?: { now(): Date };
+  /** M10 authenticated source admission routes; absent means not served. */
+  readonly sources?: SourceAdmissionOptions;
 }
 /** No positive cache: every new request authenticates and reads the authoritative catalog.
  * ALS snapshots are private to the request, not mutable shared per-workspace registry state.
@@ -121,12 +130,28 @@ export function createWorkspaceGateway(options: WorkspaceGatewayOptions) {
               ? ("healthy" as const)
               : ("unhealthy" as const),
         }));
-      return { credential, principal: credential.principal, apps };
+      return { credential, principal: credential.principal, apps, catalog: snapshot.apps };
     };
     void authenticate().then(
       (value) => context.run(value, done),
       (error) => done(error as Error),
     );
   });
+  if (options.sources) {
+    const store =
+      options.sources.store ??
+      ("admitSource" in options.store ? (options.store as unknown as SourceStore) : undefined);
+    if (!store) throw new TypeError("Source admission requires a SourceStore");
+    registerSourceRoutes(gateway, {
+      current,
+      admission: options.store,
+      store,
+      objects: options.sources.objects,
+      clock: options.clock ?? { now: () => new Date() },
+      ...(options.sources.storageTimeoutMs === undefined
+        ? {}
+        : { storageTimeoutMs: options.sources.storageTimeoutMs }),
+    });
+  }
   return gateway;
 }

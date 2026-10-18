@@ -12,6 +12,29 @@ export {
   type CredentialWrite,
 } from "./store.js";
 export { createWorkspaceGateway, type WorkspaceGatewayOptions } from "./workspace.js";
+export {
+  SourceAdmissionError,
+  decideSourceAdmission,
+  purgeExpiredSources,
+  sourceStatus,
+  verifySubmissionSource,
+  type SourceAdmissionOptions,
+  type SourceAdmitInput,
+  type SourceRecord,
+  type SourceStore,
+  type SourceUsage,
+} from "./source-admission.js";
+export {
+  GcsSourceObjectStore,
+  MemorySourceObjectStore,
+  SourceStorageError,
+  metadataAccessToken,
+  sourceObjectKey,
+  type GcsSourceObjectStoreOptions,
+  type SourceObjectInfo,
+  type SourceObjectStore,
+  type SourceUploadAccessRequest,
+} from "./source-storage.js";
 export { hostedSigningIdentity } from "./identity.js";
 export { cloudRunInvocationToken, type CloudRunInvocationOptions } from "./cloud-run.js";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";

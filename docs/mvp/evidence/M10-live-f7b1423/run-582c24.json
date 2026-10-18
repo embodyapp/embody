@@ -1,0 +1,158 @@
+{
+  "gate": "mvp-cloud-m10",
+  "status": "passed",
+  "timestamp": "2026-10-18T12:35:16.454Z",
+  "commit": "f7b1423a4886fdfe82590a94c75228bdbe05eacc",
+  "dirty": false,
+  "node": "v24.21.0",
+  "lockfileSha256": "8c985789b2d1bbaefe414a0c4aedd994a57c66c3fcd31cb7374ed67a7e7c8a13",
+  "schemaSourceSha256": "502cad9d92abe0d084394520c931a51d80f1bfa9b6378c6e9e38b69c6a714bb7",
+  "platformSchemaSourceSha256": "e0eb08692fb80383ae6ad5f422f0227435e45a0f260e5524ac8d6817892bac46",
+  "postgresFixtureSha256": "5ee505a6ae07b9b1bfbb9a98493fa0495081732cf2ca423a42311e69f5dea580",
+  "counts": {
+    "passed": 11,
+    "failed": 0,
+    "skipped": 0
+  },
+  "images": [],
+  "suites": ["m10"],
+  "releaseGate": false,
+  "pendingSuites": ["m11", "m12", "m13", "m14", "m15", "m16", "m17", "m20", "m21"],
+  "m10": {
+    "pass": true,
+    "runId": "582c24",
+    "cases": {
+      "propagation": {
+        "pass": true,
+        "attempts": 5,
+        "seconds": 62
+      },
+      "bucketPrivacy": {
+        "pass": true,
+        "checks": {
+          "uniformAccess": true,
+          "publicAccessPrevented": true,
+          "noPublicMembers": true,
+          "signerCreateOnly": true,
+          "region": true,
+          "versioningOff": true,
+          "stored": true,
+          "anonymousReadDenied": true,
+          "anonymousListDenied": true,
+          "signedPutCannotRead": true
+        },
+        "status": {
+          "stored": 200,
+          "anonymousRead": 403,
+          "anonymousList": 401,
+          "signedRead": 400
+        }
+      },
+      "admitVerify": {
+        "pass": true,
+        "checks": {
+          "created": true,
+          "signedHost": true,
+          "expiry": true,
+          "stored": true,
+          "verified": true,
+          "storedDigest": true
+        }
+      },
+      "accessBounds": {
+        "pass": true,
+        "checks": {
+          "longerRejected": true,
+          "shorterRejected": true,
+          "badSignatureRejected": true,
+          "otherObjectRejected": true,
+          "preconditionRequired": true,
+          "rangeRequired": true,
+          "validStored": true,
+          "createOnly": true,
+          "otherObjectAbsent": true,
+          "verified": true
+        },
+        "results": {
+          "longer": 400,
+          "shorter": 400,
+          "badSignature": 403,
+          "otherObject": 403,
+          "droppedPrecondition": 400,
+          "widenedRange": 403,
+          "valid": 200,
+          "overwrite": 412
+        }
+      },
+      "expiredAccess": {
+        "pass": true,
+        "status": 400,
+        "absent": true
+      },
+      "digestMismatch": {
+        "pass": true,
+        "checks": {
+          "stored": true,
+          "rejected": true,
+          "deleted": true,
+          "sameIdentity": true,
+          "retried": true
+        }
+      },
+      "adversarialArchive": {
+        "pass": true,
+        "checks": {
+          "stored": true,
+          "rejected": true,
+          "deleted": true
+        }
+      },
+      "interruptedUpload": {
+        "pass": true,
+        "checks": {
+          "aborted": true,
+          "nothingStored": true,
+          "incomplete": true,
+          "sameIdentity": true,
+          "restarted": true
+        }
+      },
+      "crossWorkspace": {
+        "pass": true,
+        "checks": {
+          "foreignOwnPath404": true,
+          "foreignStatus404": true,
+          "foreignCredential401": true,
+          "crossWrite403": true
+        }
+      },
+      "retentionPurge": {
+        "pass": true,
+        "checks": {
+          "existedBefore": true,
+          "purged": true,
+          "objectGone": true
+        },
+        "purged": {
+          "deleted": 6,
+          "failed": 0
+        }
+      },
+      "cleanup": {
+        "pass": true,
+        "teardown": {
+          "pass": true,
+          "removed": ["bucket", "signer"]
+        },
+        "leftovers": [],
+        "projectIamUnchanged": true
+      }
+    },
+    "operations": {
+      "classA": 23,
+      "classB": 33
+    },
+    "estimatedUsd": 0.0002,
+    "budgetUsd": 2
+  }
+}

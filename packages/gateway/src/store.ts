@@ -16,6 +16,13 @@ import {
 } from "@embody/cloud-contracts";
 import { validateRegistration, type Registration, type GatewayRegistryOptions } from "./index.js";
 import { DispatchRateLimitedError, type AuditRecord, type DispatchAdmission } from "./dispatch.js";
+import {
+  decideSourceAdmission,
+  type SourceAdmitInput,
+  type SourceRecord,
+  type SourceStore,
+  type SourceUsage,
+} from "./source-admission.js";
 
 export interface Workspace {
   readonly id: string;
@@ -135,8 +142,26 @@ function validateCredential(value: CredentialWrite): CredentialWrite {
   });
 }
 const defaultPolicy: GatewayRegistryOptions = { credentials: {} };
+function validateSourceInput(input: SourceAdmitInput): void {
+  id(input.workspaceId);
+  if (!AppIdSchema.safeParse(input.appId).success || !Number.isFinite(input.now.getTime()))
+    throw new BadRequestError("Invalid source request");
+}
+/** Identity, digest and size of a source record are immutable after admission. */
+function sameSourceIdentity(a: SourceRecord, b: SourceRecord): boolean {
+  return (
+    a.workspaceId === b.workspaceId &&
+    a.appId === b.appId &&
+    a.uploadId === b.uploadId &&
+    a.idempotencyKey === b.idempotencyKey &&
+    a.objectKey === b.objectKey &&
+    a.digest === b.digest &&
+    a.bytes === b.bytes
+  );
+}
 /* eslint-disable @typescript-eslint/require-await -- Atomic memory operations contain no await; async converts validation/CAS errors to rejections. */
-export class MemoryGatewayStore implements GatewayStore {
+export class MemoryGatewayStore implements GatewayStore, SourceStore {
+  private sources = new Map<string, SourceRecord>();
   private workspaces = new Map<string, Workspace>();
   private apps = new Map<string, CatalogApp>();
   private credentials = new Map<string, WorkspaceCredential>();
@@ -240,11 +265,72 @@ export class MemoryGatewayStore implements GatewayStore {
       ) ?? null,
     );
   }
+  public async admitSource(
+    input: SourceAdmitInput,
+  ): Promise<{ record: SourceRecord; replay: boolean }> {
+    validateSourceInput(input);
+    if (!this.workspaces.has(input.workspaceId)) throw new NotFoundError("Workspace not found");
+    const existing = [...this.sources.values()].find(
+      (r) =>
+        r.workspaceId === input.workspaceId &&
+        r.appId === input.appId &&
+        r.idempotencyKey === input.idempotencyKey &&
+        !r.purging,
+    );
+    const now = input.now.getTime();
+    const others = [...this.sources.values()].filter(
+      (r) => r.workspaceId === input.workspaceId && r !== existing && !r.purging,
+    );
+    const usage: SourceUsage = {
+      pendingForApp: others.filter(
+        (r) =>
+          r.appId === input.appId && r.state === "pending" && Date.parse(r.accessExpiresAt) > now,
+      ).length,
+      retainedBytes: others
+        .filter((r) => Date.parse(r.retainUntil) > now || r.pinnedBy)
+        .reduce((total, r) => total + r.bytes, 0),
+    };
+    const decision = decideSourceAdmission(existing, input, usage);
+    if (!decision.write) return { record: clone(existing!), replay: decision.replay };
+    const next = { ...decision.record, revision: (existing?.revision ?? 0) + 1 };
+    this.sources.set(`${next.workspaceId}/${next.uploadId}`, next);
+    return { record: clone(next), replay: decision.replay };
+  }
+  public async source(
+    workspaceId: string,
+    appId: string,
+    uploadId: string,
+  ): Promise<SourceRecord | null> {
+    const record = this.sources.get(`${workspaceId}/${uploadId}`);
+    return record && record.appId === appId && !record.purging ? clone(record) : null;
+  }
+  public async updateSource(next: SourceRecord, expected: number): Promise<SourceRecord> {
+    const key = `${next.workspaceId}/${next.uploadId}`;
+    const prior = this.sources.get(key);
+    if (!prior || prior.revision !== expected || prior.purging)
+      throw new ConflictError("Revision conflict");
+    if (!sameSourceIdentity(prior, next)) throw new BadRequestError("Source identity is immutable");
+    const value = { ...clone(next), revision: expected + 1 };
+    this.sources.set(key, value);
+    return clone(value);
+  }
+  public async expiredSources(now: Date, limit: number): Promise<SourceRecord[]> {
+    return [...this.sources.values()]
+      .filter((r) => Date.parse(r.retainUntil) <= now.getTime() && !r.pinnedBy)
+      .sort((a, b) => a.retainUntil.localeCompare(b.retainUntil))
+      .slice(0, limit)
+      .map(clone);
+  }
+  public async deleteSource(record: SourceRecord): Promise<boolean> {
+    const key = `${record.workspaceId}/${record.uploadId}`;
+    if (this.sources.get(key)?.revision !== record.revision) return false;
+    return this.sources.delete(key);
+  }
   public async close(): Promise<void> {}
 }
 /* eslint-enable @typescript-eslint/require-await */
 /** Platform database only. Migrations must be invoked separately using the maintenance role. */
-export class PostgresGatewayStore implements GatewayStore {
+export class PostgresGatewayStore implements GatewayStore, SourceStore {
   private readonly pool: Pool;
   private closing?: Promise<void>;
   public constructor(
@@ -285,7 +371,10 @@ export class PostgresGatewayStore implements GatewayStore {
         CREATE TABLE IF NOT EXISTS embody_platform_credentials (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), id text NOT NULL, hash text NOT NULL, document jsonb NOT NULL, PRIMARY KEY(workspace_id,id), UNIQUE(workspace_id,hash));
         CREATE TABLE IF NOT EXISTS embody_platform_quotas (workspace_id text PRIMARY KEY REFERENCES embody_platform_workspaces(id), used integer NOT NULL, reset_at timestamptz NOT NULL);
         CREATE TABLE IF NOT EXISTS embody_platform_audit (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), request_id text NOT NULL, document jsonb NOT NULL, admitted_at timestamptz NOT NULL DEFAULT clock_timestamp(), lease_until timestamptz NOT NULL, completed boolean NOT NULL DEFAULT false, PRIMARY KEY(workspace_id,request_id));
-        CREATE INDEX IF NOT EXISTS embody_platform_audit_lease ON embody_platform_audit(workspace_id,lease_until) WHERE NOT completed;`);
+        CREATE INDEX IF NOT EXISTS embody_platform_audit_lease ON embody_platform_audit(workspace_id,lease_until) WHERE NOT completed;
+        CREATE TABLE IF NOT EXISTS embody_platform_sources (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), upload_id text NOT NULL, app_id text NOT NULL, idempotency_key text NOT NULL, state text NOT NULL CHECK (state IN ('pending','verified','rejected')), bytes bigint NOT NULL CHECK (bytes > 0), access_expires_at timestamptz NOT NULL, retain_until timestamptz NOT NULL, pinned boolean NOT NULL DEFAULT false, purging boolean NOT NULL DEFAULT false, revision bigint NOT NULL CHECK (revision > 0), document jsonb NOT NULL, PRIMARY KEY(workspace_id,upload_id));
+        CREATE UNIQUE INDEX IF NOT EXISTS embody_platform_sources_key ON embody_platform_sources(workspace_id,app_id,idempotency_key) WHERE NOT purging;
+        CREATE INDEX IF NOT EXISTS embody_platform_sources_retention ON embody_platform_sources(retain_until) WHERE NOT pinned;`);
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -441,6 +530,130 @@ export class PostgresGatewayStore implements GatewayStore {
       `UPDATE embody_platform_audit SET document=$3,completed=true,lease_until=clock_timestamp() WHERE workspace_id=$1 AND request_id=$2 AND NOT completed`,
       [record.orgId, record.requestId, record],
     );
+  }
+  public async admitSource(
+    input: SourceAdmitInput,
+  ): Promise<{ record: SourceRecord; replay: boolean }> {
+    validateSourceInput(input);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Same per-workspace serialization point as catalog writes and dispatch quotas.
+      const workspace = await client.query(
+        "SELECT id FROM embody_platform_workspaces WHERE id=$1 FOR UPDATE",
+        [input.workspaceId],
+      );
+      if (!workspace.rowCount) throw new NotFoundError("Workspace not found");
+      const existing = (
+        await client.query<{ document: SourceRecord }>(
+          "SELECT document FROM embody_platform_sources WHERE workspace_id=$1 AND app_id=$2 AND idempotency_key=$3 AND NOT purging",
+          [input.workspaceId, input.appId, input.idempotencyKey],
+        )
+      ).rows[0]?.document;
+      const usage = (
+        await client.query<{ pending: number; bytes: string }>(
+          `SELECT count(*) FILTER (WHERE app_id=$2 AND state='pending' AND access_expires_at>$4)::int AS pending,
+            COALESCE(sum(bytes) FILTER (WHERE retain_until>$4 OR pinned),0)::text AS bytes
+          FROM embody_platform_sources WHERE workspace_id=$1 AND NOT purging AND NOT (app_id=$2 AND idempotency_key=$3)`,
+          [input.workspaceId, input.appId, input.idempotencyKey, input.now],
+        )
+      ).rows[0]!;
+      const decision = decideSourceAdmission(existing, input, {
+        pendingForApp: usage.pending,
+        retainedBytes: Number(usage.bytes),
+      });
+      if (!decision.write) {
+        await client.query("COMMIT");
+        return { record: existing!, replay: decision.replay };
+      }
+      const next: SourceRecord = { ...decision.record, revision: (existing?.revision ?? 0) + 1 };
+      await client.query(
+        `INSERT INTO embody_platform_sources(workspace_id,upload_id,app_id,idempotency_key,state,bytes,access_expires_at,retain_until,pinned,revision,document)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        ON CONFLICT(workspace_id,upload_id) DO UPDATE SET state=EXCLUDED.state,access_expires_at=EXCLUDED.access_expires_at,retain_until=EXCLUDED.retain_until,pinned=EXCLUDED.pinned,revision=EXCLUDED.revision,document=EXCLUDED.document`,
+        [
+          next.workspaceId,
+          next.uploadId,
+          next.appId,
+          next.idempotencyKey,
+          next.state,
+          next.bytes,
+          next.accessExpiresAt,
+          next.retainUntil,
+          Boolean(next.pinnedBy),
+          next.revision,
+          next,
+        ],
+      );
+      await client.query("COMMIT");
+      return { record: next, replay: decision.replay };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if ((error as { code?: string }).code === "23505")
+        throw new ConflictError("Source identity exists");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  public async source(
+    workspaceId: string,
+    appId: string,
+    uploadId: string,
+  ): Promise<SourceRecord | null> {
+    return (
+      (
+        await this.pool.query<{ document: SourceRecord }>(
+          "SELECT document FROM embody_platform_sources WHERE workspace_id=$1 AND app_id=$2 AND upload_id=$3 AND NOT purging",
+          [workspaceId, appId, uploadId],
+        )
+      ).rows[0]?.document ?? null
+    );
+  }
+  public async updateSource(next: SourceRecord, expected: number): Promise<SourceRecord> {
+    if (!Number.isSafeInteger(expected) || expected < 1)
+      throw new BadRequestError("Invalid revision");
+    const value: SourceRecord = { ...next, revision: expected + 1 };
+    const result = await this.pool.query<{ document: SourceRecord }>(
+      `UPDATE embody_platform_sources SET state=$5,access_expires_at=$6,retain_until=$7,pinned=$8,revision=$9,document=$10,purging=$15
+      WHERE workspace_id=$1 AND upload_id=$2 AND app_id=$3 AND revision=$4 AND idempotency_key=$11
+        AND document->>'objectKey'=$12 AND document->>'digest'=$13 AND bytes=$14 AND NOT purging RETURNING document`,
+      [
+        value.workspaceId,
+        value.uploadId,
+        value.appId,
+        expected,
+        value.state,
+        value.accessExpiresAt,
+        value.retainUntil,
+        Boolean(value.pinnedBy),
+        value.revision,
+        value,
+        value.idempotencyKey,
+        value.objectKey,
+        value.digest,
+        value.bytes,
+        Boolean(value.purging),
+      ],
+    );
+    // Revision, purging tombstone or immutable identity mismatch: never overwrite another record's identity.
+    if (!result.rowCount) throw new ConflictError("Revision conflict");
+    return value;
+  }
+  public async expiredSources(now: Date, limit: number): Promise<SourceRecord[]> {
+    return (
+      await this.pool.query<{ document: SourceRecord }>(
+        "SELECT document FROM embody_platform_sources WHERE retain_until<=$1 AND NOT pinned ORDER BY retain_until LIMIT $2",
+        [now, Math.max(1, Math.min(1000, Math.trunc(limit)))],
+      )
+    ).rows.map((row) => row.document);
+  }
+  public async deleteSource(record: SourceRecord): Promise<boolean> {
+    const result = await this.pool.query(
+      "DELETE FROM embody_platform_sources WHERE workspace_id=$1 AND upload_id=$2 AND revision=$3 AND NOT pinned",
+      [record.workspaceId, record.uploadId, record.revision],
+    );
+    return (result.rowCount ?? 0) > 0;
   }
   public close(): Promise<void> {
     return (this.closing ??= this.pool.end());

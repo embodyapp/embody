@@ -9,6 +9,9 @@ import { Pool } from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { PostgresGatewayStore, newCredential, createWorkspaceGateway } from "../src/index.js";
 import { appRecord, credentialInput, storeConformance } from "./store-conformance.js";
+import { sourceStoreConformance } from "./source-store-conformance.js";
+import { createSourceArchive } from "@embody/cloud-contracts";
+import { MemorySourceObjectStore } from "../src/index.js";
 const url = process.env["EMBODY_PLATFORM_URL"];
 if (process.env["EMBODY_PLATFORM_REQUIRED"] === "true" && !url)
   throw new Error("Required platform PostgreSQL configuration missing");
@@ -19,6 +22,86 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
     () => Promise.resolve(new PostgresGatewayStore(url!)),
     () => Promise.resolve(new PostgresGatewayStore(url!)),
   );
+  sourceStoreConformance("real source store", () =>
+    Promise.resolve(new PostgresGatewayStore(url!)),
+  );
+  it("M10 admits, verifies and persists source identity across store instances", async () => {
+    const workspace = `ws_${randomUUID().replaceAll("-", "")}`;
+    const store = new PostgresGatewayStore(url!);
+    const objects = new MemorySourceObjectStore();
+    const gateway = createWorkspaceGateway({ store, token: signingIdentity, sources: { objects } });
+    try {
+      await store.createWorkspace(workspace);
+      await store.putApp(appRecord(workspace), null);
+      const issued = newCredential({
+        ...credentialInput(workspace),
+        grants: [{ workspaceId: workspace, appId: "app_kanban0001", role: "deployer" }],
+      });
+      await store.putCredential(issued.credential, null);
+      const archive = createSourceArchive([
+        { path: "package.json", content: Buffer.from("{}") },
+        { path: "embody.config.ts", content: Buffer.from("export default {};") },
+      ]);
+      const { createHash } = await import("node:crypto");
+      const digest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
+      const headers = { authorization: `Bearer ${issued.token}` };
+      const path = `/v1/workspaces/${workspace}/apps/app_kanban0001/sources`;
+      const body = {
+        version: 1,
+        workspaceId: workspace,
+        appId: "app_kanban0001",
+        idempotencyKey: `sha256_${digest.slice(7)}`,
+        format: "embody-source-v1",
+        digest,
+        bytes: archive.byteLength,
+      };
+      const created = await gateway.inject({ method: "POST", url: path, headers, payload: body });
+      expect(created.statusCode).toBe(201);
+      const status = created.json<{
+        uploadId: string;
+        upload: { url: string; headers: Record<string, string> };
+      }>();
+      expect(
+        (
+          await objects.fetch(status.upload.url, {
+            method: "PUT",
+            headers: status.upload.headers,
+            body: archive,
+          })
+        ).status,
+      ).toBe(200);
+      const done = await gateway.inject({
+        method: "POST",
+        url: `${path}/${status.uploadId}/complete`,
+        headers: { ...headers, "content-type": "application/json" },
+        payload: "{}",
+      });
+      expect(done.json()).toMatchObject({ state: "verified" });
+      const fresh = new PostgresGatewayStore(url!);
+      try {
+        expect(await fresh.source(workspace, "app_kanban0001", status.uploadId)).toMatchObject({
+          state: "verified",
+          digest,
+          bytes: archive.byteLength,
+        });
+        const replay = await fresh.admitSource({
+          workspaceId: workspace,
+          appId: "app_kanban0001",
+          idempotencyKey: body.idempotencyKey,
+          digest,
+          bytes: archive.byteLength,
+          actorId: "alice",
+          now: new Date(),
+        });
+        expect(replay).toMatchObject({ replay: true, record: { uploadId: status.uploadId } });
+      } finally {
+        await fresh.close();
+      }
+    } finally {
+      await gateway.close();
+      await store.close();
+    }
+  });
   it("M07.d committed audit intent survives process loss, completion is immutable and contains no payload", async () => {
     const workspace = `ws_${randomUUID().replaceAll("-", "")}`;
     const store = new PostgresGatewayStore(url!);
@@ -481,7 +564,7 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
           "SELECT tableowner=current_user AS owned FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'embody_platform_%'",
         )
       ).rows;
-      expect(tables).toHaveLength(5);
+      expect(tables).toHaveLength(6);
       expect(tables.every((row) => !row.owned)).toBe(true);
       await expect(store.migrate()).rejects.toThrow("maintenance authority");
       await expect(
@@ -489,6 +572,11 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
       ).rejects.toMatchObject({ code: "42501" });
       await expect(
         pool.query("ALTER TABLE embody_platform_apps ADD COLUMN forbidden integer"),
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(
+        pool.query(
+          "ALTER TABLE embody_platform_sources DROP CONSTRAINT embody_platform_sources_pkey",
+        ),
       ).rejects.toMatchObject({ code: "42501" });
     } finally {
       await store.close();
