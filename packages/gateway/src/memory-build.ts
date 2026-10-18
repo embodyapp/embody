@@ -3,6 +3,7 @@ import {
   BuildProviderError,
   type BuildConfig,
   type BuildProvider,
+  type ImageVersion,
   type ProviderBuild,
   type ProviderBuildStatus,
 } from "./build-admission.js";
@@ -32,7 +33,7 @@ export class MemoryBuildProvider implements BuildProvider {
     { config: BuildConfig; result: SimulatedBuildResult | undefined; tags: readonly string[] }
   >();
   public readonly outputs = new Map<string, Uint8Array>();
-  public readonly images = new Map<string, { digest: string; createdAt: string }[]>();
+  public readonly images = new Map<string, ImageVersion[]>();
   public available = true;
   public constructor(
     private readonly run: (config: BuildConfig) => SimulatedBuildResult | undefined,
@@ -58,7 +59,11 @@ export class MemoryBuildProvider implements BuildProvider {
     for (const image of result.images ?? []) {
       const path = image.name.split("/").slice(3).join("/").split(":")[0]!;
       const list = this.images.get(path) ?? [];
-      list.push({ digest: image.digest, createdAt: this.clock.now().toISOString() });
+      list.push({
+        digest: image.digest,
+        createdAt: this.clock.now().toISOString(),
+        tags: [image.name.split(":").pop()!],
+      });
       this.images.set(path, list);
     }
     if (result.log !== undefined) {
@@ -144,7 +149,7 @@ export class MemoryBuildProvider implements BuildProvider {
     );
     return Promise.resolve();
   }
-  public listImages(path: string): Promise<readonly { digest: string; createdAt: string }[]> {
+  public listImages(path: string): Promise<readonly ImageVersion[]> {
     this.check();
     return Promise.resolve([...(this.images.get(path) ?? [])]);
   }

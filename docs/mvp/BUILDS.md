@@ -73,7 +73,7 @@ A rejected artifact has no image reference or manifest, its public status has no
 
 | Identity | Holds | Never holds |
 |---|---|---|
-| Builder (`<prefix>-builder`) | `artifactregistry.writer` on the builds repository; `artifactregistry.reader` on the platform repository (recipe image); `storage.objectCreator` on the outputs bucket (manifests and SBOMs are create-only); `storage.legacyBucketReader` and `storage.objectUser` on the separate logs bucket (Cloud Build requires bucket access for a user-specified logs bucket and rewrites the log object during the build) | source bucket access, any project role, Secret Manager, Cloud SQL, Cloud Run, IAM, `actAs` |
+| Builder (`<prefix>-builder`) | `artifactregistry.writer` on the builds repository; `artifactregistry.reader` on the platform repository (recipe image); `storage.objectCreator` plus `storage.legacyBucketReader` (bucket get and object listing, no object read; Cloud Build checks it can get artifact and log buckets) on the outputs bucket, so manifests and SBOMs are create-only; `storage.legacyBucketReader` and `storage.objectUser` on the separate logs bucket (Cloud Build requires bucket access for a user-specified logs bucket and rewrites the log object during the build) | source bucket access, any project role, Secret Manager, Cloud SQL, Cloud Run, IAM, `actAs` |
 | Source read signer (`<prefix>-src-read`) | `storage.objectViewer` on the source bucket; signs only the builder's GET URL | write, delete, any other bucket |
 | Controller (M12; the operator in the live run) | `cloudbuild.builds.create`/`get`/`cancel`, `actAs` on the builder only, `signBlob` on the read signer, delete on the builds repository and outputs bucket | `actAs` on any runtime identity for builds |
 

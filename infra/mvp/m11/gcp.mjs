@@ -261,6 +261,14 @@ export function createM11GcpProvider({
         "roles/storage.objectCreator",
         sa(n.builder.email),
       );
+      // Cloud Build checks it can get the artifact and logs buckets (otherwise "bucket does not
+      // exist" / FAILED_PRECONDITION): bucket get and object list, never object read.
+      await addBinding(
+        `${STORAGE}/b/${n.outputBucket}/iam`,
+        `${STORAGE}/b/${n.outputBucket}/iam`,
+        "roles/storage.legacyBucketReader",
+        sa(n.builder.email),
+      );
       // Logs: Cloud Build refuses a user-specified logs bucket the build identity cannot get
       // (FAILED_PRECONDITION) and rewrites the log object while the build runs, so the builder
       // gets bucket get/list plus object create/update/delete here, and nowhere else.

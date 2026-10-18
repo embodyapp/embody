@@ -360,9 +360,13 @@ export interface BuildProvider {
   deleteLogs(logsBucket: string): Promise<void>;
   /** Idempotent; deletes one image version by digest under `<repository>/<ws>/<app>`. */
   deleteImage(path: string, digest: string): Promise<void>;
-  listImages(
-    path: string,
-  ): Promise<readonly { readonly digest: string; readonly createdAt: string }[]>;
+  /** Image versions under `<repository>/<ws>/<app>`, with their tags. */
+  listImages(path: string): Promise<readonly ImageVersion[]>;
+}
+export interface ImageVersion {
+  readonly digest: string;
+  readonly createdAt: string;
+  readonly tags: readonly string[];
 }
 export class BuildProviderError extends Error {
   public constructor(message: string) {
@@ -907,13 +911,23 @@ export class BuildAdmission {
   }
 }
 
-/** Image and manifest/SBOM objects; logs stay until the record's retention ends. */
+/**
+ * Image and manifest/SBOM objects; logs stay until the record's retention ends. A build can
+ * push its image and still fail afterwards (for example uploading outputs), so the image is also
+ * found by its artifact tag, not only by a digest the provider reported.
+ */
 async function removeBuildOutputs(
   provider: BuildProvider,
-  record: Pick<ArtifactRecord, "workspaceId" | "appId" | "imageDigest" | "outputPrefix">,
+  record: Pick<
+    ArtifactRecord,
+    "workspaceId" | "appId" | "artifactId" | "imageDigest" | "outputPrefix"
+  >,
 ): Promise<void> {
-  if (record.imageDigest)
-    await provider.deleteImage(`${record.workspaceId}/${record.appId}`, record.imageDigest);
+  const path = `${record.workspaceId}/${record.appId}`;
+  const digests = new Set(record.imageDigest ? [record.imageDigest] : []);
+  for (const image of await provider.listImages(path))
+    if (image.tags.includes(record.artifactId)) digests.add(image.digest);
+  for (const digest of digests) await provider.deleteImage(path, digest);
   await provider.deleteOutputs(record.outputPrefix);
 }
 

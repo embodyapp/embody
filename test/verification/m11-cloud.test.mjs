@@ -86,6 +86,7 @@ test("builder IAM must be exactly push, recipe read and output create", () => {
     "buildsRepo:roles/artifactregistry.writer",
     "logsBucket:roles/storage.legacyBucketReader",
     "logsBucket:roles/storage.objectUser",
+    "outputBucket:roles/storage.legacyBucketReader",
     "outputBucket:roles/storage.objectCreator",
     "recipeRepo:roles/artifactregistry.reader",
   ];

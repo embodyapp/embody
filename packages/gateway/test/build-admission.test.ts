@@ -474,6 +474,27 @@ describe("M11 admission decisions", () => {
           `ws_build00001/app_build00001@${record.imageDigest}`,
         );
     });
+  it("deletes an image pushed by a build that failed afterwards (no reported digest)", async () => {
+    const f = await fixture((c) => ({
+      status: "FAILURE",
+      stepOutputs: honestBuild(c).stepOutputs ?? [],
+      images: [{ name: c.images[0]!, digest: pin("pushed-then-failed") }],
+    }));
+    const submission = f.submission();
+    const started = await f.admission.start({
+      submission,
+      deploymentId: "dep_build00001",
+      attempt: 1,
+    });
+    f.provider.completeAll();
+    // Cloud Build reports no image for a build that failed after its push.
+    const get = f.provider.get.bind(f.provider);
+    f.provider.get = async (id) => ({ ...(await get(id)), images: [] });
+    const record = await f.admission.settle(started, submission);
+    expect(record).toMatchObject({ state: "rejected", error: "BUILD_FAILED" });
+    expect(record.imageDigest).toBeUndefined();
+    expect(f.provider.images.get("ws_build00001/app_build00001")).toEqual([]);
+  });
   it("rejects durable capability mismatches both ways", async () => {
     for (const caps of [
       { ...capabilities.durable, workflows: false },
@@ -686,8 +707,8 @@ describe("M11 build orchestration", () => {
     orphan.provider.images
       .get("ws_build00001/app_build00001")!
       .push(
-        { digest: pin("orphan-old"), createdAt: "2029-12-01T00:00:00.000Z" },
-        { digest: pin("orphan-new"), createdAt: orphan.clock.now().toISOString() },
+        { digest: pin("orphan-old"), createdAt: "2029-12-01T00:00:00.000Z", tags: [] },
+        { digest: pin("orphan-new"), createdAt: orphan.clock.now().toISOString(), tags: [] },
       );
     const cleaned = await cleanupOrphanedImages({
       store: orphan.store,

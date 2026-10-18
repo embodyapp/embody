@@ -3,6 +3,7 @@ import {
   type BuildConfig,
   type BuildProvider,
   type BuildRecipeConfig,
+  type ImageVersion,
   type ProviderBuild,
   type ProviderBuildStatus,
 } from "./build-admission.js";
@@ -182,23 +183,40 @@ export class CloudBuildProvider implements BuildProvider {
     if (!response.ok && response.status !== 404)
       throw new BuildProviderError("Image delete failed");
   }
-  public async listImages(
-    path: string,
-  ): Promise<readonly { readonly digest: string; readonly createdAt: string }[]> {
-    const response = await this.call(`${this.packageUrl(path)}/versions?pageSize=500`);
-    if (response.status === 404) return [];
-    if (!response.ok) throw new BuildProviderError("Image list failed");
-    const body = (await response.json()) as {
-      versions?: { name?: unknown; createTime?: unknown }[];
-    };
-    return (body.versions ?? [])
-      .map((v) => ({
-        digest: decodeURIComponent(str(v.name).split("/versions/")[1] ?? ""),
-        createdAt: str(v.createTime),
-      }))
-      .filter(
-        (v) => /^sha256:[a-f0-9]{64}$/.test(v.digest) && Number.isFinite(Date.parse(v.createdAt)),
+  public async listImages(path: string): Promise<readonly ImageVersion[]> {
+    this.packageUrl(path);
+    const [host, project, repository] = this.recipe.imageRepository.split("/") as [
+      string,
+      string,
+      string,
+    ];
+    const location = host.replace(/-docker\.pkg\.dev$/, "");
+    const prefix = `${this.recipe.imageRepository}/${path}@`;
+    const versions: ImageVersion[] = [];
+    let pageToken = "";
+    do {
+      const response = await this.call(
+        `https://artifactregistry.googleapis.com/v1/projects/${project}/locations/${location}/repositories/${repository}/dockerImages?pageSize=500${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`,
       );
+      if (response.status === 404) return [];
+      if (!response.ok) throw new BuildProviderError("Image list failed");
+      const body = (await response.json()) as {
+        dockerImages?: { uri?: unknown; tags?: unknown; uploadTime?: unknown }[];
+        nextPageToken?: unknown;
+      };
+      for (const image of body.dockerImages ?? []) {
+        const uri = str(image.uri);
+        if (!uri.startsWith(prefix)) continue;
+        const digest = uri.slice(prefix.length);
+        if (
+          /^sha256:[a-f0-9]{64}$/.test(digest) &&
+          Number.isFinite(Date.parse(str(image.uploadTime)))
+        )
+          versions.push({ digest, createdAt: str(image.uploadTime), tags: strings(image.tags) });
+      }
+      pageToken = str(body.nextPageToken);
+    } while (pageToken);
+    return versions;
   }
 }
 

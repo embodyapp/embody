@@ -70,6 +70,7 @@ export function evaluateBuilderBindings(bindings) {
     "buildsRepo:roles/artifactregistry.writer",
     "logsBucket:roles/storage.legacyBucketReader",
     "logsBucket:roles/storage.objectUser",
+    "outputBucket:roles/storage.legacyBucketReader",
     "outputBucket:roles/storage.objectCreator",
     "recipeRepo:roles/artifactregistry.reader",
   ];

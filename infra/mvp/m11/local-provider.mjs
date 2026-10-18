@@ -287,23 +287,33 @@ export class LocalBuildProvider {
   }
   async listImages(path) {
     const [workspaceId, appId] = path.split("/");
-    const out = docker([
+    const ids = docker([
       "images",
+      "-q",
       "--no-trunc",
-      "--format",
-      "{{.ID}} {{.CreatedAt}}",
       "--filter",
       `label=org.embody.workspace=${workspaceId}`,
       "--filter",
       `label=org.embody.app=${appId}`,
-    ]).stdout;
-    return out
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [digest, ...rest] = line.split(" ");
-        return { digest, createdAt: new Date(rest.slice(0, 2).join(" ")).toISOString() };
-      });
+    ])
+      .stdout.split("\n")
+      .filter(Boolean);
+    return [...new Set(ids)].map((digest) => {
+      const [artifact, created] = docker([
+        "image",
+        "inspect",
+        "--format",
+        '{{index .Config.Labels "org.embody.artifact"}} {{.Created}}',
+        digest,
+      ])
+        .stdout.trim()
+        .split(" ");
+      return {
+        digest,
+        tags: artifact ? [artifact] : [],
+        createdAt: new Date(created).toISOString(),
+      };
+    });
   }
   async files() {
     const walk = async (dir) => {
