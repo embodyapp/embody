@@ -17,6 +17,7 @@ import {
 } from "../src/index.js";
 import { appRecord, credentialInput, storeConformance } from "./store-conformance.js";
 import { sourceStoreConformance } from "./source-store-conformance.js";
+import { artifactStoreConformance } from "./artifact-store-conformance.js";
 import { createSourceArchive } from "@embody/cloud-contracts";
 import { MemorySourceObjectStore } from "../src/index.js";
 const url = process.env["EMBODY_PLATFORM_URL"];
@@ -30,6 +31,9 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
     () => Promise.resolve(new PostgresGatewayStore(url!)),
   );
   sourceStoreConformance("real source store", () =>
+    Promise.resolve(new PostgresGatewayStore(url!)),
+  );
+  artifactStoreConformance("real artifact store", () =>
     Promise.resolve(new PostgresGatewayStore(url!)),
   );
   it("M10 admits, verifies and persists source identity across store instances", async () => {

@@ -87,7 +87,8 @@ export interface BuildPlan {
 }
 
 /** Cloud Build substitutes `$NAME`; scripts escape every literal `$` as `$$`. */
-const escapeDollars = (script: string) => script.replaceAll("$", "$$");
+// split/join, not replaceAll: in a replacement string "$$" means a single "$".
+const escapeDollars = (script: string) => script.split("$").join("$$");
 const MAX_TAR_BYTES = BUILD_RECIPE.maxOutputBytes + 16 * 1024 * 1024;
 
 /**
@@ -98,7 +99,7 @@ const MAX_TAR_BYTES = BUILD_RECIPE.maxOutputBytes + 16 * 1024 * 1024;
  */
 export function sandboxScript(): string {
   const s = BUILD_RECIPE.sandbox;
-  return `set -euo pipefail
+  return `set -eu
 W="\${EMBODY_WORKSPACE:-/workspace}"
 N="embody-sandbox-\${EMBODY_ARTIFACT_ID}"
 docker rm -f "$N" >/dev/null 2>&1 || true
@@ -108,19 +109,19 @@ docker create --name "$N" --network none --user ${s.user} --cap-drop ALL \\
   --env-file /dev/null --workdir /app --entrypoint /embody/sandbox.sh "$EMBODY_BUILDER_IMAGE" >/dev/null
 docker cp -a "$W/src/." "$N:/app"
 docker cp -a "$W/store/." "$N:/store"
-set +e
-timeout --kill-after=10 ${BUILD_RECIPE.sandboxSeconds} docker start -a "$N" 2>&1 | head -c ${BUILD_RECIPE.maxLogBytes}
-status=\${PIPESTATUS[0]}
-set -e
-docker kill "$N" >/dev/null 2>&1 || true
 mkdir -p "$W/sandbox"
+# Log bounded to ${BUILD_RECIPE.maxLogBytes} bytes; the rest is drained, never stored.
+{ if timeout -k 10 ${BUILD_RECIPE.sandboxSeconds} docker start -a "$N" 2>&1; then st=0; else st=$?; fi; echo "$st" > "$W/sandbox/status"; } | { head -c ${BUILD_RECIPE.maxLogBytes}; cat >/dev/null; }
+status=$(cat "$W/sandbox/status")
+echo "embody: sandbox exit $status"
+docker kill "$N" >/dev/null 2>&1 || true
 if [ "$status" != 0 ]; then
   docker rm -f "$N" >/dev/null 2>&1 || true
   echo "embody: sandbox failed (status $status)"
   exit 1
 fi
-docker cp "$N:/app" - | head -c ${MAX_TAR_BYTES} > "$W/sandbox/app.tar"
-docker cp "$N:/out/manifest.json" - | head -c ${BUILD_RECIPE.maxManifestBytes * 2} > "$W/sandbox/manifest.tar" || true
+docker cp "$N:/app" - | { head -c ${MAX_TAR_BYTES} > "$W/sandbox/app.tar"; cat >/dev/null; }
+docker cp "$N:/out/manifest.json" - 2>/dev/null | { head -c ${BUILD_RECIPE.maxManifestBytes * 2} > "$W/sandbox/manifest.tar"; cat >/dev/null; } || true
 docker rm -f "$N" >/dev/null
 `;
 }
@@ -131,17 +132,15 @@ docker rm -f "$N" >/dev/null
  * executed here), and reports the manifest digest through the provider's step output.
  */
 export function assembleScript(): string {
-  return `set -euo pipefail
+  return `set -eu
 W="\${EMBODY_WORKSPACE:-/workspace}"
 OUT="\${BUILDER_OUTPUT:-/builder/outputs}"
-size=$(stat -c %s "$W/sandbox/app.tar")
-if [ "$size" -gt ${MAX_TAR_BYTES} ]; then echo "embody: build output exceeds limit"; printf '{"rejected":"OUTPUT_LIMIT"}' > "$OUT/output"; exit 1; fi
-mkdir -p "$W/assemble/context" "$W/admit"
-tar -x --no-same-owner --no-same-permissions -C "$W/assemble/context" -f "$W/sandbox/app.tar"
-bytes=$(du -sb "$W/assemble/context" | cut -f1)
+bytes=$(stat -c %s "$W/sandbox/app.tar")
 if [ "$bytes" -gt ${BUILD_RECIPE.maxOutputBytes} ]; then echo "embody: build output exceeds limit"; printf '{"rejected":"OUTPUT_LIMIT"}' > "$OUT/output"; exit 1; fi
+mkdir -p "$W/assemble/context" "$W/admit"
+tar -xo -C "$W/assemble/context" -f "$W/sandbox/app.tar"
 : > "$W/admit/manifest.json"
-tar -x -O -f "$W/sandbox/manifest.tar" manifest.json 2>/dev/null | head -c ${BUILD_RECIPE.maxManifestBytes + 1} > "$W/admit/manifest.json" || true
+{ tar -xO -f "$W/sandbox/manifest.tar" manifest.json 2>/dev/null || true; } | head -c ${BUILD_RECIPE.maxManifestBytes + 1} > "$W/admit/manifest.json"
 cp "$W/inputs/sbom.json" "$W/admit/sbom.json"
 cat > "$W/assemble/Dockerfile" <<'EMBODY_DOCKERFILE'
 ARG RUNTIME_IMAGE
@@ -247,7 +246,7 @@ export function planBuild(recipe: BuildRecipeConfig, input: BuildPlanInput): Bui
       {
         id: "sandbox",
         name: recipe.dockerImage,
-        entrypoint: "bash",
+        entrypoint: "sh",
         args: ["-c", escapeDollars(sandboxScript())],
         env: env(...common, ["EMBODY_BUILDER_IMAGE", recipe.builderImage]),
         timeout: `${BUILD_RECIPE.sandboxSeconds + 30}s`,
@@ -255,7 +254,7 @@ export function planBuild(recipe: BuildRecipeConfig, input: BuildPlanInput): Bui
       {
         id: "assemble",
         name: recipe.dockerImage,
-        entrypoint: "bash",
+        entrypoint: "sh",
         args: ["-c", escapeDollars(assembleScript())],
         env: env(...common, ["EMBODY_RUNTIME_IMAGE", recipe.runtimeImage], ["EMBODY_IMAGE", image]),
         timeout: "120s",

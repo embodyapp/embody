@@ -554,6 +554,12 @@ export interface AppDefinition {
   readonly description?: string;
   /** Plain-text usage notes for agents, at most 2,048 characters. */
   readonly instructions?: string;
+  /**
+   * Hosted durable profile: event names this app publishes for other apps. Build admission
+   * (M11) records them in the artifact manifest; the gateway relay (M21) accepts only these.
+   * Local publishing to the app's own handlers does not need a declaration.
+   */
+  readonly publishes?: readonly string[];
 }
 
 /** Extracts the optional manifest metadata from an app definition. */
