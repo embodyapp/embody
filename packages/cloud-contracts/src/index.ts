@@ -18,11 +18,13 @@ export {
   DigestSchema,
 } from "./profile.js";
 export * from "./source.js";
+export * from "./build.js";
+import { ArtifactManifestSchema } from "./build.js";
 
 const generation = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const binding = { workspaceId: WorkspaceIdSchema, appId: AppIdSchema };
 const version = z.literal(1);
-export const CapabilitiesSchema = z.strictObject({
+export const RequestOnlyCapabilitiesSchema = z.strictObject({
   profile: z.literal("request-only-v1"),
   crud: z.boolean(),
   boundedActions: z.boolean(),
@@ -33,6 +35,27 @@ export const CapabilitiesSchema = z.strictObject({
   persistentLocalState: z.literal(false),
   genui: z.literal(false),
 });
+/**
+ * M20 durable profile (M11 manifest amendment): events, subscriptions and workflows may be
+ * declared; build admission requires each flag to match the built app exactly.
+ */
+export const DurableCapabilitiesSchema = z.strictObject({
+  profile: z.literal("durable-v1"),
+  crud: z.boolean(),
+  boundedActions: z.boolean(),
+  workflows: z.boolean(),
+  events: z.boolean(),
+  subscriptions: z.boolean(),
+  schedules: z.literal(false),
+  appToAppRpc: z.literal(false),
+  persistentLocalState: z.literal(false),
+  genui: z.literal(false),
+});
+export const CapabilitiesSchema = z.discriminatedUnion("profile", [
+  RequestOnlyCapabilitiesSchema,
+  DurableCapabilitiesSchema,
+]);
+export type Capabilities = z.infer<typeof CapabilitiesSchema>;
 export const SecretReferenceSchema = z.strictObject({
   version,
   ...binding,
@@ -81,6 +104,8 @@ export const ReleaseManifestSchema = z
     scaffold: z.literal(HOSTED_PROFILE.scaffold),
     nodeMajor: z.union([z.literal(22), z.literal(24)]),
     capabilities: CapabilitiesSchema,
+    /** Admitted M11 artifact manifest (profile, events, subscriptions, workflow versions). */
+    artifact: ArtifactManifestSchema.optional(),
     secretReferences,
   })
   .refine(secretsMatchBinding, "Secret references must be unique and app/workspace bound");
@@ -112,7 +137,7 @@ export const PublicErrorCodeSchema = z.enum([
 ]);
 const publicMessages: Record<z.infer<typeof PublicErrorCodeSchema>, string> = {
   INVALID_INPUT: "Invalid deployment request.",
-  UNSUPPORTED_PROFILE: "Use the supported request-only scaffold and capabilities.",
+  UNSUPPORTED_PROFILE: "Use a supported hosted scaffold profile and capabilities.",
   FORBIDDEN: "Permission denied.",
   NOT_FOUND: "Resource not found.",
   IDEMPOTENCY_CONFLICT: "Submission key already binds a different request.",
