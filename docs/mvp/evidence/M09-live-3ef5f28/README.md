@@ -104,4 +104,4 @@ open (as for M05).
 - Cold-latency targets for gateway/app (MD06) are M17's measurement; M09 records DB connection
   latency only.
 
-Reviewer decision: **ACCEPTED** by an [independent review](./independent-review.md) of `308edf8` (no blockers; DONE conditional on the owner's worksheet review C1 and the documentation corrections C2, made in [M09-QUALIFICATION.md](../../M09-QUALIFICATION.md#shared-instance-privileges)).
+Reviewer decision: **ACCEPTED** by an [independent review](./independent-review.md) of `308edf8` (no blockers). C1: the owner approved the worksheet on 2026-10-18 (keep `db-f1-micro`). C2: documentation corrections made in [M09-QUALIFICATION.md](../../M09-QUALIFICATION.md#shared-instance-privileges)).

@@ -2,7 +2,7 @@
 
 Status: **live-run and passed** on candidate `3ef5f28` (run `027dddff`, 2026-10-18): 19/19 cases,
 zero skips, full cleanup. [Evidence](./evidence/M09-live-3ef5f28/README.md). Independent review
-pending. Task definition: [IMPLEMENTATION M09](./IMPLEMENTATION.md#m09--qualify-the-clouddatabase-baseline-and-cost-limits).
+accepted; owner approved the worksheet (keep `db-f1-micro`) on 2026-10-18. **M09 is DONE.** Task definition: [IMPLEMENTATION M09](./IMPLEMENTATION.md#m09--qualify-the-clouddatabase-baseline-and-cost-limits).
 
 ## Proposed baseline
 
