@@ -438,12 +438,28 @@ export async function runM11Cases(deps) {
         remaining.push(j.name);
     const images = [];
     for (const kind of Object.keys(sources))
-      images.push(...(await deps.provider.listImages(`${workspaceId}/${sources[kind].appId}`)));
+      for (const image of await deps.provider.listImages(`${workspaceId}/${sources[kind].appId}`))
+        images.push({ ...image, path: `${workspaceId}/${sources[kind].appId}` });
     const checks = {
       purgedAll: purged.failed === 0 && remaining.length === 0,
       imagesGone: images.length === 0,
     };
-    return { pass: Object.values(checks).every(Boolean), checks, purged, remaining };
+    // Diagnostics: retry one leftover image directly to record the provider's reason.
+    let deleteError;
+    if (images.length)
+      try {
+        await deps.provider.deleteImage(images[0].path, images[0].digest);
+      } catch (error) {
+        deleteError = String(error?.message ?? error).slice(0, 120);
+      }
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      purged,
+      remaining,
+      leftoverImages: images.map((i) => ({ tags: i.tags })),
+      deleteError,
+    };
   });
 
   const pass = Object.values(cases).every((value) => value.pass === true);

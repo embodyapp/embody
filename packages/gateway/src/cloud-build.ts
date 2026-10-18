@@ -188,7 +188,7 @@ export class CloudBuildProvider implements BuildProvider {
       { method: "DELETE" },
     );
     if (response.status === 404) return;
-    if (!response.ok) throw new BuildProviderError("Image delete failed");
+    if (!response.ok) throw new BuildProviderError(`Image delete failed (HTTP ${response.status})`);
     // A long-running operation: it can still fail (for example a manifest with a parent index),
     // so wait for it rather than treat the accepted request as a deletion.
     let operation = (await response.json().catch(() => ({}))) as {
@@ -204,11 +204,14 @@ export class CloudBuildProvider implements BuildProvider {
     ) {
       if (Date.now() > deadline) throw new BuildProviderError("Image delete still running");
       await new Promise((resolve) => setTimeout(resolve, this.pollMs));
-      operation = (await this.json(
-        `https://artifactregistry.googleapis.com/v1/${name}`,
-      )) as typeof operation;
+      operation = await this.json(`https://artifactregistry.googleapis.com/v1/${name}`);
     }
-    if (operation.error !== undefined) throw new BuildProviderError("Image delete failed");
+    if (operation.error !== undefined) {
+      const code = (operation.error as { code?: unknown }).code;
+      throw new BuildProviderError(
+        `Image delete failed${Number.isInteger(code) ? ` (${String(code)})` : ""}`,
+      );
+    }
   }
   public async listImages(path: string): Promise<readonly ImageVersion[]> {
     this.packageUrl(path);
