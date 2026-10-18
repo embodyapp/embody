@@ -104,7 +104,7 @@ resource "google_artifact_registry_repository" "images" {
   repository_id = "${var.prefix}-images"
   format        = "DOCKER"
   labels        = local.labels
-  # Bound image storage: keep the five newest versions per package, delete untagged after 1 day.
+  # Deletes untagged versions after a day; KEEP only protects the five newest (tagged growth is unbounded).
   cleanup_policy_dry_run = false
   cleanup_policies {
     id     = "keep-recent"
