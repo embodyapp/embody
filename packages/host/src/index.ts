@@ -35,6 +35,7 @@ import {
   type DrainResult,
   type WakeQueue,
 } from "./durable.js";
+import { authenticateTask } from "./tasks.js";
 import {
   DeliveryWorker,
   DirectEventTransport,
@@ -45,6 +46,16 @@ import {
 } from "./events.js";
 
 export { WorkflowWorker, type WorkflowWorkerOptions } from "./workflows.js";
+export {
+  MAX_TASK_TOKEN_BYTES,
+  MemoryTaskQueue,
+  authenticateTask,
+  cloudTasksQueue,
+  deterministicTaskName,
+  type CloudTasksQueueOptions,
+  type QueueTask,
+  type TaskQueue,
+} from "./tasks.js";
 export {
   cloudTasksWakeQueue,
   createDurableDrain,
@@ -392,10 +403,7 @@ export function createHost(options: HostOptions): EmbodyHost {
       // Only the queue's platform invoker token is accepted here; gateway principal tokens
       // (X-Gateway-Auth) are ignored and never authorize a drain. Callers learn nothing else
       // about this host before they authenticate.
-      const authorization = request.headers.authorization;
-      await durable.verifier.verify(
-        bearer(typeof authorization === "string" ? authorization : undefined),
-      );
+      await authenticateTask(request.headers, durable.verifier);
       if (!accepting || options.kernel.state !== "ready") throw new UnavailableError();
       if (active >= maximum) {
         reply.header("retry-after", "1");

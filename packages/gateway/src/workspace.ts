@@ -12,6 +12,8 @@ import {
   type SourceAdmissionOptions,
   type SourceStore,
 } from "./source-admission.js";
+import { registerDeploymentRoutes, type DeploymentRouteOptions } from "./deployment-routes.js";
+import type { DeploymentStore } from "./deployment.js";
 
 interface RequestContext {
   credential: WorkspaceCredential;
@@ -27,6 +29,8 @@ export interface WorkspaceGatewayOptions extends Omit<
   readonly clock?: { now(): Date };
   /** M10 authenticated source admission routes; absent means not served. */
   readonly sources?: SourceAdmissionOptions;
+  /** M12 deployment submission/status/cancel and app status routes; absent means not served. */
+  readonly deployments?: DeploymentRouteOptions;
 }
 /** No positive cache: every new request authenticates and reads the authoritative catalog.
  * ALS snapshots are private to the request, not mutable shared per-workspace registry state.
@@ -151,6 +155,24 @@ export function createWorkspaceGateway(options: WorkspaceGatewayOptions) {
       ...(options.sources.storageTimeoutMs === undefined
         ? {}
         : { storageTimeoutMs: options.sources.storageTimeoutMs }),
+    });
+  }
+  if (options.deployments) {
+    const store =
+      options.deployments.store ??
+      ("submitDeployment" in options.store
+        ? (options.store as unknown as DeploymentStore & Pick<SourceStore, "source">)
+        : undefined);
+    if (!store) throw new TypeError("Deployment routes require a DeploymentStore");
+    registerDeploymentRoutes(gateway, {
+      current,
+      admission: options.store,
+      store,
+      queue: options.deployments.queue,
+      clock: options.clock ?? { now: () => new Date() },
+      ...(options.deployments.storageTimeoutMs === undefined
+        ? {}
+        : { storageTimeoutMs: options.deployments.storageTimeoutMs }),
     });
   }
   return gateway;

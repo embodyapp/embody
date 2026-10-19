@@ -12,6 +12,7 @@ import {
   WorkspaceIdSchema,
   AppIdSchema,
   ReleaseIdSchema,
+  DeploymentSubmissionSchema,
   type ScopedGrant,
 } from "@embody/cloud-contracts";
 import { validateRegistration, type Registration, type GatewayRegistryOptions } from "./index.js";
@@ -30,6 +31,31 @@ import {
   type ArtifactStore,
   type ArtifactWrite,
 } from "./build-admission.js";
+import {
+  DEPLOYMENT_LIMITS,
+  DeploymentError,
+  StaleDeploymentError,
+  TERMINAL,
+  appControl,
+  decideCancel,
+  decideCleanup,
+  decideClaim,
+  decideComplete,
+  decideSubmit,
+  isOverdue,
+  newDeploymentId,
+  releaseManifest,
+  wakeFor,
+  type AppControl,
+  type ClaimDecision,
+  type CompletionFence,
+  type DeploymentRecord,
+  type DeploymentStore,
+  type DeploymentWakeHook,
+  type ReleaseRecord,
+  type StageOutcome,
+  type SubmitInput,
+} from "./deployment.js";
 
 export interface Workspace {
   readonly id: string;
@@ -43,8 +69,14 @@ export interface CatalogApp {
   readonly state: "idle" | "ready" | "unavailable" | "disabled" | "deleted";
   readonly revision: number;
   readonly generation: number;
+  /**
+   * Advanced when the app becomes disabled or deleted (M02 lifecycle fence). Deployments capture
+   * it at submission and cannot advance or promote once it moves. Absent on records written
+   * before M12, which reads that as 0.
+   */
+  readonly lifecycleFence?: number;
 }
-export type CatalogWrite = Omit<CatalogApp, "revision" | "generation">;
+export type CatalogWrite = Omit<CatalogApp, "revision" | "generation" | "lifecycleFence">;
 export interface WorkspaceCredential {
   readonly workspaceId: string;
   readonly id: string;
@@ -149,6 +181,12 @@ function validateCredential(value: CredentialWrite): CredentialWrite {
   });
 }
 const defaultPolicy: GatewayRegistryOptions = { credentials: {} };
+/** Disabling or deleting an app advances its lifecycle fence; other writes keep it. */
+function nextLifecycleFence(prior: CatalogApp | undefined, value: CatalogWrite): number {
+  const fence = prior?.lifecycleFence ?? 0;
+  const stopped = value.state === "disabled" || value.state === "deleted";
+  return stopped && prior?.state !== value.state ? fence + 1 : fence;
+}
 function validateArtifact(record: ArtifactWrite): void {
   id(record.workspaceId);
   if (
@@ -162,6 +200,19 @@ function validateArtifact(record: ArtifactWrite): void {
   )
     throw new BadRequestError("Invalid artifact record");
 }
+function validateSubmission(input: SubmitInput): void {
+  // The route parsed it already; stores re-check identity shape so no caller can write a record
+  // keyed by an arbitrary string.
+  DeploymentSubmissionSchema.parse(input.submission);
+  if (
+    !/^sha256:[a-f0-9]{64}$/.test(input.fingerprint) ||
+    typeof input.actorId !== "string" ||
+    !input.actorId ||
+    !Number.isFinite(input.now.getTime())
+  )
+    throw new BadRequestError("Invalid deployment submission");
+}
+const newLeaseToken = () => randomBytes(16).toString("hex");
 function validateSourceInput(input: SourceAdmitInput): void {
   id(input.workspaceId);
   if (!AppIdSchema.safeParse(input.appId).success || !Number.isFinite(input.now.getTime()))
@@ -180,7 +231,9 @@ function sameSourceIdentity(a: SourceRecord, b: SourceRecord): boolean {
   );
 }
 /* eslint-disable @typescript-eslint/require-await -- Atomic memory operations contain no await; async converts validation/CAS errors to rejections. */
-export class MemoryGatewayStore implements GatewayStore, SourceStore, ArtifactStore {
+export class MemoryGatewayStore
+  implements GatewayStore, SourceStore, ArtifactStore, DeploymentStore
+{
   private sources = new Map<string, SourceRecord>();
   private artifacts = new Map<string, ArtifactRecord>();
   private workspaces = new Map<string, Workspace>();
@@ -256,6 +309,7 @@ export class MemoryGatewayStore implements GatewayStore, SourceStore, ArtifactSt
       ...value,
       revision: (prior?.revision ?? 0) + 1,
       generation: (prior?.generation ?? 0) + 1,
+      lifecycleFence: nextLifecycleFence(prior, value),
     };
     this.apps.set(key, next);
     return clone(next);
@@ -436,11 +490,236 @@ export class MemoryGatewayStore implements GatewayStore, SourceStore, ArtifactSt
     if (prior?.revision !== record.revision || prior.pinnedBy) return false;
     return this.artifacts.delete(key);
   }
+  // M12 deployments. Every operation runs under one lock so a wake hook awaited "inside the
+  // transaction" cannot interleave with another writer, and a failed hook writes nothing.
+  private deployments = new Map<string, DeploymentRecord>();
+  private releases = new Map<string, ReleaseRecord>();
+  private txids = new Map<string, "in-progress" | "committed" | "aborted">();
+  private txSequence = 1000;
+  private serial: Promise<unknown> = Promise.resolve();
+  private transaction<T>(work: (txid: string) => Promise<T>): Promise<T> {
+    const run = this.serial.then(async () => {
+      const txid = String((this.txSequence += 1));
+      this.txids.set(txid, "in-progress");
+      try {
+        const result = await work(txid);
+        this.txids.set(txid, "committed");
+        return result;
+      } catch (error) {
+        this.txids.set(txid, "aborted");
+        throw error;
+      }
+    });
+    this.serial = run.catch(() => undefined);
+    return run;
+  }
+  private deploymentKey(workspaceId: string, deploymentId: string): string {
+    return `${workspaceId}/${deploymentId}`;
+  }
+  private catalogApp(workspaceId: string, appId: string): CatalogApp | undefined {
+    return this.apps.get(`${workspaceId}/${appId}`);
+  }
+  public async submitDeployment(
+    input: SubmitInput,
+    wake: DeploymentWakeHook,
+  ): Promise<{ record: DeploymentRecord; replay: boolean }> {
+    validateSubmission(input);
+    const { submission } = input;
+    return this.transaction(async (txid) => {
+      if (!this.workspaces.has(submission.workspaceId)) throw new DeploymentError("NOT_FOUND");
+      const existing =
+        [...this.deployments.values()].find(
+          (d) =>
+            d.workspaceId === submission.workspaceId &&
+            d.appId === submission.appId &&
+            d.idempotencyKey === submission.idempotencyKey,
+        ) ?? null;
+      const active = [...this.deployments.values()].filter(
+        (d) => d.workspaceId === submission.workspaceId && !TERMINAL.has(d.state),
+      );
+      const sourceKey = `${submission.workspaceId}/${submission.source.uploadId}`;
+      const decision = decideSubmit({
+        existing: existing ? clone(existing) : null,
+        request: input,
+        app: appControl(this.catalogApp(submission.workspaceId, submission.appId)),
+        source: clone(this.sources.get(sourceKey) ?? null),
+        usage: {
+          activeForApp: active.filter((d) => d.appId === submission.appId).length,
+          activeForWorkspace: active.length,
+        },
+        deploymentId: newDeploymentId(),
+      });
+      if (decision.replay) return { record: clone(decision.record), replay: true };
+      const record: DeploymentRecord = { ...decision.record, revision: 1 };
+      const priorSource = this.sources.get(sourceKey)!;
+      await wake([wakeFor(record, "submit")!], txid);
+      this.sources.set(sourceKey, {
+        ...clone(decision.source),
+        revision: priorSource.revision + 1,
+      });
+      this.deployments.set(this.deploymentKey(record.workspaceId, record.deploymentId), record);
+      return { record: clone(record), replay: false };
+    });
+  }
+  public async deployment(
+    workspaceId: string,
+    appId: string,
+    deploymentId: string,
+  ): Promise<DeploymentRecord | null> {
+    const record = this.deployments.get(this.deploymentKey(workspaceId, deploymentId));
+    return record && record.appId === appId ? clone(record) : null;
+  }
+  public claimDeployment(
+    key: { workspaceId: string; appId: string; deploymentId: string },
+    now: Date,
+    wake: DeploymentWakeHook,
+  ): Promise<{ decision: ClaimDecision | { kind: "missing" } }> {
+    return this.transaction(async (txid) => {
+      const record = this.deployments.get(this.deploymentKey(key.workspaceId, key.deploymentId));
+      if (!record || record.appId !== key.appId) return { decision: { kind: "missing" as const } };
+      const decision = decideClaim(clone(record), now, newLeaseToken());
+      if (decision.kind === "claimed" || decision.kind === "settled") {
+        if (decision.wake) await wake([decision.wake], txid);
+        this.deployments.set(this.deploymentKey(key.workspaceId, key.deploymentId), decision.next);
+      }
+      return { decision: clone(decision) };
+    });
+  }
+  public completeDeployment(
+    fence: CompletionFence,
+    outcome: StageOutcome,
+    now: Date,
+    wake: DeploymentWakeHook,
+  ): Promise<DeploymentRecord> {
+    return this.transaction(async (txid) => {
+      const key = this.deploymentKey(fence.workspaceId, fence.deploymentId);
+      const record = this.deployments.get(key);
+      if (!record) throw new StaleDeploymentError();
+      const app = this.catalogApp(fence.workspaceId, fence.appId);
+      let applied = outcome;
+      let artifact: ArtifactRecord | undefined;
+      if (outcome.kind === "promote") {
+        artifact = record.artifactId
+          ? this.artifacts.get(`${record.workspaceId}/${record.artifactId}`)
+          : undefined;
+        if (
+          !artifact ||
+          artifact.state !== "admitted" ||
+          artifact.purging ||
+          artifact.deploymentId !== record.deploymentId ||
+          artifact.appId !== record.appId
+        )
+          applied = { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: "ARTIFACT_MISSING" };
+      }
+      const decision = decideComplete({
+        record: clone(record),
+        fence,
+        outcome: applied,
+        app: appControl(app),
+        now,
+      });
+      if (decision.wake) await wake([decision.wake], txid);
+      if (decision.promote) {
+        const manifest = releaseManifest(record, artifact!, decision.promote.releaseId);
+        const release: ReleaseRecord = {
+          workspaceId: record.workspaceId,
+          appId: record.appId,
+          releaseId: decision.promote.releaseId,
+          deploymentId: record.deploymentId,
+          artifactId: artifact!.artifactId,
+          imageReference: artifact!.imageReference!,
+          generation: decision.promote.generation,
+          manifest,
+          createdAt: now.toISOString(),
+        };
+        this.releases.set(`${record.workspaceId}/${release.releaseId}`, release);
+        this.apps.set(`${record.workspaceId}/${record.appId}`, {
+          ...app!,
+          activeRelease: release.releaseId,
+          generation: decision.promote.generation,
+          revision: app!.revision + 1,
+        });
+        this.bump(record.workspaceId);
+        this.artifacts.set(`${record.workspaceId}/${artifact!.artifactId}`, {
+          ...artifact!,
+          pinnedBy: release.releaseId,
+          revision: artifact!.revision + 1,
+        });
+      }
+      this.deployments.set(key, decision.next);
+      return clone(decision.next);
+    });
+  }
+  public cancelDeployment(
+    key: { workspaceId: string; appId: string; deploymentId: string },
+    cancellationFence: number,
+    now: Date,
+    wake: DeploymentWakeHook,
+  ): Promise<{ record: DeploymentRecord; changed: boolean }> {
+    return this.transaction(async (txid) => {
+      const id = this.deploymentKey(key.workspaceId, key.deploymentId);
+      const record = this.deployments.get(id);
+      if (!record || record.appId !== key.appId) throw new DeploymentError("NOT_FOUND");
+      const decision = decideCancel(clone(record), cancellationFence, now);
+      if (!decision.changed) return { record: clone(record), changed: false };
+      if (decision.wake) await wake([decision.wake], txid);
+      this.deployments.set(id, decision.next);
+      return { record: clone(decision.next), changed: true };
+    });
+  }
+  public finishCleanup(
+    key: { workspaceId: string; appId: string; deploymentId: string },
+    epoch: number,
+    done: boolean,
+    now: Date,
+    wake: DeploymentWakeHook,
+  ): Promise<void> {
+    return this.transaction(async (txid) => {
+      const id = this.deploymentKey(key.workspaceId, key.deploymentId);
+      const record = this.deployments.get(id);
+      if (!record || record.appId !== key.appId) return;
+      const decision = decideCleanup(clone(record), epoch, done, now);
+      if (!decision) return;
+      if (decision.wake) await wake([decision.wake], txid);
+      this.deployments.set(id, decision.next);
+    });
+  }
+  public async appStatus(workspaceId: string, appId: string): Promise<AppControl | null> {
+    return appControl(this.catalogApp(workspaceId, appId));
+  }
+  public async release(
+    workspaceId: string,
+    appId: string,
+    releaseId: string,
+  ): Promise<ReleaseRecord | null> {
+    const release = this.releases.get(`${workspaceId}/${releaseId}`);
+    return release && release.appId === appId ? clone(release) : null;
+  }
+  public async overdueDeployments(
+    now: Date,
+    limit: number,
+    workspaceId?: string,
+  ): Promise<readonly DeploymentRecord[]> {
+    return [...this.deployments.values()]
+      .filter(
+        (d) => (workspaceId === undefined || d.workspaceId === workspaceId) && isOverdue(d, now),
+      )
+      .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
+      .slice(0, Math.max(1, Math.min(100, Math.trunc(limit))))
+      .map(clone);
+  }
+  public async transactionStatus(
+    txid: string,
+  ): Promise<"in-progress" | "committed" | "aborted" | "unknown"> {
+    return this.txids.get(txid) ?? "unknown";
+  }
   public async close(): Promise<void> {}
 }
 /* eslint-enable @typescript-eslint/require-await */
 /** Platform database only. Migrations must be invoked separately using the maintenance role. */
-export class PostgresGatewayStore implements GatewayStore, SourceStore, ArtifactStore {
+export class PostgresGatewayStore
+  implements GatewayStore, SourceStore, ArtifactStore, DeploymentStore
+{
   private readonly pool: Pool;
   private closing?: Promise<void>;
   public constructor(
@@ -486,7 +765,10 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore, Artifact
         CREATE UNIQUE INDEX IF NOT EXISTS embody_platform_sources_key ON embody_platform_sources(workspace_id,app_id,idempotency_key) WHERE NOT purging;
         CREATE INDEX IF NOT EXISTS embody_platform_sources_retention ON embody_platform_sources(retain_until) WHERE NOT pinned;
         CREATE TABLE IF NOT EXISTS embody_platform_artifacts (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), artifact_id text NOT NULL, app_id text NOT NULL, deployment_id text NOT NULL, attempt integer NOT NULL CHECK (attempt > 0), state text NOT NULL CHECK (state IN ('building','admitted','rejected')), image_digest text, retain_until timestamptz NOT NULL, pinned boolean NOT NULL DEFAULT false, purging boolean NOT NULL DEFAULT false, revision bigint NOT NULL CHECK (revision > 0), document jsonb NOT NULL, PRIMARY KEY(workspace_id,artifact_id), UNIQUE(workspace_id,app_id,deployment_id,attempt));
-        CREATE INDEX IF NOT EXISTS embody_platform_artifacts_retention ON embody_platform_artifacts(retain_until) WHERE NOT pinned;`);
+        CREATE INDEX IF NOT EXISTS embody_platform_artifacts_retention ON embody_platform_artifacts(retain_until) WHERE NOT pinned;
+        CREATE TABLE IF NOT EXISTS embody_platform_deployments (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), deployment_id text NOT NULL, app_id text NOT NULL, idempotency_key text NOT NULL, state text NOT NULL CHECK (state IN ('accepted','validating','building','provisioning','checking','promoting','active','failed','cancelled')), due_at timestamptz NOT NULL, lease_until timestamptz, cleanup boolean NOT NULL DEFAULT false, retain_until timestamptz NOT NULL, revision bigint NOT NULL CHECK (revision > 0), document jsonb NOT NULL, PRIMARY KEY(workspace_id,deployment_id), UNIQUE(workspace_id,app_id,idempotency_key));
+        CREATE INDEX IF NOT EXISTS embody_platform_deployments_due ON embody_platform_deployments(due_at) WHERE state NOT IN ('active','failed','cancelled') OR cleanup;
+        CREATE TABLE IF NOT EXISTS embody_platform_releases (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), release_id text NOT NULL, app_id text NOT NULL, deployment_id text NOT NULL, artifact_id text NOT NULL, created_at timestamptz NOT NULL, document jsonb NOT NULL, PRIMARY KEY(workspace_id,release_id), UNIQUE(workspace_id,deployment_id));`);
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -571,6 +853,7 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore, Artifact
       ...value,
       revision: (prior?.revision ?? 0) + 1,
       generation: (prior?.generation ?? 0) + 1,
+      lifecycleFence: nextLifecycleFence(prior, value),
     }));
   }
   public async putCredential(
@@ -919,6 +1202,390 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore, Artifact
       [record.workspaceId, record.artifactId, record.revision],
     );
     return (result.rowCount ?? 0) > 0;
+  }
+  // M12 deployments. Lock order is always workspace row, then deployment row, then the source or
+  // artifact row, so submissions, claims, completions and cancellations cannot deadlock. The wake
+  // hook runs inside the transaction before COMMIT: an enqueue failure rolls the write back.
+  private async deploymentTransaction<T>(
+    work: (client: PoolClient, txid: () => Promise<string>) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const txid = async () =>
+        (await client.query<{ txid: string }>("SELECT txid_current()::text AS txid")).rows[0]!.txid;
+      const result = await work(client, txid);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  private async lockDeployment(
+    client: PoolClient,
+    workspaceId: string,
+    deploymentId: string,
+  ): Promise<DeploymentRecord | undefined> {
+    return (
+      await client.query<{ document: DeploymentRecord }>(
+        "SELECT document FROM embody_platform_deployments WHERE workspace_id=$1 AND deployment_id=$2 FOR UPDATE",
+        [workspaceId, deploymentId],
+      )
+    ).rows[0]?.document;
+  }
+  private async writeDeployment(
+    client: PoolClient,
+    next: DeploymentRecord,
+    expected: number,
+  ): Promise<void> {
+    const result = await client.query(
+      `UPDATE embody_platform_deployments SET state=$3,due_at=$4,lease_until=$5,cleanup=$6,retain_until=$7,revision=$8,document=$9
+      WHERE workspace_id=$1 AND deployment_id=$2 AND revision=$10`,
+      [
+        next.workspaceId,
+        next.deploymentId,
+        next.state,
+        next.dueAt,
+        next.leaseUntil ?? null,
+        next.cleanup,
+        next.retainUntil,
+        next.revision,
+        next,
+        expected,
+      ],
+    );
+    // Rows are locked FOR UPDATE first, so a miss is a broken invariant, never a lost race.
+    if (result.rowCount !== 1) throw new ConflictError("Deployment revision conflict");
+  }
+  private async catalogDocument(
+    client: PoolClient,
+    workspaceId: string,
+    appId: string,
+  ): Promise<CatalogApp | undefined> {
+    return (
+      await client.query<{ document: CatalogApp }>(
+        "SELECT document FROM embody_platform_apps WHERE workspace_id=$1 AND id=$2",
+        [workspaceId, appId],
+      )
+    ).rows[0]?.document;
+  }
+  public async submitDeployment(
+    input: SubmitInput,
+    wake: DeploymentWakeHook,
+  ): Promise<{ record: DeploymentRecord; replay: boolean }> {
+    validateSubmission(input);
+    const { submission } = input;
+    try {
+      return await this.deploymentTransaction(async (client, txid) => {
+        // Same per-workspace serialization point as catalog writes, quotas and source admission.
+        const workspace = await client.query(
+          "SELECT id FROM embody_platform_workspaces WHERE id=$1 FOR UPDATE",
+          [submission.workspaceId],
+        );
+        if (!workspace.rowCount) throw new DeploymentError("NOT_FOUND");
+        const existing =
+          (
+            await client.query<{ document: DeploymentRecord }>(
+              "SELECT document FROM embody_platform_deployments WHERE workspace_id=$1 AND app_id=$2 AND idempotency_key=$3",
+              [submission.workspaceId, submission.appId, submission.idempotencyKey],
+            )
+          ).rows[0]?.document ?? null;
+        const source = (
+          await client.query<{ document: SourceRecord; purging: boolean; revision: string }>(
+            "SELECT document,purging,revision FROM embody_platform_sources WHERE workspace_id=$1 AND upload_id=$2 AND app_id=$3 FOR UPDATE",
+            [submission.workspaceId, submission.source.uploadId, submission.appId],
+          )
+        ).rows[0];
+        const usage = (
+          await client.query<{ app: number; workspace: number }>(
+            `SELECT count(*) FILTER (WHERE app_id=$2)::int AS app, count(*)::int AS workspace
+            FROM embody_platform_deployments WHERE workspace_id=$1 AND state NOT IN ('active','failed','cancelled')`,
+            [submission.workspaceId, submission.appId],
+          )
+        ).rows[0]!;
+        const decision = decideSubmit({
+          existing,
+          request: input,
+          app: appControl(
+            await this.catalogDocument(client, submission.workspaceId, submission.appId),
+          ),
+          source: source
+            ? source.purging
+              ? { ...source.document, purging: true }
+              : source.document
+            : null,
+          usage: { activeForApp: usage.app, activeForWorkspace: usage.workspace },
+          deploymentId: newDeploymentId(),
+        });
+        if (decision.replay) return { record: decision.record, replay: true };
+        const record: DeploymentRecord = { ...decision.record, revision: 1 };
+        const pinned: SourceRecord = {
+          ...decision.source,
+          revision: Number(source!.revision) + 1,
+        };
+        const pin = await client.query(
+          `UPDATE embody_platform_sources SET pinned=true,retain_until=$4,revision=$5,document=$6
+          WHERE workspace_id=$1 AND upload_id=$2 AND revision=$3 AND NOT purging`,
+          [
+            pinned.workspaceId,
+            pinned.uploadId,
+            source!.revision,
+            pinned.retainUntil,
+            pinned.revision,
+            pinned,
+          ],
+        );
+        if (pin.rowCount !== 1) throw new DeploymentError("INVALID_INPUT");
+        await client.query(
+          `INSERT INTO embody_platform_deployments(workspace_id,deployment_id,app_id,idempotency_key,state,due_at,lease_until,cleanup,retain_until,revision,document)
+          VALUES($1,$2,$3,$4,$5,$6,NULL,false,$7,1,$8)`,
+          [
+            record.workspaceId,
+            record.deploymentId,
+            record.appId,
+            record.idempotencyKey,
+            record.state,
+            record.dueAt,
+            record.retainUntil,
+            record,
+          ],
+        );
+        await wake([wakeFor(record, "submit")!], await txid());
+        return { record, replay: false };
+      });
+    } catch (error) {
+      // A concurrent submission with the same key (impossible under the workspace lock) or a
+      // colliding random ID: report a retryable conflict, never a partial write.
+      if ((error as { code?: string }).code === "23505")
+        throw new ConflictError("Deployment identity exists");
+      throw error;
+    }
+  }
+  public async deployment(
+    workspaceId: string,
+    appId: string,
+    deploymentId: string,
+  ): Promise<DeploymentRecord | null> {
+    return (
+      (
+        await this.pool.query<{ document: DeploymentRecord }>(
+          "SELECT document FROM embody_platform_deployments WHERE workspace_id=$1 AND app_id=$2 AND deployment_id=$3",
+          [workspaceId, appId, deploymentId],
+        )
+      ).rows[0]?.document ?? null
+    );
+  }
+  public claimDeployment(
+    key: { workspaceId: string; appId: string; deploymentId: string },
+    now: Date,
+    wake: DeploymentWakeHook,
+  ): Promise<{ decision: ClaimDecision | { kind: "missing" } }> {
+    return this.deploymentTransaction(async (client, txid) => {
+      const record = await this.lockDeployment(client, key.workspaceId, key.deploymentId);
+      if (!record || record.appId !== key.appId) return { decision: { kind: "missing" as const } };
+      const decision = decideClaim(record, now, newLeaseToken());
+      if (decision.kind === "claimed" || decision.kind === "settled") {
+        await this.writeDeployment(client, decision.next, record.revision);
+        if (decision.wake) await wake([decision.wake], await txid());
+      }
+      return { decision };
+    });
+  }
+  public completeDeployment(
+    fence: CompletionFence,
+    outcome: StageOutcome,
+    now: Date,
+    wake: DeploymentWakeHook,
+  ): Promise<DeploymentRecord> {
+    return this.deploymentTransaction(async (client, txid) => {
+      if (outcome.kind === "promote") {
+        // Promotion writes the catalog: take the workspace lock first (lock order).
+        const workspace = await client.query(
+          "SELECT id FROM embody_platform_workspaces WHERE id=$1 FOR UPDATE",
+          [fence.workspaceId],
+        );
+        if (!workspace.rowCount) throw new StaleDeploymentError();
+      }
+      const record = await this.lockDeployment(client, fence.workspaceId, fence.deploymentId);
+      if (!record) throw new StaleDeploymentError();
+      const app = await this.catalogDocument(client, fence.workspaceId, fence.appId);
+      let applied = outcome;
+      let artifact: ArtifactRecord | undefined;
+      if (outcome.kind === "promote") {
+        const row = record.artifactId
+          ? (
+              await client.query<{ document: ArtifactRecord; purging: boolean; state: string }>(
+                "SELECT document,purging,state FROM embody_platform_artifacts WHERE workspace_id=$1 AND artifact_id=$2 FOR UPDATE",
+                [record.workspaceId, record.artifactId],
+              )
+            ).rows[0]
+          : undefined;
+        artifact = row && !row.purging && row.state === "admitted" ? row.document : undefined;
+        if (
+          !artifact ||
+          artifact.deploymentId !== record.deploymentId ||
+          artifact.appId !== record.appId
+        )
+          applied = { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: "ARTIFACT_MISSING" };
+      }
+      const decision = decideComplete({
+        record,
+        fence,
+        outcome: applied,
+        app: appControl(app),
+        now,
+      });
+      if (decision.promote) {
+        const releaseId = decision.promote.releaseId;
+        const manifest = releaseManifest(record, artifact!, releaseId);
+        const release: ReleaseRecord = {
+          workspaceId: record.workspaceId,
+          appId: record.appId,
+          releaseId,
+          deploymentId: record.deploymentId,
+          artifactId: artifact!.artifactId,
+          imageReference: artifact!.imageReference!,
+          generation: decision.promote.generation,
+          manifest,
+          createdAt: now.toISOString(),
+        };
+        await client.query(
+          `INSERT INTO embody_platform_releases(workspace_id,release_id,app_id,deployment_id,artifact_id,created_at,document)
+          VALUES($1,$2,$3,$4,$5,$6,$7)`,
+          [
+            release.workspaceId,
+            releaseId,
+            release.appId,
+            release.deploymentId,
+            release.artifactId,
+            release.createdAt,
+            release,
+          ],
+        );
+        const promoted: CatalogApp = {
+          ...app!,
+          activeRelease: releaseId,
+          generation: decision.promote.generation,
+          revision: app!.revision + 1,
+        };
+        // CAS on the generation read under the workspace lock (canPromote already compared it).
+        const pointer = await client.query(
+          `UPDATE embody_platform_apps SET document=$3 WHERE workspace_id=$1 AND id=$2 AND (document->>'generation')::bigint=$4`,
+          [record.workspaceId, record.appId, promoted, app!.generation],
+        );
+        if (pointer.rowCount !== 1) throw new ConflictError("App generation conflict");
+        await client.query(
+          "UPDATE embody_platform_workspaces SET revision=revision+1 WHERE id=$1",
+          [record.workspaceId],
+        );
+        const pinned: ArtifactRecord = {
+          ...artifact!,
+          pinnedBy: releaseId,
+          revision: artifact!.revision + 1,
+        };
+        const pin = await client.query(
+          `UPDATE embody_platform_artifacts SET pinned=true,revision=$3,document=$4
+          WHERE workspace_id=$1 AND artifact_id=$2 AND revision=$5 AND state='admitted' AND NOT purging`,
+          [pinned.workspaceId, pinned.artifactId, pinned.revision, pinned, artifact!.revision],
+        );
+        if (pin.rowCount !== 1) throw new ConflictError("Artifact revision conflict");
+      }
+      await this.writeDeployment(client, decision.next, record.revision);
+      if (decision.wake) await wake([decision.wake], await txid());
+      return decision.next;
+    });
+  }
+  public cancelDeployment(
+    key: { workspaceId: string; appId: string; deploymentId: string },
+    cancellationFence: number,
+    now: Date,
+    wake: DeploymentWakeHook,
+  ): Promise<{ record: DeploymentRecord; changed: boolean }> {
+    return this.deploymentTransaction(async (client, txid) => {
+      const record = await this.lockDeployment(client, key.workspaceId, key.deploymentId);
+      if (!record || record.appId !== key.appId) throw new DeploymentError("NOT_FOUND");
+      const decision = decideCancel(record, cancellationFence, now);
+      if (!decision.changed) return { record, changed: false };
+      await this.writeDeployment(client, decision.next, record.revision);
+      if (decision.wake) await wake([decision.wake], await txid());
+      return { record: decision.next, changed: true };
+    });
+  }
+  public finishCleanup(
+    key: { workspaceId: string; appId: string; deploymentId: string },
+    epoch: number,
+    done: boolean,
+    now: Date,
+    wake: DeploymentWakeHook,
+  ): Promise<void> {
+    return this.deploymentTransaction(async (client, txid) => {
+      const record = await this.lockDeployment(client, key.workspaceId, key.deploymentId);
+      if (!record || record.appId !== key.appId) return;
+      const decision = decideCleanup(record, epoch, done, now);
+      if (!decision) return;
+      await this.writeDeployment(client, decision.next, record.revision);
+      if (decision.wake) await wake([decision.wake], await txid());
+    });
+  }
+  public async appStatus(workspaceId: string, appId: string): Promise<AppControl | null> {
+    return appControl(
+      (
+        await this.pool.query<{ document: CatalogApp }>(
+          "SELECT document FROM embody_platform_apps WHERE workspace_id=$1 AND id=$2",
+          [workspaceId, appId],
+        )
+      ).rows[0]?.document,
+    );
+  }
+  public async release(
+    workspaceId: string,
+    appId: string,
+    releaseId: string,
+  ): Promise<ReleaseRecord | null> {
+    return (
+      (
+        await this.pool.query<{ document: ReleaseRecord }>(
+          "SELECT document FROM embody_platform_releases WHERE workspace_id=$1 AND app_id=$2 AND release_id=$3",
+          [workspaceId, appId, releaseId],
+        )
+      ).rows[0]?.document ?? null
+    );
+  }
+  public async overdueDeployments(
+    now: Date,
+    limit: number,
+    workspaceId?: string,
+  ): Promise<readonly DeploymentRecord[]> {
+    const cutoff = new Date(now.getTime() - DEPLOYMENT_LIMITS.recoveryGraceMs);
+    const bounded = Math.max(1, Math.min(100, Math.trunc(limit)));
+    const rows = (
+      await this.pool.query<{ document: DeploymentRecord }>(
+        `SELECT document FROM embody_platform_deployments
+        WHERE (state NOT IN ('active','failed','cancelled') OR cleanup) AND due_at<$1
+          AND (lease_until IS NULL OR lease_until<$1) AND ($3::text IS NULL OR workspace_id=$3)
+        ORDER BY due_at LIMIT $2`,
+        [cutoff, bounded, workspaceId ?? null],
+      )
+    ).rows;
+    return rows.map((row) => row.document).filter((record) => isOverdue(record, now));
+  }
+  public async transactionStatus(
+    txid: string,
+  ): Promise<"in-progress" | "committed" | "aborted" | "unknown"> {
+    if (!/^\d{1,20}$/.test(txid)) return "unknown";
+    const status = (
+      await this.pool.query<{ status: string | null }>("SELECT txid_status($1::bigint) AS status", [
+        txid,
+      ])
+    ).rows[0]?.status;
+    return status === "in progress"
+      ? "in-progress"
+      : status === "committed" || status === "aborted"
+        ? status
+        : "unknown";
   }
   public close(): Promise<void> {
     return (this.closing ??= this.pool.end());
