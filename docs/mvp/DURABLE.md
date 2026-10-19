@@ -18,6 +18,10 @@ action transaction ──► outbox row / runnable step
 
 ## Configuration
 
+Wake-up tasks and the drain's authentication use the platform's shared queue adapter and task
+ingress (`cloudTasksQueue`, `authenticateTask` in `@embody/host`), the same path as the M12
+deployment controller ([DEPLOYMENTS](./DEPLOYMENTS.md#task-ingress-and-the-shared-queue-step-6)).
+
 `EMBODY_HOST_PROFILE=hosted` plus `EMBODY_HOSTED_PROFILE=durable`, with every hosted setting
 from [IDENTITY](./IDENTITY.md) and:
 
