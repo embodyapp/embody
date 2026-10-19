@@ -41,7 +41,8 @@
     "test:e2e": "pnpm -r --if-present test:e2e",
     "typecheck": "pnpm -r --if-present typecheck",
     "verify": "pnpm lint && pnpm license:check && pnpm typecheck && pnpm test && pnpm build && pnpm api-report && pnpm format:check",
-    "test:m11": "pnpm build && node scripts/test-m11.mjs"
+    "test:m11": "pnpm build && node scripts/test-m11.mjs",
+    "test:m12": "node scripts/test-m12.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",

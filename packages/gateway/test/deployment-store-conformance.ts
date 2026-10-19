@@ -133,7 +133,7 @@ export function deploymentStoreConformance(name: string, factory: () => Promise<
         submit(
           submission("deploy_key_pending01", {
             source: { uploadId: pending.record.uploadId, digest: pin("pending"), bytes: 100 },
-          } as Partial<DeploymentSubmission>),
+          }),
         ),
       ).rejects.toMatchObject({ code: "INVALID_INPUT" });
       for (let i = 0; i < DEPLOYMENT_LIMITS.maxActivePerApp; i++)

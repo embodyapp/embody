@@ -1,6 +1,7 @@
 // Shared M12 fixtures for the real-PostgreSQL crash matrix. Every fake keeps its state in fixture
 // tables of the platform database, on its own connection and outside the store's transactions,
 // so it survives a SIGKILLed process the way Cloud Tasks, Cloud Build and Cloud Run would.
+import { Buffer } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { compileManifest, definePlugin, z } from "@embody/core";
