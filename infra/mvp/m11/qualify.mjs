@@ -245,17 +245,34 @@ export async function runM11Suite(env, provider, deps) {
     }
     await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
   }
-  let leftovers = await provider.inventory(approval, runId);
-  for (let attempt = 0; leftovers.length && attempt < 12; attempt++) {
+  // Post-run checks never throw: a failure is recorded so evidence is always written, and the
+  // run inventory (in the state bucket) names what to reconcile.
+  const attempt = async (fn, fallback) => {
+    for (let i = 0; i < 4; i++)
+      try {
+        return { value: await fn() };
+      } catch (error) {
+        if (i === 3)
+          return { value: fallback, error: String(error?.message ?? error).slice(0, 120) };
+        await provider.wait(15_000);
+      }
+    return { value: fallback };
+  };
+  let inventory = await attempt(() => provider.inventory(approval, runId), ["unknown"]);
+  for (let i = 0; inventory.value.length && i < 12; i++) {
     await provider.wait(15_000);
-    leftovers = await provider.inventory(approval, runId);
+    inventory = await attempt(() => provider.inventory(approval, runId), ["unknown"]);
   }
-  const iamAfter = await provider.projectIam();
+  const leftovers = inventory.value;
+  const iamAfter = await attempt(() => provider.projectIam(), "unknown");
   cases.cleanup = {
-    pass: teardown.pass === true && leftovers.length === 0 && iamBefore === iamAfter,
+    pass: teardown.pass === true && leftovers.length === 0 && iamBefore === iamAfter.value,
     teardown,
     leftovers,
-    projectIamUnchanged: iamBefore === iamAfter,
+    projectIamUnchanged: iamBefore === iamAfter.value,
+    ...(inventory.error || iamAfter.error
+      ? { errors: [inventory.error, iamAfter.error].filter(Boolean) }
+      : {}),
   };
   const minutes = builds?.length
     ? await provider.buildMinutes(builds).catch(() => builds.length * 10)

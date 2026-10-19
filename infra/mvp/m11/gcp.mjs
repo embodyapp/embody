@@ -75,8 +75,9 @@ export function createM11GcpProvider({
               }),
         });
       } catch {
-        if (method === "GET" && attempt < 2) {
-          await delay(5000);
+        // Idempotent reads and deletes ride out network blips (a run lasts ~20 minutes).
+        if (["GET", "DELETE"].includes(method) && attempt < 6) {
+          await delay(10_000);
           continue;
         }
         throw new Error(`Provider ${method} ${new URL(url).host} failed (0); details suppressed`);
@@ -85,8 +86,8 @@ export function createM11GcpProvider({
         cached = undefined;
         continue;
       }
-      if (response.status >= 500 && method === "GET" && attempt < 2) {
-        await delay(5000);
+      if (response.status >= 500 && ["GET", "DELETE"].includes(method) && attempt < 6) {
+        await delay(10_000);
         continue;
       }
       if (allow.includes(response.status)) return { status: response.status };
