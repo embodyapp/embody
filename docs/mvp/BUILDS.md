@@ -33,7 +33,7 @@ gateway/controller (trusted)            Cloud Build default pool, us-central1, b
                                             re-validate + extract (M10 reader)
                                             input/lockfile policy, pnpm fetch --ignore-scripts
                                             lockfile audit, SBOM ─► step output (trusted)
-                                        2 sandbox  (docker create --network none, uid 1000, …)
+                                        2 sandbox  (input image, docker create --network none, uid 1000, …)
                                             install, build script, manifest extraction
                                             (customer code; everything it writes is data)
                                         3 assemble (trusted, no RUN instruction)
@@ -44,7 +44,7 @@ gateway/controller (trusted)            Cloud Build default pool, us-central1, b
   settle: provider record + outputs ──► admit (digest reference) or reject (image deleted)
 ```
 
-The sandbox gets the source and dependency store by `docker cp` and returns the app tree and `manifest.json` the same way. It never sees `/workspace`, the step environment (including the signed URL), `$BUILDER_OUTPUT` or the Docker socket, and with no network it cannot reach the metadata server, so it has no builder token.
+The sandbox starts from a per-build input image: the recipe image plus the source and dependency store, added by a platform Dockerfile with `COPY --chown` only (no `RUN`, no network). It returns the app tree and `manifest.json` by `docker cp`. (`docker cp -a` is not used: on Cloud Build it resolves the container user in the host's passwd file.) It never sees `/workspace`, the step environment (including the signed URL), `$BUILDER_OUTPUT` or the Docker socket, and with no network it cannot reach the metadata server, so it has no builder token.
 
 ## Admission (trusted code outside the build)
 
@@ -138,4 +138,4 @@ Hosted apps keep Cloud Run's default internet egress and are contained by identi
 - `pnpm --filter @embody/cloud-contracts test`: input/lockfile policy, SBOM, manifest and capability schemas, redaction.
 - `pnpm --filter @embody/gateway test`: build plan and sandbox flags, every admission rejection, idempotent start, crash recovery between submit and record, deadline cancellation, CAS settlement, log redaction, purge and orphan cleanup, adapter request shapes, memory artifact-store conformance; the PostgreSQL artifact-store conformance runs in `test:gateway-store`.
 - `pnpm test:m11` (Docker + network to registry.npmjs.org): builds the recipe image from the checkout and runs the exact build plan on local Docker through a Cloud Build emulator, with clean request-only and durable scaffolds and adversaries (sandbox probe, secret canaries, failing build, stale/tarball/missing lockfiles, foreign framework, wrong package manager, oversized output, memory hog, profile/capability mismatches, post-build substitution). This tests the recipe and admission, not provider IAM.
-- `pnpm test:mvp:cloud` suite `m11` (live, owner-approved budget): the same cases on Cloud Build with the real builder identity, plus IAM inspection and an admitted image run as a Cloud Run job. See [M11 evidence](./evidence/M11-local.md).
+- `pnpm test:mvp:cloud` suite `m11` (live, owner-approved budget): the same cases on Cloud Build with the real builder identity, plus IAM inspection, a registry retag and admitted images run as a Cloud Run job. Passed 14/14 on 2026-10-19 ([live evidence](./evidence/M11-live-20b82dd/README.md), [local evidence](./evidence/M11-local.md)).

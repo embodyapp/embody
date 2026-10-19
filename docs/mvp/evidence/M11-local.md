@@ -26,7 +26,7 @@ The unit suites found one real defect before it reached the cloud: the Cloud Bui
 
 ## Residuals and open items
 
-- **Live qualification (phase 2) not run:** builder IAM, the real metadata server, Artifact Registry immutable tags, `GCS_ONLY` logs with a user-specified builder, regional default-pool behaviour and the Cloud Run job are unverified until the owner approves a budget. The local emulator has no IAM or metadata server and uses the local image ID as the pushed digest.
+- **Live qualification (phase 2):** passed 14/14 on 2026-10-19 ([evidence](./M11-live-20b82dd/README.md)). It changed the design in four places recorded there: a separate logs bucket, bucket get on outputs, source entering the sandbox through an input image instead of `docker cp -a`, and mutable tags. The local emulator has no IAM or metadata server and uses the local image ID as the pushed digest.
 - **Container escape** on a build VM would reach the builder's push/create rights (documented residual in [BUILDS](./BUILDS.md#identities-md09)).
 - **Preflight claims** are produced by customer code; host boot, M13 and M21 must keep enforcing the profile at runtime.
 - **M12** must call `BuildAdmission.start`/`settle` from durable jobs and map retries; **M13** must deploy only `imageReference`, pin artifacts it releases and embed the artifact manifest in `ReleaseManifest`; **M16** must schedule `purgeArtifacts` and `cleanupOrphanedImages`; **M15** serves logs.

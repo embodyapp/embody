@@ -1,0 +1,441 @@
+{
+  "gate": "mvp-cloud-m11",
+  "status": "passed",
+  "timestamp": "2026-10-19T15:08:02.008Z",
+  "commit": "20b82dda63e61144415931d83dd33ea8ace9316b",
+  "dirty": false,
+  "node": "v24.21.0",
+  "lockfileSha256": "a08f0f439a28acb21840c83aa7058e7fbf1de72d252ef4de9e594ad7908ec373",
+  "schemaSourceSha256": "502cad9d92abe0d084394520c931a51d80f1bfa9b6378c6e9e38b69c6a714bb7",
+  "platformSchemaSourceSha256": "d389b9df73893f0627ce16a88341614e79cd3f4091f2bc9c7667c2a2fa193b3f",
+  "postgresFixtureSha256": "5ee505a6ae07b9b1bfbb9a98493fa0495081732cf2ca423a42311e69f5dea580",
+  "counts": {
+    "passed": 14,
+    "failed": 0,
+    "skipped": 0
+  },
+  "images": [],
+  "suites": ["m11"],
+  "releaseGate": false,
+  "pendingSuites": ["m12", "m13", "m14", "m15", "m16", "m17", "m20", "m21"],
+  "m11": {
+    "pass": true,
+    "runId": "eb3f4c",
+    "cases": {
+      "M11.a.builder-iam": {
+        "pass": true,
+        "checks": {
+          "exact": true,
+          "noProjectRole": true,
+          "noSourceAccess": true,
+          "noImpersonation": true
+        },
+        "bindings": [
+          "buildsRepo:roles/artifactregistry.writer",
+          "logsBucket:roles/storage.legacyBucketReader",
+          "logsBucket:roles/storage.objectUser",
+          "outputBucket:roles/storage.legacyBucketReader",
+          "outputBucket:roles/storage.objectCreator",
+          "recipeRepo:roles/artifactregistry.reader"
+        ]
+      },
+      "propagation": {
+        "pass": true,
+        "attempts": 4,
+        "seconds": 46
+      },
+      "M11.idempotent-start": {
+        "pass": true,
+        "submittedBefore": 14,
+        "submittedAfter": 14
+      },
+      "M11.c.scaffold-request-only": {
+        "pass": true,
+        "checks": {
+          "admitted": true,
+          "digestReference": true,
+          "profile": true,
+          "boundToSource": true,
+          "provenance": true,
+          "sbom": true,
+          "runnable": true
+        },
+        "runnable": {
+          "pass": true,
+          "succeeded": 1,
+          "failed": 0
+        },
+        "manifest": {
+          "version": 1,
+          "profile": "request-only-v1",
+          "recipe": "embody-node24-pnpm-v1",
+          "nodeMajor": 24,
+          "appId": "m11-request-only",
+          "appVersion": "0.1.0",
+          "entrypoint": "dist/src/index.js",
+          "publishes": [],
+          "subscriptions": [],
+          "workflows": [],
+          "catalogDigest": "sha256:d4de18934cf3d776dc6a0a75e1443c863d3f5052b11bc53d057e4deeb9255db2"
+        }
+      },
+      "M11.c.scaffold-durable": {
+        "pass": true,
+        "checks": {
+          "admitted": true,
+          "digestReference": true,
+          "profile": true,
+          "boundToSource": true,
+          "provenance": true,
+          "sbom": true,
+          "publishes": true,
+          "subscriptions": true,
+          "workflows": true,
+          "runnable": true
+        },
+        "runnable": {
+          "pass": true,
+          "succeeded": 1,
+          "failed": 0
+        },
+        "manifest": {
+          "version": 1,
+          "profile": "durable-v1",
+          "recipe": "embody-node24-pnpm-v1",
+          "nodeMajor": 24,
+          "appId": "m11-durable",
+          "appVersion": "0.1.0",
+          "entrypoint": "dist/src/index.js",
+          "publishes": ["app.submitted"],
+          "subscriptions": ["app.submitted"],
+          "workflows": [
+            {
+              "target": "app.followUp",
+              "version": "0.1.0",
+              "steps": [
+                {
+                  "name": "remind",
+                  "dependsOn": []
+                }
+              ]
+            }
+          ],
+          "catalogDigest": "sha256:da72f27dc7288194386fcb8c8520c11189b0df655b80ba2ba89a5938269bc93d"
+        }
+      },
+      "M11.c.log-redaction": {
+        "pass": true,
+        "checks": {
+          "injected": true,
+          "redacted": true,
+          "marked": true
+        },
+        "admitted": true
+      },
+      "M11.a.sandbox-probe": {
+        "pass": true,
+        "checks": {
+          "reported": true,
+          "metadataIp": true,
+          "metadataHost": true,
+          "publicRegistry": true,
+          "storageApi": true,
+          "cloudRunApi": true,
+          "otherSource": true,
+          "dockerSocket": true,
+          "workspaceVisible": true,
+          "builderOutputsVisible": true,
+          "canWriteRecipe": true,
+          "uid": true,
+          "noPlatformEnv": true,
+          "processesBounded": true
+        },
+        "report": {
+          "uid": 1000,
+          "metadataIp": "blocked",
+          "metadataHost": "blocked",
+          "publicRegistry": "blocked",
+          "storageApi": "blocked",
+          "cloudRunApi": "blocked",
+          "otherSource": "blocked",
+          "dockerSocket": false,
+          "workspaceVisible": false,
+          "builderOutputsVisible": false,
+          "platformEnv": [],
+          "canWriteRecipe": false,
+          "rootDirs": ".dockerenv,app,bin,boot,dev,embody,etc,home,lib,lib64,media,mnt,opt,out,proc,root,run,sbin,srv,store,sys,tmp,usr,var",
+          "processesStarted": 487
+        },
+        "admitted": true
+      },
+      "M11.a.resource-bounds": {
+        "pass": true,
+        "checks": {
+          "memory-hog": true,
+          "oversized": true
+        },
+        "results": {
+          "request-only": {
+            "state": "admitted",
+            "error": null,
+            "expect": "admitted",
+            "imageDigest": "sha256:85e97706bbb728ea7202bc76b904eba55a6002cafeeb1cb19238baafe44e9143"
+          },
+          "durable": {
+            "state": "admitted",
+            "error": null,
+            "expect": "admitted",
+            "imageDigest": "sha256:0f665c61599a5e5db3d4b7b71b70adcaf2b9d8f81accf9879a6f01c6d38df64c"
+          },
+          "probe": {
+            "state": "admitted",
+            "error": null,
+            "expect": "admitted",
+            "imageDigest": "sha256:2a8f7aa99bb1ba25549c69f2ba1ae3d4ffbdcb45503085a9906688f1c23f9cbe"
+          },
+          "canary": {
+            "state": "admitted",
+            "error": null,
+            "expect": "admitted",
+            "imageDigest": "sha256:0d1a6d4fdddf12dda1e9ad6d5cba8388b8297eb2d3932e0bd76093f6cfecee2f"
+          },
+          "failing-build": {
+            "state": "rejected",
+            "error": "BUILD_FAILED",
+            "expect": "BUILD_FAILED",
+            "imageDigest": null
+          },
+          "stale-lockfile": {
+            "state": "rejected",
+            "error": "LOCKFILE_REJECTED",
+            "expect": "LOCKFILE_REJECTED",
+            "imageDigest": null
+          },
+          "tarball-lockfile": {
+            "state": "rejected",
+            "error": "LOCKFILE_REJECTED",
+            "expect": "LOCKFILE_REJECTED",
+            "imageDigest": null
+          },
+          "missing-lockfile": {
+            "state": "rejected",
+            "error": "LOCKFILE_REJECTED",
+            "expect": "LOCKFILE_REJECTED",
+            "imageDigest": null
+          },
+          "foreign-framework": {
+            "state": "rejected",
+            "error": "UNSUPPORTED_RUNTIME",
+            "expect": "UNSUPPORTED_RUNTIME",
+            "imageDigest": null
+          },
+          "unsupported-package-manager": {
+            "state": "rejected",
+            "error": "UNSUPPORTED_RUNTIME",
+            "expect": "UNSUPPORTED_RUNTIME",
+            "imageDigest": null
+          },
+          "oversized": {
+            "state": "rejected",
+            "error": "OUTPUT_LIMIT",
+            "expect": "OUTPUT_LIMIT",
+            "imageDigest": null
+          },
+          "memory-hog": {
+            "state": "rejected",
+            "error": "BUILD_FAILED",
+            "expect": "BUILD_FAILED",
+            "imageDigest": null
+          },
+          "durable-as-request-only": {
+            "state": "rejected",
+            "error": "UNSUPPORTED_PROFILE",
+            "expect": "UNSUPPORTED_PROFILE",
+            "imageDigest": "sha256:801a2b22b554009177b16543175cf3665fe379530de775eb92e4bb0d6bb5c61a"
+          },
+          "durable-undeclared-workflows": {
+            "state": "rejected",
+            "error": "CAPABILITY_MISMATCH",
+            "expect": "CAPABILITY_MISMATCH",
+            "imageDigest": "sha256:0dcbba871d4737072cc113b6caa852a54d88e973ca38a8076f02f80d24cee4d0"
+          }
+        }
+      },
+      "M11.b.inputs-and-failures": {
+        "pass": true,
+        "checks": {
+          "failing-build": true,
+          "stale-lockfile": true,
+          "tarball-lockfile": true,
+          "missing-lockfile": true,
+          "foreign-framework": true,
+          "unsupported-package-manager": true,
+          "durable-as-request-only": true,
+          "durable-undeclared-workflows": true
+        }
+      },
+      "M11.b.substitution": {
+        "pass": true,
+        "checks": {
+          "honest": true,
+          "manifest": true,
+          "image": true,
+          "extraImage": true,
+          "config": true,
+          "source": true
+        },
+        "codes": {
+          "honest": "admitted",
+          "manifest": "MANIFEST_MISMATCH",
+          "image": "IMAGE_INVALID",
+          "extraImage": "IMAGE_INVALID",
+          "config": "PROVENANCE_INVALID",
+          "source": "PROVENANCE_INVALID"
+        }
+      },
+      "M11.b.never-promotable": {
+        "pass": true,
+        "checks": {
+          "noReference": true,
+          "statusHasNoImage": true,
+          "rejectedImagesDeleted": true,
+          "allDecided": true
+        },
+        "leftovers": []
+      },
+      "M11.b.retag": {
+        "pass": true,
+        "checks": {
+          "referenceUnchanged": true,
+          "redecidedSameDigest": true
+        }
+      },
+      "M11.step5.retention": {
+        "pass": true,
+        "checks": {
+          "purgedAll": true,
+          "imagesGone": true
+        },
+        "purged": {
+          "deleted": 14,
+          "failed": 0,
+          "skipped": 0
+        },
+        "remaining": [],
+        "leftoverImages": []
+      },
+      "cleanup": {
+        "pass": true,
+        "teardown": {
+          "pass": true,
+          "removed": [
+            "job",
+            "bucket:embody-test-m11-src-eb3f4c",
+            "bucket:embody-test-m11-out-eb3f4c",
+            "bucket:embody-test-m11-log-eb3f4c",
+            "repository:embody-test-m11-builds-eb3f4c",
+            "repository:embody-test-m11-recipe-eb3f4c",
+            "serviceAccount:embody-test-m11-b-eb3f4c",
+            "serviceAccount:embody-test-m11-r-eb3f4c",
+            "serviceAccount:embody-test-m11-x-eb3f4c"
+          ]
+        },
+        "leftovers": [],
+        "projectIamUnchanged": true
+      }
+    },
+    "results": {
+      "request-only": {
+        "state": "admitted",
+        "error": null,
+        "expect": "admitted",
+        "imageDigest": "sha256:85e97706bbb728ea7202bc76b904eba55a6002cafeeb1cb19238baafe44e9143"
+      },
+      "durable": {
+        "state": "admitted",
+        "error": null,
+        "expect": "admitted",
+        "imageDigest": "sha256:0f665c61599a5e5db3d4b7b71b70adcaf2b9d8f81accf9879a6f01c6d38df64c"
+      },
+      "probe": {
+        "state": "admitted",
+        "error": null,
+        "expect": "admitted",
+        "imageDigest": "sha256:2a8f7aa99bb1ba25549c69f2ba1ae3d4ffbdcb45503085a9906688f1c23f9cbe"
+      },
+      "canary": {
+        "state": "admitted",
+        "error": null,
+        "expect": "admitted",
+        "imageDigest": "sha256:0d1a6d4fdddf12dda1e9ad6d5cba8388b8297eb2d3932e0bd76093f6cfecee2f"
+      },
+      "failing-build": {
+        "state": "rejected",
+        "error": "BUILD_FAILED",
+        "expect": "BUILD_FAILED",
+        "imageDigest": null
+      },
+      "stale-lockfile": {
+        "state": "rejected",
+        "error": "LOCKFILE_REJECTED",
+        "expect": "LOCKFILE_REJECTED",
+        "imageDigest": null
+      },
+      "tarball-lockfile": {
+        "state": "rejected",
+        "error": "LOCKFILE_REJECTED",
+        "expect": "LOCKFILE_REJECTED",
+        "imageDigest": null
+      },
+      "missing-lockfile": {
+        "state": "rejected",
+        "error": "LOCKFILE_REJECTED",
+        "expect": "LOCKFILE_REJECTED",
+        "imageDigest": null
+      },
+      "foreign-framework": {
+        "state": "rejected",
+        "error": "UNSUPPORTED_RUNTIME",
+        "expect": "UNSUPPORTED_RUNTIME",
+        "imageDigest": null
+      },
+      "unsupported-package-manager": {
+        "state": "rejected",
+        "error": "UNSUPPORTED_RUNTIME",
+        "expect": "UNSUPPORTED_RUNTIME",
+        "imageDigest": null
+      },
+      "oversized": {
+        "state": "rejected",
+        "error": "OUTPUT_LIMIT",
+        "expect": "OUTPUT_LIMIT",
+        "imageDigest": null
+      },
+      "memory-hog": {
+        "state": "rejected",
+        "error": "BUILD_FAILED",
+        "expect": "BUILD_FAILED",
+        "imageDigest": null
+      },
+      "durable-as-request-only": {
+        "state": "rejected",
+        "error": "UNSUPPORTED_PROFILE",
+        "expect": "UNSUPPORTED_PROFILE",
+        "imageDigest": "sha256:801a2b22b554009177b16543175cf3665fe379530de775eb92e4bb0d6bb5c61a"
+      },
+      "durable-undeclared-workflows": {
+        "state": "rejected",
+        "error": "CAPABILITY_MISMATCH",
+        "expect": "CAPABILITY_MISMATCH",
+        "imageDigest": "sha256:0dcbba871d4737072cc113b6caa852a54d88e973ca38a8076f02f80d24cee4d0"
+      }
+    },
+    "builds": 14,
+    "buildMinutes": 16,
+    "enabledServices": [],
+    "enablementDelta": [],
+    "projectionUsd": 1.21,
+    "estimatedUsd": 0.35,
+    "budgetUsd": 5
+  }
+}
