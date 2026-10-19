@@ -130,12 +130,15 @@ docker create --name "$N" --network none --user ${s.user} --cap-drop ALL \\
   --pids-limit ${s.pids} --cpus ${s.cpus} --ulimit nofile=${s.openFiles}:${s.openFiles} --ulimit core=0 \\
   --env-file /dev/null --workdir /app --entrypoint /embody/sandbox.sh "$I" >/dev/null
 mkdir -p "$W/sandbox"
+started=$(date +%s)
 # Log bounded to ${BUILD_RECIPE.maxLogBytes} bytes; the rest is drained, never stored.
 { if timeout -k 10 ${BUILD_RECIPE.sandboxSeconds} docker start -a "$N" 2>&1; then st=0; else st=$?; fi; echo "$st" > "$W/sandbox/status"; } | { head -c ${BUILD_RECIPE.maxLogBytes}; cat >/dev/null; }
 status=$(cat "$W/sandbox/status")
 echo "embody: sandbox exit $status"
-# timeout(1) exits 124 (or 137 after -k): report it as the build timeout, not a generic failure.
-if [ "$status" = 124 ] || [ "$status" = 137 ]; then mkdir -p "\${BUILDER_OUTPUT:-/builder/outputs}"; printf '{"rejected":"BUILD_TIMEOUT"}' > "\${BUILDER_OUTPUT:-/builder/outputs}/output"; fi
+# timeout(1) exits 124, or 137 when -k had to kill; an out-of-memory kill is also 137, so 137
+# counts as a timeout only once the wall clock has reached the limit.
+elapsed=$(( $(date +%s) - started ))
+if [ "$status" = 124 ] || { [ "$status" = 137 ] && [ "$elapsed" -ge ${BUILD_RECIPE.sandboxSeconds} ]; }; then mkdir -p "\${BUILDER_OUTPUT:-/builder/outputs}"; printf '{"rejected":"BUILD_TIMEOUT"}' > "\${BUILDER_OUTPUT:-/builder/outputs}/output"; fi
 docker kill "$N" >/dev/null 2>&1 || true
 if [ "$status" != 0 ]; then
   docker rm -f "$N" >/dev/null 2>&1 || true
