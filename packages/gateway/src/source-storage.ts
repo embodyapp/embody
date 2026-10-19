@@ -15,6 +15,11 @@ export interface SourceUploadAccessRequest {
   readonly contentType: string;
   readonly expiresAt: Date;
 }
+/** Builder read capability (M11): one object, GET only, short expiry. */
+export interface SourceReadAccessRequest {
+  readonly objectKey: string;
+  readonly expiresAt: Date;
+}
 export interface SourceObjectInfo {
   readonly bytes: number;
   /** Opaque provider generation; reads are pinned to it. */
@@ -85,11 +90,16 @@ export class MemorySourceObjectStore implements SourceObjectStore {
     this.origin = options.origin ?? "https://source-storage.test";
     this.clock = options.clock ?? { now: () => new Date() };
   }
-  private sign(key: string, expires: string, headers: Record<string, string>): string {
+  private sign(
+    key: string,
+    expires: string,
+    headers: Record<string, string>,
+    method: "PUT" | "GET" = "PUT",
+  ): string {
     return createHmac("sha256", this.secret)
       .update(
         [
-          "PUT",
+          method,
           key,
           expires,
           headers["content-type"],
@@ -112,6 +122,15 @@ export class MemorySourceObjectStore implements SourceObjectStore {
       headers,
       expiresAt: request.expiresAt.toISOString(),
     });
+  }
+  /** Signed GET for exactly one object (the builder's source fetch). */
+  public createReadAccess(request: SourceReadAccessRequest): Promise<{ url: string }> {
+    assertKey(request.objectKey);
+    const expires = String(Math.floor(request.expiresAt.getTime() / 1000));
+    const url = new URL(`${this.origin}/read/${request.objectKey}`);
+    url.searchParams.set("expires", expires);
+    url.searchParams.set("sig", this.sign(request.objectKey, expires, {}, "GET"));
+    return Promise.resolve({ url: url.href });
   }
   public stat(objectKey: string): Promise<SourceObjectInfo | null> {
     assertKey(objectKey);
@@ -152,6 +171,20 @@ export class MemorySourceObjectStore implements SourceObjectStore {
     const url = new URL(request.url);
     const reply = (status: number, code: string) =>
       new Response(`<Error><Code>${code}</Code></Error>`, { status });
+    if (url.origin === this.origin && url.pathname.startsWith("/read/")) {
+      const key = decodeURIComponent(url.pathname.slice("/read/".length));
+      const expires = url.searchParams.get("expires") ?? "";
+      const sig = url.searchParams.get("sig") ?? "";
+      if (request.method !== "GET" || !SOURCE_OBJECT_KEY.test(key) || !/^\d{1,12}$/.test(expires))
+        return reply(403, "AccessDenied");
+      const expected = Buffer.from(this.sign(key, expires, {}, "GET"), "hex");
+      const actual = Buffer.from(/^[a-f0-9]{64}$/.test(sig) ? sig : "", "hex");
+      if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
+        return reply(403, "SignatureDoesNotMatch");
+      if (Number(expires) * 1000 <= this.clock.now().getTime()) return reply(400, "ExpiredToken");
+      const value = this.objects.get(key);
+      return value ? new Response(value.data, { status: 200 }) : reply(404, "NoSuchKey");
+    }
     if (url.origin !== this.origin || !url.pathname.startsWith("/upload/"))
       return reply(404, "NoSuchBucket");
     const key = decodeURIComponent(url.pathname.slice("/upload/".length));
@@ -185,6 +218,11 @@ export interface GcsSourceObjectStoreOptions {
   readonly bucket: string;
   /** Service account whose IAM signBlob produces V4 signatures; no private keys are held. */
   readonly signerEmail: string;
+  /**
+   * Separate service account for builder read access (M11): holds only object read on the
+   * bucket, so the upload signer stays create-only. Required for `createReadAccess`.
+   */
+  readonly readSignerEmail?: string;
   /** OAuth access token for storage JSON API and IAM credentials calls. */
   readonly accessToken?: () => Promise<string>;
   readonly fetch?: typeof fetch;
@@ -236,8 +274,14 @@ export class GcsSourceObjectStore implements SourceObjectStore {
   public constructor(private readonly options: GcsSourceObjectStoreOptions) {
     if (!/^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/.test(options.bucket))
       throw new TypeError("Invalid source bucket");
-    if (!/^[a-z0-9-]+@[a-z0-9-]+\.iam\.gserviceaccount\.com$/.test(options.signerEmail))
+    const account = /^[a-z0-9-]+@[a-z0-9-]+\.iam\.gserviceaccount\.com$/;
+    if (!account.test(options.signerEmail))
       throw new TypeError("Source signer must be a service account");
+    if (
+      options.readSignerEmail !== undefined &&
+      (!account.test(options.readSignerEmail) || options.readSignerEmail === options.signerEmail)
+    )
+      throw new TypeError("Source read signer must be a separate service account");
     this.fetcher = options.fetch ?? fetch;
     this.token = options.accessToken ?? metadataAccessToken(this.fetcher);
     this.now = options.now ?? (() => new Date());
@@ -261,7 +305,9 @@ export class GcsSourceObjectStore implements SourceObjectStore {
     return `https://storage.googleapis.com/storage/v1/b/${this.options.bucket}/o/${encodeURIComponent(key)}`;
   }
   /** Exposed for tests: the exact V4 canonical request and string to sign. */
-  public canonical(request: SourceUploadAccessRequest): {
+  public canonical(
+    request: SourceUploadAccessRequest | (SourceReadAccessRequest & { method: "GET" }),
+  ): {
     url: URL;
     canonicalRequest: string;
     stringToSign: string;
@@ -278,14 +324,19 @@ export class GcsSourceObjectStore implements SourceObjectStore {
     const date = stamp.slice(0, 8);
     const scope = `${date}/auto/storage/goog4_request`;
     const host = "storage.googleapis.com";
-    const headers = uploadHeaders(request.bytes, request.contentType);
-    const signed = { ...headers, host };
+    const read = "method" in request;
+    const signer = read ? this.options.readSignerEmail : this.options.signerEmail;
+    if (!signer) throw new SourceStorageError("Source read signer not configured");
+    const headers: Record<string, string> = read
+      ? {}
+      : uploadHeaders(request.bytes, request.contentType);
+    const signed: Record<string, string> = { ...headers, host };
     const names = Object.keys(signed).sort();
     const signedHeaders = names.join(";");
     const path = `/${this.options.bucket}/${request.objectKey.split("/").map(rfc3986).join("/")}`;
     const query: Record<string, string> = {
       "X-Goog-Algorithm": "GOOG4-RSA-SHA256",
-      "X-Goog-Credential": `${this.options.signerEmail}/${scope}`,
+      "X-Goog-Credential": `${signer}/${scope}`,
       "X-Goog-Date": stamp,
       "X-Goog-Expires": String(seconds),
       "X-Goog-SignedHeaders": signedHeaders,
@@ -294,11 +345,9 @@ export class GcsSourceObjectStore implements SourceObjectStore {
       .sort()
       .map((key) => `${rfc3986(key)}=${rfc3986(query[key]!)}`)
       .join("&");
-    const canonicalHeaders = names
-      .map((name) => `${name}:${signed[name as keyof typeof signed].trim()}\n`)
-      .join("");
+    const canonicalHeaders = names.map((name) => `${name}:${signed[name]!.trim()}\n`).join("");
     const canonicalRequest = [
-      "PUT",
+      read ? "GET" : "PUT",
       path,
       canonicalQuery,
       canonicalHeaders,
@@ -318,10 +367,9 @@ export class GcsSourceObjectStore implements SourceObjectStore {
       headers,
     };
   }
-  public async createUploadAccess(request: SourceUploadAccessRequest): Promise<SourceUploadAccess> {
-    const { url, stringToSign, headers } = this.canonical(request);
+  private async signBlob(signer: string, stringToSign: string): Promise<string> {
     const response = await this.call(
-      `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(this.options.signerEmail)}:signBlob`,
+      `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(signer)}:signBlob`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -332,11 +380,32 @@ export class GcsSourceObjectStore implements SourceObjectStore {
     const body = (await response.json()) as { signedBlob?: unknown };
     if (typeof body.signedBlob !== "string" || !/^[A-Za-z0-9+/=]{16,2048}$/.test(body.signedBlob))
       throw new SourceStorageError("Invalid signing response");
+    return Buffer.from(body.signedBlob, "base64").toString("hex");
+  }
+  public async createUploadAccess(request: SourceUploadAccessRequest): Promise<SourceUploadAccess> {
+    const { url, stringToSign, headers } = this.canonical(request);
     url.searchParams.set(
       "X-Goog-Signature",
-      Buffer.from(body.signedBlob, "base64").toString("hex"),
+      await this.signBlob(this.options.signerEmail, stringToSign),
     );
-    return { method: "PUT", url: url.href, headers, expiresAt: request.expiresAt.toISOString() };
+    return {
+      method: "PUT",
+      url: url.href,
+      headers,
+      expiresAt: request.expiresAt.toISOString(),
+    };
+  }
+  /**
+   * V4 signed GET for one object, signed by the read signer (object read only). Given to the
+   * isolated builder's trusted fetch step; it never reaches customer code.
+   */
+  public async createReadAccess(request: SourceReadAccessRequest): Promise<{ url: string }> {
+    const { url, stringToSign } = this.canonical({ ...request, method: "GET" });
+    url.searchParams.set(
+      "X-Goog-Signature",
+      await this.signBlob(this.options.readSignerEmail!, stringToSign),
+    );
+    return { url: url.href };
   }
   public async stat(objectKey: string): Promise<SourceObjectInfo | null> {
     assertKey(objectKey);

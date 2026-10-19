@@ -17,6 +17,8 @@ Requires Node.js 22 or 24 and uses ESM.
 
 `createWorkspaceGateway({ store, token, sources: { objects } })` additionally serves authenticated source admission (`/v1/workspaces/:workspace/apps/:app/sources`) backed by a `SourceObjectStore` (`MemorySourceObjectStore` for tests, `GcsSourceObjectStore` for a private Cloud Storage bucket). It stores and verifies source archives as data and never builds or evaluates them; see [hosted source admission](https://github.com/embodyapp/embody/blob/main/docs/mvp/SOURCES.md).
 
+`BuildAdmission` turns a verified source into an admitted, digest-addressed image (M11): it plans a pinned Cloud Build recipe in which customer code runs only in a no-network, unprivileged sandbox, then admits the result only if the provider's record, the trusted step outputs, the pushed image digest and the manifest/SBOM digests all match the plan. `CloudBuildProvider` is the Cloud Build adapter and `MemoryBuildProvider` a test fake; see [isolated builds](https://github.com/embodyapp/embody/blob/main/docs/mvp/BUILDS.md).
+
 The gateway is available in two operating models: the paid managed Embody Gateway, or an operator-owned deployment built with this package. Applications use the same registration and execution contracts with either model.
 
 The environment-driven process in [`apps/gateway`](https://github.com/embodyapp/embody/tree/main/apps/gateway) is a distributed-test reference with example-specific identities and credentials, not a generic production binary. Production operators must provide TLS, rotated secrets, explicit endpoint allowlists, durable audit export, appropriate rate limits, and registration recovery.

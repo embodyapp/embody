@@ -73,9 +73,12 @@ A transaction pooler would need a separate qualification of `SET LOCAL`/RLS and 
 - **Logs:** no exclusion, retention or volume bound (`log_connections=on`, task log sampling 1 in
   the fixture).
 - **Images:** bound tagged versions too (the KEEP rule only protects); per-app repositories or
-  immutable tags so a build cannot overwrite another app's or the gateway's tag (M11).
+  immutable tags so a build cannot overwrite another app's or the gateway's tag (M11). **M11:** app
+  images go to a separate builds repository (mutable tags, because immutable tags block deletes; nothing deploys by tag), admission binds digests from the
+  provider record, and `purgeArtifacts`/`cleanupOrphanedImages` bound retained versions
+  ([BUILDS](./BUILDS.md#retention-and-cleanup)); the platform repository stays builder read-only.
 - **Secrets:** no secret-version lifecycle.
-- **Builds and source storage:** not present yet (M10/M11).
+- **Builds and source storage:** M10 source storage and the M11 build recipe exist ([SOURCES](./SOURCES.md), [BUILDS](./BUILDS.md)); M11's live run qualifies them on Cloud Build.
 - **Restore:** Cloud SQL restores the whole shared instance (about 15 minutes, every app rolled
   back). Per-app recovery needs restore-to-new-instance plus a per-database copy (M16).
 - **Invoker tokens:** each app can make Cloud Tasks mint its own invoker's OIDC token for any
@@ -83,7 +86,9 @@ A transaction pooler would need a separate qualification of `SET LOCAL`/RLS and 
 - **Evaluator hardening:** the emergency-stop check should compare the delivery time with the
   resume time; isolation should count any non-403 status as allowed; identity negatives should
   record the error reason (403 can also mean a disabled API).
-- **Builder scope:** the check does not cover who may act as the builder or the state bucket.
+- **Builder scope:** the check does not cover who may act as the builder or the state bucket. M11
+  inspects every binding the builder holds on its run's resources and the project; only the
+  controller (M12) may act as the builder.
 
 ## Wake queue design
 

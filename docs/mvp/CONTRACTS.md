@@ -57,6 +57,8 @@ Submission contains an owned uploaded-source ID, SHA-256 digest and byte count; 
 }
 ```
 
+**Durable profile (M11 amendment for M19–M21):** `capabilities` may instead be `profile: "durable-v1"` with boolean `workflows`, `events` (publishes events for other apps) and `subscriptions`; `schedules`, `appToAppRpc`, `persistentLocalState` and `genui` stay `false`. Build admission requires each flag to equal what the built app actually has, and `ReleaseManifest.artifact` carries the admitted [artifact manifest](./BUILDS.md#admission-trusted-code-outside-the-build) (profile, published event names, subscriptions, versioned workflow definitions).
+
 AppStatus carries current authoritative `generation`, app-wide `lifecycleFence`, lifecycle status (`enabled`, `disabled`, `deleted`) and nullable `activeReleaseId`. Read it before submitting any generation-bound operation and again after a CAS conflict. A successful promotion increments generation; a deployment's `expectedGeneration` remains its historical captured value, not current app state. AppList wraps unique workspace-bound summaries.
 
 Deployment response/status carries deployment ID, workspace/app, source digest, state, stage attempt, expected generation, captured app lifecycle fence and deployment cancellation fence. An active status requires a release ID; a failed status requires a safe error; other statuses carry no error. CLI noninteractive JSON output must preserve the ID so status polling resumes without resubmission. Existing call/discovery commands are unchanged; new commands are not implemented by M02.

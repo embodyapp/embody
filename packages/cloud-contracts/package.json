@@ -1,7 +1,7 @@
 {
   "name": "@embody/cloud-contracts",
   "version": "0.1.0",
-  "description": "Versioned request-only hosted MVP contracts (no deployment executor).",
+  "description": "Versioned hosted MVP contracts and build/source admission policy (no deployment executor).",
   "license": "Elastic-2.0",
   "type": "module",
   "sideEffects": false,
@@ -24,7 +24,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "zod": "^4.5.4"
+    "zod": "^4.5.4",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

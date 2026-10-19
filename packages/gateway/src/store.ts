@@ -23,6 +23,13 @@ import {
   type SourceStore,
   type SourceUsage,
 } from "./source-admission.js";
+import {
+  artifactTransitionAllowed,
+  type ArtifactCursor,
+  type ArtifactRecord,
+  type ArtifactStore,
+  type ArtifactWrite,
+} from "./build-admission.js";
 
 export interface Workspace {
   readonly id: string;
@@ -142,6 +149,19 @@ function validateCredential(value: CredentialWrite): CredentialWrite {
   });
 }
 const defaultPolicy: GatewayRegistryOptions = { credentials: {} };
+function validateArtifact(record: ArtifactWrite): void {
+  id(record.workspaceId);
+  if (
+    !AppIdSchema.safeParse(record.appId).success ||
+    !/^dep_[a-z0-9]{8,64}$/.test(record.deploymentId) ||
+    !/^art_[a-z0-9]{8,64}$/.test(record.artifactId) ||
+    !Number.isSafeInteger(record.attempt) ||
+    record.attempt < 1 ||
+    !["building", "admitted", "rejected"].includes(record.state) ||
+    !Number.isFinite(Date.parse(record.retainUntil))
+  )
+    throw new BadRequestError("Invalid artifact record");
+}
 function validateSourceInput(input: SourceAdmitInput): void {
   id(input.workspaceId);
   if (!AppIdSchema.safeParse(input.appId).success || !Number.isFinite(input.now.getTime()))
@@ -160,8 +180,9 @@ function sameSourceIdentity(a: SourceRecord, b: SourceRecord): boolean {
   );
 }
 /* eslint-disable @typescript-eslint/require-await -- Atomic memory operations contain no await; async converts validation/CAS errors to rejections. */
-export class MemoryGatewayStore implements GatewayStore, SourceStore {
+export class MemoryGatewayStore implements GatewayStore, SourceStore, ArtifactStore {
   private sources = new Map<string, SourceRecord>();
+  private artifacts = new Map<string, ArtifactRecord>();
   private workspaces = new Map<string, Workspace>();
   private apps = new Map<string, CatalogApp>();
   private credentials = new Map<string, WorkspaceCredential>();
@@ -326,11 +347,100 @@ export class MemoryGatewayStore implements GatewayStore, SourceStore {
     if (this.sources.get(key)?.revision !== record.revision) return false;
     return this.sources.delete(key);
   }
+  public async createArtifact(record: ArtifactWrite): Promise<ArtifactRecord> {
+    validateArtifact(record);
+    if (!this.workspaces.has(record.workspaceId)) throw new NotFoundError("Workspace not found");
+    const duplicate = [...this.artifacts.values()].some(
+      (a) =>
+        a.workspaceId === record.workspaceId &&
+        (a.artifactId === record.artifactId ||
+          (a.appId === record.appId &&
+            a.deploymentId === record.deploymentId &&
+            a.attempt === record.attempt)),
+    );
+    if (duplicate) throw new ConflictError("Artifact exists");
+    const value = { ...clone(record), revision: 1 };
+    this.artifacts.set(`${record.workspaceId}/${record.artifactId}`, value);
+    return clone(value);
+  }
+  public async artifact(
+    workspaceId: string,
+    appId: string,
+    artifactId: string,
+  ): Promise<ArtifactRecord | null> {
+    const record = this.artifacts.get(`${workspaceId}/${artifactId}`);
+    return record && record.appId === appId && !record.purging ? clone(record) : null;
+  }
+  public async artifactForAttempt(
+    workspaceId: string,
+    appId: string,
+    deploymentId: string,
+    attempt: number,
+  ): Promise<ArtifactRecord | null> {
+    const record = [...this.artifacts.values()].find(
+      (a) =>
+        a.workspaceId === workspaceId &&
+        a.appId === appId &&
+        a.deploymentId === deploymentId &&
+        a.attempt === attempt &&
+        !a.purging,
+    );
+    return record ? clone(record) : null;
+  }
+  public async updateArtifact(next: ArtifactRecord, expected: number): Promise<ArtifactRecord> {
+    validateArtifact(next);
+    const key = `${next.workspaceId}/${next.artifactId}`;
+    const prior = this.artifacts.get(key);
+    if (!prior || prior.revision !== expected || prior.purging)
+      throw new ConflictError("Revision conflict");
+    if (!artifactTransitionAllowed(prior, next))
+      throw new BadRequestError("Artifact identity and decision are immutable");
+    const value = { ...clone(next), revision: expected + 1 };
+    this.artifacts.set(key, value);
+    return clone(value);
+  }
+  public async expiredArtifacts(
+    now: Date,
+    limit: number,
+    after?: ArtifactCursor,
+  ): Promise<ArtifactRecord[]> {
+    const key = (a: ArtifactCursor) =>
+      [new Date(a.retainUntil).toISOString(), a.workspaceId, a.artifactId] as const;
+    const compare = (a: ArtifactCursor, b: ArtifactCursor) => {
+      const [x, y] = [key(a), key(b)];
+      for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i]! < y[i]! ? -1 : 1;
+      return 0;
+    };
+    return [...this.artifacts.values()]
+      .filter((a) => Date.parse(a.retainUntil) <= now.getTime() && !a.pinnedBy)
+      .filter((a) => !after || compare(a, after) > 0)
+      .sort(compare)
+      .slice(0, limit)
+      .map(clone);
+  }
+  public async artifactKeys(
+    workspaceId: string,
+    appId: string,
+  ): Promise<{ digests: ReadonlySet<string>; artifactIds: ReadonlySet<string> }> {
+    const records = [...this.artifacts.values()].filter(
+      (a) => a.workspaceId === workspaceId && a.appId === appId,
+    );
+    return {
+      digests: new Set(records.flatMap((a) => (a.imageDigest ? [a.imageDigest] : []))),
+      artifactIds: new Set(records.map((a) => a.artifactId)),
+    };
+  }
+  public async deleteArtifact(record: ArtifactRecord): Promise<boolean> {
+    const key = `${record.workspaceId}/${record.artifactId}`;
+    const prior = this.artifacts.get(key);
+    if (prior?.revision !== record.revision || prior.pinnedBy) return false;
+    return this.artifacts.delete(key);
+  }
   public async close(): Promise<void> {}
 }
 /* eslint-enable @typescript-eslint/require-await */
 /** Platform database only. Migrations must be invoked separately using the maintenance role. */
-export class PostgresGatewayStore implements GatewayStore, SourceStore {
+export class PostgresGatewayStore implements GatewayStore, SourceStore, ArtifactStore {
   private readonly pool: Pool;
   private closing?: Promise<void>;
   public constructor(
@@ -374,7 +484,9 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore {
         CREATE INDEX IF NOT EXISTS embody_platform_audit_lease ON embody_platform_audit(workspace_id,lease_until) WHERE NOT completed;
         CREATE TABLE IF NOT EXISTS embody_platform_sources (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), upload_id text NOT NULL, app_id text NOT NULL, idempotency_key text NOT NULL, state text NOT NULL CHECK (state IN ('pending','verified','rejected')), bytes bigint NOT NULL CHECK (bytes > 0), access_expires_at timestamptz NOT NULL, retain_until timestamptz NOT NULL, pinned boolean NOT NULL DEFAULT false, purging boolean NOT NULL DEFAULT false, revision bigint NOT NULL CHECK (revision > 0), document jsonb NOT NULL, PRIMARY KEY(workspace_id,upload_id));
         CREATE UNIQUE INDEX IF NOT EXISTS embody_platform_sources_key ON embody_platform_sources(workspace_id,app_id,idempotency_key) WHERE NOT purging;
-        CREATE INDEX IF NOT EXISTS embody_platform_sources_retention ON embody_platform_sources(retain_until) WHERE NOT pinned;`);
+        CREATE INDEX IF NOT EXISTS embody_platform_sources_retention ON embody_platform_sources(retain_until) WHERE NOT pinned;
+        CREATE TABLE IF NOT EXISTS embody_platform_artifacts (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), artifact_id text NOT NULL, app_id text NOT NULL, deployment_id text NOT NULL, attempt integer NOT NULL CHECK (attempt > 0), state text NOT NULL CHECK (state IN ('building','admitted','rejected')), image_digest text, retain_until timestamptz NOT NULL, pinned boolean NOT NULL DEFAULT false, purging boolean NOT NULL DEFAULT false, revision bigint NOT NULL CHECK (revision > 0), document jsonb NOT NULL, PRIMARY KEY(workspace_id,artifact_id), UNIQUE(workspace_id,app_id,deployment_id,attempt));
+        CREATE INDEX IF NOT EXISTS embody_platform_artifacts_retention ON embody_platform_artifacts(retain_until) WHERE NOT pinned;`);
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -671,6 +783,140 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore {
     const result = await this.pool.query(
       "DELETE FROM embody_platform_sources WHERE workspace_id=$1 AND upload_id=$2 AND revision=$3 AND NOT pinned",
       [record.workspaceId, record.uploadId, record.revision],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+  public async createArtifact(record: ArtifactWrite): Promise<ArtifactRecord> {
+    validateArtifact(record);
+    const value: ArtifactRecord = { ...record, revision: 1 };
+    try {
+      const result = await this.pool.query(
+        `INSERT INTO embody_platform_artifacts(workspace_id,artifact_id,app_id,deployment_id,attempt,state,image_digest,retain_until,pinned,revision,document)
+        SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10 WHERE EXISTS (SELECT 1 FROM embody_platform_workspaces WHERE id=$1)`,
+        [
+          value.workspaceId,
+          value.artifactId,
+          value.appId,
+          value.deploymentId,
+          value.attempt,
+          value.state,
+          value.imageDigest ?? null,
+          value.retainUntil,
+          Boolean(value.pinnedBy),
+          value,
+        ],
+      );
+      if (!result.rowCount) throw new NotFoundError("Workspace not found");
+    } catch (error) {
+      if ((error as { code?: string }).code === "23505") throw new ConflictError("Artifact exists");
+      throw error;
+    }
+    return value;
+  }
+  public async artifact(
+    workspaceId: string,
+    appId: string,
+    artifactId: string,
+  ): Promise<ArtifactRecord | null> {
+    return (
+      (
+        await this.pool.query<{ document: ArtifactRecord }>(
+          "SELECT document FROM embody_platform_artifacts WHERE workspace_id=$1 AND app_id=$2 AND artifact_id=$3 AND NOT purging",
+          [workspaceId, appId, artifactId],
+        )
+      ).rows[0]?.document ?? null
+    );
+  }
+  public async artifactForAttempt(
+    workspaceId: string,
+    appId: string,
+    deploymentId: string,
+    attempt: number,
+  ): Promise<ArtifactRecord | null> {
+    return (
+      (
+        await this.pool.query<{ document: ArtifactRecord }>(
+          "SELECT document FROM embody_platform_artifacts WHERE workspace_id=$1 AND app_id=$2 AND deployment_id=$3 AND attempt=$4 AND NOT purging",
+          [workspaceId, appId, deploymentId, attempt],
+        )
+      ).rows[0]?.document ?? null
+    );
+  }
+  public async updateArtifact(next: ArtifactRecord, expected: number): Promise<ArtifactRecord> {
+    validateArtifact(next);
+    if (!Number.isSafeInteger(expected) || expected < 1)
+      throw new BadRequestError("Invalid revision");
+    const prior = (
+      await this.pool.query<{ document: ArtifactRecord }>(
+        "SELECT document FROM embody_platform_artifacts WHERE workspace_id=$1 AND artifact_id=$2 AND revision=$3 AND NOT purging",
+        [next.workspaceId, next.artifactId, expected],
+      )
+    ).rows[0]?.document;
+    if (!prior) throw new ConflictError("Revision conflict");
+    if (!artifactTransitionAllowed(prior, next))
+      throw new BadRequestError("Artifact identity and decision are immutable");
+    const value: ArtifactRecord = { ...next, revision: expected + 1 };
+    const result = await this.pool.query(
+      `UPDATE embody_platform_artifacts SET state=$4,image_digest=$5,retain_until=$6,pinned=$7,purging=$8,revision=$9,document=$10
+      WHERE workspace_id=$1 AND artifact_id=$2 AND revision=$3 AND NOT purging`,
+      [
+        value.workspaceId,
+        value.artifactId,
+        expected,
+        value.state,
+        value.imageDigest ?? null,
+        value.retainUntil,
+        Boolean(value.pinnedBy),
+        Boolean(value.purging),
+        value.revision,
+        value,
+      ],
+    );
+    if (!result.rowCount) throw new ConflictError("Revision conflict");
+    return value;
+  }
+  public async expiredArtifacts(
+    now: Date,
+    limit: number,
+    after?: ArtifactCursor,
+  ): Promise<ArtifactRecord[]> {
+    const bounded = Math.max(1, Math.min(1000, Math.trunc(limit)));
+    // Byte-order collation: the cursor order must not depend on the database locale.
+    const order =
+      'ORDER BY retain_until, workspace_id COLLATE "C", artifact_id COLLATE "C" LIMIT $2';
+    const result = after
+      ? await this.pool.query<{ document: ArtifactRecord; purging: boolean }>(
+          `SELECT document,purging FROM embody_platform_artifacts WHERE retain_until<=$1 AND NOT pinned
+          AND (retain_until, workspace_id COLLATE "C", artifact_id COLLATE "C") > ($3::timestamptz, $4 COLLATE "C", $5 COLLATE "C") ${order}`,
+          [now, bounded, after.retainUntil, after.workspaceId, after.artifactId],
+        )
+      : await this.pool.query<{ document: ArtifactRecord; purging: boolean }>(
+          `SELECT document,purging FROM embody_platform_artifacts WHERE retain_until<=$1 AND NOT pinned ${order}`,
+          [now, bounded],
+        );
+    return result.rows.map((row) =>
+      row.purging ? { ...row.document, purging: true } : row.document,
+    );
+  }
+  public async artifactKeys(
+    workspaceId: string,
+    appId: string,
+  ): Promise<{ digests: ReadonlySet<string>; artifactIds: ReadonlySet<string> }> {
+    const rows = (
+      await this.pool.query<{ artifact_id: string; image_digest: string | null }>(
+        "SELECT artifact_id,image_digest FROM embody_platform_artifacts WHERE workspace_id=$1 AND app_id=$2",
+        [workspaceId, appId],
+      )
+    ).rows;
+    return {
+      digests: new Set(rows.flatMap((row) => (row.image_digest ? [row.image_digest] : []))),
+      artifactIds: new Set(rows.map((row) => row.artifact_id)),
+    };
+  }
+  public async deleteArtifact(record: ArtifactRecord): Promise<boolean> {
+    const result = await this.pool.query(
+      "DELETE FROM embody_platform_artifacts WHERE workspace_id=$1 AND artifact_id=$2 AND revision=$3 AND NOT pinned",
+      [record.workspaceId, record.artifactId, record.revision],
     );
     return (result.rowCount ?? 0) > 0;
   }
