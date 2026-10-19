@@ -35,11 +35,11 @@
     "@embody/core": "workspace:*",
     "@embody/cloud-contracts": "workspace:*",
     "@types/pg": "^8.23.1",
-    "pg": "^8.23.0",
+    "pg": "^8.23.1",
     "@embody/host": "workspace:*",
     "@embody/mcp": "workspace:*",
-    "fastify": "^5.12.5",
-    "jose": "^6.2.10"
+    "fastify": "^5.12.7",
+    "jose": "^6.2.12"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
