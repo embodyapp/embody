@@ -45,3 +45,25 @@ All on clean `2f37b5e`, with a disposable M03 fixture (Compose project `embody-m
 | `pnpm test:gateway-store` | passed **55**, 0 skipped (adds the PostgreSQL cursor conformance case) |
 | `pnpm test:mvp` | passed **549**, 0 skipped: postgres 16, gateway-store 55, cloud-contracts 106, auth 6, host 109, MCP 18, gateway **223**, CLI 16 |
 | `pnpm test:m11` | passed **10/10 cases, 15 builds** (adds `oversized-manifest` → `MANIFEST_INVALID`) |
+
+## Final review of `bd10e10`: B3
+
+The [final review](../M11-bd10e10/independent-final-review.md) accepted B1, B2 and the findings, and found **B3**. The PostgreSQL store refused a legitimate pin of an admitted artifact. The finding 8 freeze compared `manifest` and `provenance` with `JSON.stringify`, and the jsonb column reorders object keys.
+
+**Fixed in `12a4497`.**
+- The freeze now compares those two fields with the order-independent `canonical()`, and it also freezes `finishedAt` (N3).
+- N1 is reworded in BUILDS: up to 10 × `limit` failing rows per sweep; M16 alerts on `failed`. The N2 guidance for M12 is added there too.
+
+**Regression.** A new shared conformance case, "pins an admitted artifact using the record the store returned (review B3)". It covers a durable manifest and provenance in non-canonical key order, pin and unpin, and a frozen manifest and `finishedAt`.
+- On PostgreSQL it **fails with the old comparison** (`1 failed | 55 passed`, verified by reverting the line temporarily) and passes with the fix.
+- On the memory store it passes.
+
+**Results on clean `12a4497`:**
+
+| Command | Passed | Skipped |
+|---|---|---|
+| `pnpm test:postgres` | 16 | 0 |
+| `pnpm test:gateway-store` | **56** | 0 |
+| `pnpm test:mvp` | **551** (gateway 224, gateway-store 56) | 0 |
+
+`pnpm lint` and `format:check` passed. `test:m11` and a live run were not needed, as the review states.
