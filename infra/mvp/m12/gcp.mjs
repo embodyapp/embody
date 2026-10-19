@@ -208,6 +208,14 @@ export function createM12GcpProvider({
         },
       });
       await waitOperation(created, `${SQL}/projects/${project}/operations`, 240);
+      // The insert operation can finish before the instance accepts connections (run 74cea3
+      // saw PENDING_CREATE and ephemeral-certificate 409s): wait for RUNNABLE itself.
+      for (let i = 0; ; i++) {
+        const state = (await api(`${SQL}/projects/${project}/instances/${n.sql}`))?.state;
+        if (state === "RUNNABLE") break;
+        if (i >= 240) throw new Error(`Cloud SQL instance not runnable (${state})`);
+        await delay(5000);
+      }
       // Controller queue.
       await api(`${TASKS}/projects/${project}/locations/${REGION}/queues`, "POST", {
         name: `projects/${project}/locations/${REGION}/queues/${n.queue}`,
@@ -380,8 +388,26 @@ export function createM12GcpProvider({
       proxy = spawn(
         approval.proxy,
         ["--gcloud-auth", `--port=${port}`, "--address=127.0.0.1", context.connection],
-        { stdio: ["ignore", "ignore", "ignore"] },
+        { stdio: ["ignore", "pipe", "pipe"] },
       );
+      // Sanitized diagnostics only: HTTP status codes and the exit code, never the output.
+      const proxyStatus = { exit: null, statuses: [], line: "" };
+      const watch = (chunk) => {
+        for (const match of String(chunk).matchAll(/\b(400|401|403|404|409|429|500|503)\b/g))
+          if (!proxyStatus.statuses.includes(match[1])) proxyStatus.statuses.push(match[1]);
+        const failure = String(chunk)
+          .split("\n")
+          .find((l) => /error|failed|denied/i.test(l));
+        if (failure && !proxyStatus.line)
+          proxyStatus.line = failure
+            .replace(/[\w.%+-]+@[\w.-]+/g, "<account>")
+            .replace(/\b\d{1,3}(\.\d{1,3}){3}\b/g, "<ip>")
+            .replace(/(password|token)\S*/gi, "<redacted>")
+            .slice(-240);
+      };
+      proxy.stdout.on("data", watch);
+      proxy.stderr.on("data", watch);
+      proxy.on("exit", (code) => (proxyStatus.exit = code));
       const { Pool } = createRequire(
         new URL("../../../packages/gateway/package.json", import.meta.url),
       )("pg");
@@ -395,9 +421,12 @@ export function createM12GcpProvider({
         try {
           await admin.query("SELECT 1");
           break;
-        } catch {
-          if (i > 30) throw new Error("Cloud SQL proxy unavailable");
-          await delay(2000);
+        } catch (error) {
+          if (i > 60)
+            throw new Error(
+              `Cloud SQL proxy unavailable (pg ${error?.code ?? "?"}, proxy exit ${proxyStatus.exit}, statuses ${proxyStatus.statuses.join("/") || "none"}, state ${(await api(`${SQL}/projects/${project}/instances/${context.sql}`))?.state}: ${proxyStatus.line})`,
+            );
+          await delay(3000);
         }
       }
       const migratorPassword = randomBytes(24).toString("base64url");
