@@ -211,7 +211,7 @@ describe("MCP execution errors", () => {
   it("audits cancelled MCP calls as cancelled", async () => {
     let started!: () => void;
     const hostStarted = new Promise<void>((resolve) => (started = resolve));
-    const { call, audit } = await mcpCall((init) => {
+    const { call, audit, client } = await mcpCall((init) => {
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           init?.signal?.addEventListener("abort", () => controller.error(new Error("aborted")));
@@ -225,6 +225,9 @@ describe("MCP execution errors", () => {
     await hostStarted;
     controller.abort();
     await expect(pending).rejects.toThrow();
+    // Stateless MCP cancellation crosses replicas; disconnect the HTTP transport to abort
+    // the request-owned execution and publish its cancellation audit.
+    await client.close();
     await expect.poll(() => audit.records[0]?.outcome).toBe("cancelled");
   });
 

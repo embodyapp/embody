@@ -1,0 +1,24 @@
+{
+  "operatorAttested": true,
+  "controlDeletionRecordedAt": "2026-10-13T12:00:25.336Z",
+  "backendWrittenAfterNetworkRemovalAt": "2026-10-13T13:14:39.724Z",
+  "finalEmptyProviderInventoryAt": "2026-10-13T13:15:45.484Z",
+  "network": {
+    "initialFailure": "Subnetwork already being used by Google-managed serverless-ipv4-cloudrun addressReservations",
+    "providerRule": "Cannot manually delete reserved serverless addresses; wait 1-2 hours after Cloud Run resource deletion",
+    "documentation": "https://cloud.google.com/run/docs/configuring/vpc-direct-vpc#delete-subnet",
+    "resolution": "Delete workloads, jobs, SQL and NAT first; bounded Terraform retry with refreshed tokens/new plans; subnet and network removed after reservations released",
+    "stateLockDisabled": false,
+    "stalePartiallyAppliedPlanReused": false,
+    "paidWorkloadsRetainedForWait": false
+  },
+  "images": {
+    "initialPackageDeleteFailure": "Requested entity was not found, but provider listing still showed 72 image versions",
+    "resolution": "Delete immutable versions individually with owned fixture path validation; index/parent deletion before retrying 17 referenced child-manifest failures; then delete empty fixture package",
+    "finalImageVersionCount": 0,
+    "finalFixturePackageCount": 0
+  },
+  "rawIndexFileSha256": "09b29ab7b5c15adbf90ef7cc6377fdbd52c6965538d9936086a5af901f106f10",
+  "rawIndexHashVerification": "shasum -a 256 docs/mvp/evidence/M05-live-b429/image-index.oci; matches immutable root digest exactly",
+  "qualification": "These deletion/reconciliation events are operator-attested; the independently reviewed final provider metadata lists and fresh Terraform no-change result establish final absence. Exact SQL/NAT deletion wall-clock timestamps were not separately captured; conservative cost allowance assumes they remained billed until final empty inventory. Cloud Billing invoice remains OPEN. No credentials or private state contents included."
+}

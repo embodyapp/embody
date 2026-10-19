@@ -3,6 +3,7 @@ import { UnauthenticatedError, ForbiddenError, type Principal } from "@embody/co
 import { hasPermission } from "@embody/cloud-contracts";
 import { AuthChain, createGateway, type GatewayOptions, type RegisteredApp } from "./index.js";
 import { credentialHash, type GatewayStore, type WorkspaceCredential } from "./store.js";
+import { publicSigningKeys } from "./identity.js";
 
 interface RequestContext {
   credential: WorkspaceCredential;
@@ -20,6 +21,17 @@ export interface WorkspaceGatewayOptions extends Omit<
  * ALS snapshots are private to the request, not mutable shared per-workspace registry state.
  */
 export function createWorkspaceGateway(options: WorkspaceGatewayOptions) {
+  if (
+    options.token.algorithm !== "ES256" ||
+    options.token.key instanceof Uint8Array ||
+    options.token.key.type !== "private" ||
+    !options.token.kid ||
+    !options.token.publicJwks
+  )
+    throw new TypeError("Hosted gateway requires asymmetric signing identity and public JWKS");
+  const publicJwks = publicSigningKeys(options.token.publicJwks.keys);
+  if (!publicJwks.keys.some((key) => key.kid === options.token.kid))
+    throw new TypeError("Hosted active signing kid must be published");
   const context = new AsyncLocalStorage<RequestContext>();
   const current = () => {
     const value = context.getStore();
@@ -28,6 +40,7 @@ export function createWorkspaceGateway(options: WorkspaceGatewayOptions) {
   };
   const gateway = createGateway({
     ...options,
+    mcp: { actor: "agent-on-behalf" },
     environment: "production",
     catalogMaxAgeSeconds: 0,
     discoverUnavailable: true,
@@ -52,8 +65,16 @@ export function createWorkspaceGateway(options: WorkspaceGatewayOptions) {
     },
   });
   gateway.get("/health", () => ({ live: true }));
+  gateway.get("/.well-known/jwks.json", (_request, reply) => {
+    reply.header("cache-control", "public, max-age=60");
+    return publicJwks;
+  });
   gateway.addHook("onRequest", (request, reply, done) => {
-    if (request.routeOptions.url === "/health" && request.method === "GET") {
+    if (
+      (request.routeOptions.url === "/health" ||
+        request.routeOptions.url === "/.well-known/jwks.json") &&
+      request.method === "GET"
+    ) {
       done();
       return;
     }
