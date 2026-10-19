@@ -10,8 +10,8 @@ Environment: macOS (arm64), Docker Desktop 29.8.2 (8 GiB VM), Node 24.21.0, pnpm
 | `pnpm test:verification` | passed: 93, zero skips (M11 adds 7 mocked live-suite cases) |
 | `pnpm test:postgres` | passed: 16, zero skips |
 | `pnpm test:gateway-store` | passed: 54, zero skips (3 new PostgreSQL artifact-store conformance cases) |
-| `pnpm test:mvp` | passed: **537, zero skipped**: postgres 16, gateway-store 54, cloud-contracts 106, auth 6, host 109, MCP 18, gateway 212, CLI 16 |
-| `pnpm test:m11` | passed: **10/10 cases, 14 builds in 235 s** on local Docker through the Cloud Build emulator, zero skips; every `embody-m11-*`/`embody-sandbox-*` container and recipe-labelled image removed afterwards |
+| `pnpm test:mvp` | passed: **537, zero skipped**: postgres 16, gateway-store 54, cloud-contracts 106, auth 6, host 109, MCP 18, gateway 212, CLI 16 (phase 1); rerun on clean `5bf4178` after the live fixes: **538, zero skipped** (gateway 213) |
+| `pnpm test:m11` | passed: **10/10 cases, 14 builds in 235 s** (rerun on `5bf4178`: 10/10, 284 s) on local Docker through the Cloud Build emulator, zero skips; every `embody-m11-*`/`embody-sandbox-*` container and recipe-labelled image removed afterwards |
 
 The unit suites found one real defect before it reached the cloud: the Cloud Build `$` escaping used `replaceAll("$", "$$")`, which in JavaScript inserts a single `$`, so Cloud Build would have substituted the scripts' shell variables. Fixed with split/join and covered by a test. The M10 packer also (correctly) refused the first canary fixture because it contained a literal private key; the canary now assembles it at runtime.
 
