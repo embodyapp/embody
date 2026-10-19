@@ -481,8 +481,10 @@ export function artifactTransitionAllowed(prior: ArtifactRecord, next: ArtifactR
     next.imageReference === prior.imageReference &&
     next.manifestDigest === prior.manifestDigest &&
     next.sbomDigest === prior.sbomDigest &&
-    JSON.stringify(next.manifest) === JSON.stringify(prior.manifest) &&
-    JSON.stringify(next.provenance) === JSON.stringify(prior.provenance)
+    next.finishedAt === prior.finishedAt &&
+    // Order-independent: PostgreSQL jsonb reorders object keys (review B3).
+    canonical(next.manifest ?? null) === canonical(prior.manifest ?? null) &&
+    canonical(next.provenance ?? null) === canonical(prior.provenance ?? null)
   );
 }
 export function sameArtifactIdentity(a: ArtifactRecord, b: ArtifactRecord): boolean {

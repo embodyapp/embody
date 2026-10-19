@@ -98,6 +98,71 @@ export function artifactStoreConformance(
         (await store.updateArtifact({ ...admitted, pinnedBy: "rel_aaaaaaaa" }, 3)).pinnedBy,
       ).toBe("rel_aaaaaaaa");
     });
+    it("M11 pins an admitted artifact using the record the store returned (review B3)", async () => {
+      const created = await store.createArtifact(record());
+      // Key orders the JSON column will not preserve.
+      const admitted = await store.updateArtifact(
+        {
+          ...created,
+          buildId: "build-1",
+          state: "admitted",
+          imageDigest: digest(3),
+          imageReference: `us-central1-docker.pkg.dev/p0000/builds/ws/app@${digest(3)}`,
+          manifestDigest: digest(4),
+          sbomDigest: digest(5),
+          manifest: {
+            workflows: [
+              {
+                version: "0.1.0",
+                target: "app.followUp",
+                steps: [{ dependsOn: [], name: "remind" }],
+              },
+            ],
+            version: 1,
+            subscriptions: ["app.submitted"],
+            recipe: "embody-node24-pnpm-v1",
+            publishes: ["app.submitted"],
+            profile: "durable-v1",
+            nodeMajor: 24,
+            entrypoint: "dist/src/index.js",
+            catalogDigest: digest(6),
+            appVersion: "0.1.0",
+            appId: "my-app",
+          },
+          provenance: {
+            startTime: t0.toISOString(),
+            configDigest: digest(2),
+            buildId: "build-1",
+            builder: "b@p.iam.gserviceaccount.com",
+          },
+          finishedAt: t0.toISOString(),
+        },
+        1,
+      );
+      const pinned = await store.updateArtifact(
+        { ...admitted, pinnedBy: "rel_aaaaaaaa" },
+        admitted.revision,
+      );
+      expect(pinned.pinnedBy).toBe("rel_aaaaaaaa");
+      const reread = await store.artifact(workspace, "app_kanban0001", created.artifactId);
+      const { pinnedBy: _pin, ...withoutPin } = reread!;
+      void _pin;
+      const unpinned = await store.updateArtifact(withoutPin, reread!.revision);
+      expect(unpinned.pinnedBy).toBeUndefined();
+      // The decision itself stays frozen, whatever the key order.
+      await expect(
+        store.updateArtifact(
+          { ...unpinned, manifest: { ...unpinned.manifest!, publishes: ["app.forged"] } },
+          unpinned.revision,
+        ),
+      ).rejects.toThrow(/immutable/);
+      await expect(
+        store.updateArtifact(
+          { ...unpinned, finishedAt: new Date(0).toISOString() },
+          unpinned.revision,
+        ),
+      ).rejects.toThrow(/immutable/);
+    });
     it("M11 pages expired artifacts by cursor in a stable order (review B2)", async () => {
       const base = Date.parse("1990-01-01T00:00:00.000Z");
       const ids: string[] = [];
