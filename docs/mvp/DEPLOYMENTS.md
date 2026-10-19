@@ -152,7 +152,31 @@ Clocks: leases and due times compare the workers' clocks (NTP on Cloud Run); the
 | after a stage committed, before the ACK | redelivery is harmless |
 | after promotion committed, before the ACK | redelivery is terminal: one release, generation + 1 once |
 
-Every case ends with exactly one active deployment, one build, one candidate, one generation step and no pending tasks. The live suite (`test:mvp:cloud` suite `m12`) adds the real Cloud Tasks queue, OIDC delivery to a Cloud Run worker, Cloud SQL and Cloud Build.
+Every case ends with exactly one active deployment, one build, one candidate, one generation step and no pending tasks.
+
+### Live suite (`test:mvp:cloud` suite `m12`, owner-approved budget only)
+
+[`infra/mvp/m12`](../../infra/mvp/m12/): `qualify.mjs` (guards, projection, evaluators, cases), `gcp.mjs` (provider, composed on the M11 one) and `worker.mjs` (the worker entry, run from the `Dockerfile.m05` repository image). It creates, run-scoped under the `embody-test-m12` prefix in `embody-cloud`/`us-central1`: the M11 build resources (builder, read signer, no-role runtime identity, recipe and builds repositories, source/output/logs buckets), a `db-f1-micro` Cloud SQL platform database (no authorized networks, TLS only, restricted maintenance and runtime roles as in M03), a secret with the worker's database URL, the controller queue, a worker (controller) identity, a controller invoker and the Cloud Run deployment worker (min 0, max 2). The worker's two project-level grants (`cloudbuild.builds.editor`, `cloudsql.client`) are removed before its identity is deleted, and the run checks project IAM is unchanged. The operator machine plays the gateway (Cloud SQL Auth Proxy) and closes it after each request.
+
+| Case | What is real | Pass |
+|---|---|---|
+| `M12.live.iam` | provider IAM | worker holds exactly the controller grants; the invoker only `run.invoker` on the worker |
+| `M12.a.c.chain-zero-gateway` | queue, OIDC, worker, Cloud SQL, Cloud Build | gateway gone after `202`; four duplicate tasks; the worker exits after its first claim, after creating the build (before recording it) and after promotion (before the ACK); one active deployment, one build, one candidate, generation + 1, three faults fired |
+| `M12.a.lost-task` | same | committed without its task; a status read through a fresh gateway recovers it to active |
+| `M12.a.rolled-back` | queue, Cloud SQL | the task of a rolled-back submission does nothing; source unpinned |
+| `M12.b.cancel-during-build` | Cloud Build | cancelled while building: provider build `CANCELLED`, artifact `CANCELLED`, no release, no candidate |
+| `M12.b.promotion-race` | Cloud SQL, two worker instances | two deployments of one app: one active, one `STALE_GENERATION`, one generation step |
+| `M12.c.queue-pause` | queue | a paused queue holds a building deployment for two minutes; after resume it completes |
+| `M12.d.ingress` | Cloud Run IAM, OIDC | anonymous, operator, wrong-audience and other-identity tokens refused; malicious body `400`; foreign workspace `missing`; no state change |
+| `cleanup` | inventory | every run resource gone, project IAM unchanged |
+
+Faults are rows in a fixture table the qualification worker reads (`m12_fixture_faults`); the process exits at the named point once, and Cloud Tasks redelivers to a new instance. Expired-token rejection and the full kill matrix are local (`test:m12`): a live provider token cannot be made to expire on demand.
+
+## Cost
+
+**Running (worksheet delta)**, list prices as in the [M09 worksheet](./M09-QUALIFICATION.md#cost-worksheet), 5 apps × 20 deployments a month: about 50 worker requests per deployment (polls, lease wakes) at about 0.2 vCPU-s each plus about 5 cold starts of about 3 vCPU-s: 2,500 vCPU-s, **$0.06**; memory and requests **$0.01**; Cloud Tasks about 8,000 operations (inside the free million) **$0.00**; worker image about 0.5 GiB **$0.07**; logs about 50 MiB **$0.03**. **Delta ≈ $0.17/month** (worksheet ≈ $20.03 → ≈ $20.20; ceiling $50). The gateway gains no cost: it only enqueues one task per submission. Builds are the M11 line.
+
+**One-off live qualification, conservative:** six builds at the full 600 s timeout ($0.36), Cloud SQL `db-f1-micro` with storage and IPv4 for four hours ($0.09), plus $0.40 for the worker, queue, images for a day, buckets, logs and egress: **$0.85 per run** (`m12Projection`). The suite refuses to start above the approved budget (proposed cap **$6**, which covers several runs if the first ones fail closed, as M11's did) and fails if the measured estimate exceeds it.
 
 ## Not yet proven / later tasks
 

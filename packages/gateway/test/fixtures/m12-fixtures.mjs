@@ -32,12 +32,14 @@ export async function createFixtureTables(migrationUrl, runtimeRole) {
     await pool.query(`CREATE TABLE IF NOT EXISTS m12_fixture_tasks (name text PRIMARY KEY, schedule_at timestamptz NOT NULL, body jsonb NOT NULL, delivered boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT clock_timestamp());
       CREATE TABLE IF NOT EXISTS m12_fixture_builds (id text PRIMARY KEY, tag text NOT NULL, config jsonb NOT NULL, status text NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp());
       CREATE TABLE IF NOT EXISTS m12_fixture_outputs (path text PRIMARY KEY, bytes bytea NOT NULL);
-      CREATE TABLE IF NOT EXISTS m12_fixture_resources (name text PRIMARY KEY, labels jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp());`);
+      CREATE TABLE IF NOT EXISTS m12_fixture_resources (name text PRIMARY KEY, labels jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp());
+      CREATE TABLE IF NOT EXISTS m12_fixture_faults (deployment_key text NOT NULL, point text NOT NULL, fired timestamptz, PRIMARY KEY (deployment_key, point));`);
     for (const table of [
       "m12_fixture_tasks",
       "m12_fixture_builds",
       "m12_fixture_outputs",
       "m12_fixture_resources",
+      "m12_fixture_faults",
     ])
       await pool.query(`GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE ${table} TO ${role}`);
   } finally {

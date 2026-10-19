@@ -1,13 +1,16 @@
 import { access } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { URL, pathToFileURL } from "node:url";
 import { evidence, main, requireVariables, SuiteFailure } from "./verification.mjs";
 import { m09Approval, runM09Suite } from "../infra/mvp/m09/qualify.mjs";
 import { m10Approval } from "../infra/mvp/m10/qualify.mjs";
 import { m11Approval } from "../infra/mvp/m11/qualify.mjs";
+import { m12Approval } from "../infra/mvp/m12/qualify.mjs";
 
-// Real-provider qualification. M09, M10 and M11 exist; later suites (M12–M17, M20, M21 cloud cases)
+// Real-provider qualification. M09–M12 exist; later suites (M13–M17, M20, M21 cloud cases)
 // must be added here before this gate can stand for a release (M18). Requesting one fails closed.
-const IMPLEMENTED = ["m09", "m10", "m11"];
-const PENDING = ["m12", "m13", "m14", "m15", "m16", "m17", "m20", "m21"];
+const IMPLEMENTED = ["m09", "m10", "m11", "m12"];
+const PENDING = ["m13", "m14", "m15", "m16", "m17", "m20", "m21"];
 
 await main("mvp-cloud", async () => {
   requireVariables([
@@ -22,6 +25,7 @@ await main("mvp-cloud", async () => {
   if (suites.includes("m09")) m09Approval(process.env);
   if (suites.includes("m10")) m10Approval(process.env);
   if (suites.includes("m11")) m11Approval(process.env);
+  if (suites.includes("m12")) m12Approval(process.env);
   // Either the operator's own gcloud login (no key file, as in M05) or a credential file.
   if (process.env.EMBODY_MVP_CLOUD_CREDENTIALS !== "gcloud") {
     requireVariables(["GOOGLE_APPLICATION_CREDENTIALS"]);
@@ -39,6 +43,75 @@ await main("mvp-cloud", async () => {
   if (suites.length !== 1)
     throw new Error("Run one cloud suite per invocation; no resources created");
   const credentials = process.env.EMBODY_MVP_CLOUD_CREDENTIALS === "gcloud" ? "gcloud" : "adc";
+  if (suites[0] === "m12") {
+    const [
+      { createM12GcpProvider },
+      { CLOUD_BUILDERS_DOCKER },
+      { runM12Suite },
+      gateway,
+      contracts,
+      scaffold,
+      { stageRecipe },
+      { startFrameworkRegistry },
+      { createFixture },
+      jose,
+    ] = await Promise.all([
+      import("../infra/mvp/m12/gcp.mjs"),
+      import("../infra/mvp/m11/gcp.mjs"),
+      import("../infra/mvp/m12/qualify.mjs"),
+      import("../packages/gateway/dist/index.js"),
+      import("../packages/cloud-contracts/dist/index.js"),
+      import("../packages/create-embody-app/dist/index.js"),
+      import("../infra/mvp/builder/stage.mjs"),
+      import("../infra/mvp/builder/registry.mjs"),
+      import("../infra/mvp/m11/fixtures.mjs"),
+      import(
+        pathToFileURL(
+          createRequire(new URL("../packages/gateway/package.json", import.meta.url)).resolve(
+            "jose",
+          ),
+        ).href
+      ),
+    ]);
+    // The operator's in-process gateway signs nothing that leaves this machine; a throwaway key.
+    const pair = await jose.generateKeyPair("ES256", { extractable: true });
+    const signingIdentity = await gateway.hostedSigningIdentity({
+      issuer: "m12-qualification",
+      kid: "m12",
+      privateKeyPem: await jose.exportPKCS8(pair.privateKey),
+      publicKeys: [
+        { ...(await jose.exportJWK(pair.publicKey)), kid: "m12", alg: "ES256", use: "sig" },
+      ],
+    });
+    const provider = createM12GcpProvider({
+      project: process.env.EMBODY_MVP_CLOUD_PROJECT,
+      gateway,
+      credentials,
+    });
+    const result = await runM12Suite(process.env, provider, {
+      gateway,
+      contracts,
+      createApp: scaffold.createApp,
+      stageRecipe,
+      startFrameworkRegistry,
+      createFixture,
+      cloudBuildersDocker: CLOUD_BUILDERS_DOCKER,
+      signingIdentity,
+    });
+    const outcomes = Object.values(result.cases);
+    const counts = {
+      passed: outcomes.filter((value) => value.pass === true).length,
+      failed: outcomes.filter((value) => value.pass !== true).length,
+      skipped: 0,
+    };
+    const details = { suites, releaseGate: false, pendingSuites: PENDING, m12: result };
+    if (!result.pass) {
+      await evidence("mvp-cloud-m12", "failed", counts, [], details);
+      throw new SuiteFailure("M12 cloud qualification failed; see sanitized case results", counts);
+    }
+    await evidence("mvp-cloud-m12", "passed", counts, [], details);
+    return;
+  }
   if (suites[0] === "m11") {
     const [
       { createM11GcpProvider, CLOUD_BUILDERS_DOCKER },

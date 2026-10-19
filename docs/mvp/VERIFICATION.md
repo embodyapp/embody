@@ -9,7 +9,7 @@
 - Missing required DB/cloud credentials must fail the selected gate, not silently skip it. Local unit suites may explicitly skip optional environments, but cannot satisfy release gates.
 - Tests use injected clocks/barriers for determinism. Real cloud scale-down uses bounded observation of provider metrics, not an arbitrary sleep followed by an assumption.
 - Evidence must not include tokens, connection strings, source secrets or customer payloads.
-- M03 implements the local/CI runners documented in [TESTING.md](./TESTING.md). Later tasks extend their explicit suite list. The cloud entry point runs only implemented suites (M09, M10 and M11 so far) and fails closed for the rest; its evidence is not a release gate until M10–M17 and M19–M21 cloud suites exist.
+- M03 implements the local/CI runners documented in [TESTING.md](./TESTING.md). Later tasks extend their explicit suite list. The cloud entry point runs only implemented suites (M09–M12 so far) and fails closed for the rest; its evidence is not a release gate until M10–M17 and M19–M21 cloud suites exist.
 
 ## Test layers and commands
 
@@ -21,7 +21,7 @@
 | MVP contracts/integration | `pnpm test:mvp` | Current contracts/gateway + mandatory DB/isolation/failure-path suites; later tasks add source/build adversaries, controller recovery and effect ledgers |
 | Deployment controller (local) | `pnpm test:m12` | Real platform PostgreSQL: crash matrix with SIGKILLed processes (commit/enqueue, resource/receipt, ACK), duplicate/concurrent/cancellation races, malicious tasks and ingress, zero skips ([deployments](./DEPLOYMENTS.md)). Fake queue and build provider; the real queue, worker and builds are the live suite's |
 | Isolated build (local) | `pnpm test:m11` | Exact build plan on local Docker: clean scaffolds admitted and runnable, adversarial builds rejected or contained, zero skips. Recipe/admission evidence only, not provider IAM ([builds](./BUILDS.md)) |
-| Real provider qualification | `pnpm test:mvp:cloud`: M09 ([runbook](./M09-QUALIFICATION.md)), M10 ([source storage](./SOURCES.md)) and M11 ([builds](./BUILDS.md)) suites implemented, later suites fail closed | Fails on missing project/budget/credentials, on budgets above $25, on unimplemented suites and on any failed case; M10–M17 must add build/deploy/restore/zero-instance checks before it can stand for a release |
+| Real provider qualification | `pnpm test:mvp:cloud`: M09 ([runbook](./M09-QUALIFICATION.md)), M10 ([source storage](./SOURCES.md)), M11 ([builds](./BUILDS.md)) and M12 ([deployments](./DEPLOYMENTS.md)) suites implemented, later suites fail closed | Fails on missing project/budget/credentials, on budgets above $25, on unimplemented suites and on any failed case; M10–M17 must add build/deploy/restore/zero-instance checks before it can stand for a release |
 | Real client smoke | Versioned fixture and documented manual steps | Named MCP product/version, setup, cold call, quiescence and known limitations |
 | Release audit | Proposed evidence checker plus human review | Every task/case has matching candidate evidence; customer/operating approvals are manual |
 
