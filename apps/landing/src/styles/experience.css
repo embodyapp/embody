@@ -29,7 +29,10 @@ p { line-height: 1.8; }
 .brand { display: inline-flex; gap: 8px; align-items: center; font: 700 31px var(--font-display); letter-spacing: -1.4px; }
 .brand-mark { width: 32px; height: 34px; display: inline-grid; place-items: center; border: 1.8px solid var(--text-main); border-radius: 10px 10px 10px 3px; background: var(--color-sun-yellow); font: 800 31px/.8 var(--font-display); transform: rotate(-6deg); letter-spacing: -2px; padding-right: 2px; }
 .brand-period { color: var(--color-terracotta); margin-left: -8px; }
-.site-header nav { display: flex; gap: 30px; font-size: 12px; font-weight: 600; }
+.site-header nav { display: flex; align-items: center; gap: 22px; font-size: 12px; font-weight: 600; }
+.site-header nav a { display: inline-flex; align-items: center; min-height: 44px; white-space: nowrap; }
+.site-header > .brand, .site-header > .button { flex-shrink: 0; }
+.site-header nav a:hover { text-decoration: underline; text-underline-offset: 5px; }
 .site-header nav a:hover, .site-footer a:hover { color: #a94a2e; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 24px; padding: 17px 24px; border-radius: 9px; border: 1.5px solid var(--text-main); font-size: 12px; font-weight: 700; line-height: 1.5; transition: transform .2s, box-shadow .2s, background .2s; }
 .button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 3px 3px 0 var(--text-main); }
@@ -304,6 +307,8 @@ input, select { width: 100%; border: 1px solid #dcd2c5; background: #fdfaf5; pad
 @media (min-width: 1500px) { .hero { padding-top: 90px; } }
 @media (max-width: 1050px) {
   .wrap { width: calc(100% - 48px); }
+  .site-header { flex-wrap: wrap; gap: 12px 24px; padding-block: 18px 12px; }
+  .site-header nav { order: 3; flex-basis: 100%; justify-content: center; flex-wrap: wrap; gap: 4px 24px; }
   .doodle-left { left: 0; width: 80px; }
   .doodle-right { right: 0; width: 90px; }
   .sales-layout { grid-template-columns: 1fr 210px; gap: 18px; }
@@ -321,7 +326,7 @@ input, select { width: 100%; border: 1px solid #dcd2c5; background: #fdfaf5; pad
   .wrap { width: calc(100% - 36px); }
   .site-header { min-height: 80px; flex-wrap: wrap; padding-block: 18px 16px; gap: 18px 12px; }
   .brand { font-size: 28px; }
-  .site-header nav { display: flex; order: 3; flex-basis: 100%; flex-wrap: wrap; justify-content: space-between; gap: 12px; font-size: 10px; }
+  .site-header nav { justify-content: center; gap: 0 18px; font-size: 11px; }
   .site-header nav a { padding-block: 8px; }
   .site-header .button { font-size: 10px; }
   .hero { padding: 48px 0 45px; }

@@ -2,6 +2,7 @@ import './styles/experience.css';
 import './styles/guided-demo.css';
 import './styles/personal-software.css';
 import './styles/chat-control.css';
+import './styles/pain-solution.css';
 import posthog, { posthogEnabled } from './posthog';
 
 const track = (event: string, properties?: Record<string, unknown>) => {

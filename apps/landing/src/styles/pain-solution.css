@@ -1,0 +1,34 @@
+.pain-section { padding-block: 55px 35px; }
+.pain-section .section-heading { text-align: center; margin-bottom: 32px; }
+.pain-section .section-heading h2 { margin-top: 12px; }
+.pain-section .section-heading p { margin-top: 18px; color: var(--muted); font-size: 14px; }
+.pain-solution-diagrams-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.architecture-card { min-width: 0; overflow: hidden; border: 1.5px solid var(--text-main); border-radius: 16px; background: #fffdf9; box-shadow: 5px 6px 0 #e8dfd1; }
+.architecture-card header { padding: 28px 28px 18px; }
+.architecture-label { display: inline-block; padding: 7px 10px; border-radius: 6px; font-size: 9px; font-weight: 800; letter-spacing: 1px; background: #f8e0d6; color: #873d2f; }
+.architecture-solution .architecture-label { background: #dcece1; color: #315d47; }
+.architecture-card h3 { font-size: clamp(23px, 2.5vw, 29px); font-weight: 600; letter-spacing: -.7px; margin-top: 17px; }
+.architecture-card header p { color: var(--muted); font-size: 12px; line-height: 1.8; margin-top: 10px; }
+.architecture-card svg { display: block; width: calc(100% - 24px); height: auto; margin: 0 12px 18px; background: radial-gradient(circle, #bca79833 1px, transparent 1px); background-size: 14px 14px; }
+.architecture-wires { fill: none; stroke-width: 2; }
+.tangled-wires { stroke: #bd7765; stroke-dasharray: 5 5; opacity: .65; }
+.clean-wires { stroke: #608e75; stroke-width: 2.5; }
+.architecture-card svg text { font-family: var(--font-body); text-anchor: middle; fill: var(--text-main); font-size: 12px; font-weight: 700; }
+.architecture-card svg .architecture-owner { font-size: 9px; font-weight: 500; fill: var(--muted); }
+.architecture-node rect { fill: #fbefe9; stroke: #ccac9f; stroke-width: 1.3; }
+.architecture-solution .architecture-node rect { fill: #eaf2ec; stroke: #9ebca9; }
+.architecture-output rect { fill: #fffaf6; }
+.architecture-card .architecture-output text { font-size: 11px; }
+.architecture-alert rect { fill: #fff1e8; stroke: #dba18c; }
+.architecture-card .architecture-alert text { font-size: 10px; fill: #873d2f; }
+.architecture-hub rect { fill: #d4e7d9; stroke: #375e48; stroke-width: 1.5; }
+.architecture-card .architecture-hub text { font-family: var(--font-display); font-size: 26px; }
+.architecture-card .architecture-hub .hub-subtitle { font-family: var(--font-body); font-size: 8px; letter-spacing: 2px; }
+.architecture-card footer { padding: 17px 22px; border-top: 1px solid var(--line); background: #fcf3ed; font-size: 11px; line-height: 1.7; text-align: center; }
+.architecture-solution footer { background: #edf4ee; }
+.architecture-disclosure { margin: 21px auto 0; max-width: 800px; font-size: 10px; color: var(--muted); text-align: center; line-height: 1.8; }
+@media (max-width: 760px) {
+  .pain-solution-diagrams-grid { grid-template-columns: 1fr; gap: 22px; }
+  .architecture-card header { padding: 24px 22px 18px; }
+  .pain-section { padding-top: 35px; }
+}
