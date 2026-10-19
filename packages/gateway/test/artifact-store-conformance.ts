@@ -81,10 +81,54 @@ export function artifactStoreConformance(
       await expect(
         store.updateArtifact({ ...admitted, imageDigest: digest(4) }, 3),
       ).rejects.toThrow(/immutable/);
-      expect(await store.artifactDigests(workspace, "app_kanban0001")).toEqual(
-        new Set([digest(3)]),
-      );
-      expect((await store.artifactDigests(workspace, "app_other00001")).size).toBe(0);
+      const keys = await store.artifactKeys(workspace, "app_kanban0001");
+      expect(keys.digests).toEqual(new Set([digest(3)]));
+      expect(keys.artifactIds).toEqual(new Set([created.artifactId]));
+      expect((await store.artifactKeys(workspace, "app_other00001")).artifactIds.size).toBe(0);
+      // A settled decision is frozen; only retention fields may change (review finding 8).
+      for (const change of [
+        { state: "rejected" as const, error: "BUILD_FAILED" as const },
+        { imageReference: "other@sha256:0" },
+        { manifestDigest: digest(7) },
+      ])
+        await expect(store.updateArtifact({ ...admitted, ...change }, 3)).rejects.toThrow(
+          /immutable/,
+        );
+      expect(
+        (await store.updateArtifact({ ...admitted, pinnedBy: "rel_aaaaaaaa" }, 3)).pinnedBy,
+      ).toBe("rel_aaaaaaaa");
+    });
+    it("M11 pages expired artifacts by cursor in a stable order (review B2)", async () => {
+      const base = Date.parse("1990-01-01T00:00:00.000Z");
+      const ids: string[] = [];
+      for (let n = 0; n < 3; n++)
+        ids.push(
+          (
+            await store.createArtifact(
+              record({
+                attempt: n + 1,
+                // Two rows share a retainUntil: the tie breaks on artifact ID.
+                retainUntil: new Date(base + Math.min(n, 1) * 1000).toISOString(),
+              }),
+            )
+          ).artifactId,
+        );
+      const now = new Date(base + 10_000);
+      const seen: string[] = [];
+      let after;
+      for (let page = 0; page < 1000; page++) {
+        const rows = await store.expiredArtifacts(now, 2, after);
+        if (rows.length === 0) break;
+        for (const row of rows) if (row.workspaceId === workspace) seen.push(row.artifactId);
+        const last = rows[rows.length - 1]!;
+        after = {
+          retainUntil: last.retainUntil,
+          workspaceId: last.workspaceId,
+          artifactId: last.artifactId,
+        };
+      }
+      const tied = [ids[1]!, ids[2]!].sort();
+      expect(seen).toEqual([ids[0]!, ...tied]);
     });
     it("M11 lists expired unpinned artifacts and fences purges", async () => {
       const a = await store.createArtifact(

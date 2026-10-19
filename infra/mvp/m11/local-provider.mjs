@@ -24,6 +24,7 @@ export class LocalBuildProvider {
    * to one the prepare container can reach. `dockerSteps`: images that get the Docker socket.
    */
   constructor({
+    TooLarge = Error,
     scratch,
     outputBucket,
     dockerImage,
@@ -32,6 +33,7 @@ export class LocalBuildProvider {
     imageAliases = {},
   }) {
     this.imageAliases = imageAliases;
+    this.TooLarge = TooLarge;
     this.slots = 2;
     this.queue = [];
     this.scratch = scratch;
@@ -249,7 +251,7 @@ export class LocalBuildProvider {
   async readOutput(path, maxBytes) {
     try {
       const file = join(this.bucketDir, path);
-      if ((await stat(file)).size > maxBytes) throw new Error("Build output too large");
+      if ((await stat(file)).size > maxBytes) throw new this.TooLarge();
       return new Uint8Array(await readFile(file));
     } catch (error) {
       if (error.code === "ENOENT") return null;
@@ -266,12 +268,17 @@ export class LocalBuildProvider {
     });
   }
   async readLog(buildId, logsBucket, maxBytes) {
-    const bytes = await this.readOutput(
-      `${logsBucket.replace(/^gs:\/\/[^/]+\//, "")}/log-${buildId}.txt`,
-      maxBytes,
-    );
-    return bytes ? Buffer.from(bytes).toString("utf8") : null;
+    try {
+      const bytes = await readFile(
+        join(this.bucketDir, `${logsBucket.replace(/^gs:\/\/[^/]+\//, "")}/log-${buildId}.txt`),
+      );
+      return Buffer.from(bytes.subarray(0, maxBytes)).toString("utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    }
   }
+
   async deleteImage(path, digest) {
     const [workspaceId, appId] = path.split("/");
     const ids = docker([

@@ -75,9 +75,11 @@ try {
     redirect: "error",
     signal: AbortSignal.timeout(30_000),
   });
+  // 400/403 on a signed URL usually means it expired while the build was queued: a platform
+  // delay, so retryable. Content problems are caught by the digest check below.
   if (!response.ok)
     await reject(
-      response.status >= 500 ? "DEPENDENCY_UNAVAILABLE" : "SOURCE_INVALID",
+      response.status === 404 ? "SOURCE_INVALID" : "DEPENDENCY_UNAVAILABLE",
       `source fetch ${response.status}`,
     );
   archive = new Uint8Array(await response.arrayBuffer());
@@ -118,6 +120,8 @@ const pnpmArgs = [
   `--config.@embody:registry=${registry.url}`,
   "--config.ignore-pnpmfile=true",
   "--config.ignore-scripts=true",
+  // Never download another pnpm or a runtime because the project asks for one.
+  "--config.manage-package-manager-versions=false",
 ];
 try {
   const fetched = await run("pnpm", ["fetch", "--frozen-lockfile", ...pnpmArgs], {

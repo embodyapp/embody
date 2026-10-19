@@ -134,6 +134,8 @@ mkdir -p "$W/sandbox"
 { if timeout -k 10 ${BUILD_RECIPE.sandboxSeconds} docker start -a "$N" 2>&1; then st=0; else st=$?; fi; echo "$st" > "$W/sandbox/status"; } | { head -c ${BUILD_RECIPE.maxLogBytes}; cat >/dev/null; }
 status=$(cat "$W/sandbox/status")
 echo "embody: sandbox exit $status"
+# timeout(1) exits 124 (or 137 after -k): report it as the build timeout, not a generic failure.
+if [ "$status" = 124 ] || [ "$status" = 137 ]; then mkdir -p "\${BUILDER_OUTPUT:-/builder/outputs}"; printf '{"rejected":"BUILD_TIMEOUT"}' > "\${BUILDER_OUTPUT:-/builder/outputs}/output"; fi
 docker kill "$N" >/dev/null 2>&1 || true
 if [ "$status" != 0 ]; then
   docker rm -f "$N" >/dev/null 2>&1 || true
@@ -163,6 +165,7 @@ mkdir -p "$W/assemble/context" "$W/admit"
 tar -xo -C "$W/assemble/context" -f "$W/sandbox/app.tar"
 : > "$W/admit/manifest.json"
 { tar -xO -f "$W/sandbox/manifest.tar" manifest.json 2>/dev/null || true; } | head -c ${BUILD_RECIPE.maxManifestBytes + 1} > "$W/admit/manifest.json"
+if [ "$(stat -c %s "$W/admit/manifest.json")" -gt ${BUILD_RECIPE.maxManifestBytes} ]; then echo "embody: manifest exceeds limit"; printf '{"rejected":"MANIFEST_INVALID"}' > "$OUT/output"; exit 1; fi
 cp "$W/inputs/sbom.json" "$W/admit/sbom.json"
 cat > "$W/assemble/Dockerfile" <<'EMBODY_DOCKERFILE'
 ARG RUNTIME_IMAGE
@@ -374,6 +377,13 @@ export class BuildProviderError extends Error {
     this.name = "BuildProviderError";
   }
 }
+/** An output object larger than the caller's bound: a property of the build, not an outage. */
+export class BuildOutputTooLargeError extends BuildProviderError {
+  public constructor() {
+    super("Build output too large");
+    this.name = "BuildOutputTooLargeError";
+  }
+}
 
 // ---------------------------------------------------------------------------------------------
 // Artifact records.
@@ -432,11 +442,45 @@ export interface ArtifactStore {
   ): Promise<ArtifactRecord | null>;
   /** CAS on revision; identity fields are immutable; refuses purging records. */
   updateArtifact(next: ArtifactRecord, expectedRevision: number): Promise<ArtifactRecord>;
-  /** Expired unpinned records, including purging tombstones. */
-  expiredArtifacts(now: Date, limit: number): Promise<ArtifactRecord[]>;
-  /** Image digests of every record (any state) of the app, for orphan detection. */
-  artifactDigests(workspaceId: string, appId: string): Promise<ReadonlySet<string>>;
+  /**
+   * Expired unpinned records, including purging tombstones, ordered by (retainUntil,
+   * workspaceId, artifactId) and strictly after `after` when given, so a sweep can page past
+   * rows it cannot settle instead of seeing them first forever.
+   */
+  expiredArtifacts(now: Date, limit: number, after?: ArtifactCursor): Promise<ArtifactRecord[]>;
+  /**
+   * Image digests and artifact IDs of every record (any state) of the app, for orphan
+   * detection: an image is kept while a record references its digest or carries its tag.
+   */
+  artifactKeys(
+    workspaceId: string,
+    appId: string,
+  ): Promise<{ readonly digests: ReadonlySet<string>; readonly artifactIds: ReadonlySet<string> }>;
   deleteArtifact(record: ArtifactRecord): Promise<boolean>;
+}
+export interface ArtifactCursor {
+  readonly retainUntil: string;
+  readonly workspaceId: string;
+  readonly artifactId: string;
+}
+/**
+ * Allowed record changes: `building` may become `admitted` or `rejected` once; after that the
+ * decision (state, error, image reference, manifest, digests, provenance) is frozen and only
+ * retention fields (pin, retainUntil, purging) may change.
+ */
+export function artifactTransitionAllowed(prior: ArtifactRecord, next: ArtifactRecord): boolean {
+  if (!sameArtifactIdentity(prior, next)) return false;
+  if (prior.state === "building") return true;
+  return (
+    next.state === prior.state &&
+    next.error === prior.error &&
+    next.imageDigest === prior.imageDigest &&
+    next.imageReference === prior.imageReference &&
+    next.manifestDigest === prior.manifestDigest &&
+    next.sbomDigest === prior.sbomDigest &&
+    JSON.stringify(next.manifest) === JSON.stringify(prior.manifest) &&
+    JSON.stringify(next.provenance) === JSON.stringify(prior.provenance)
+  );
 }
 export function sameArtifactIdentity(a: ArtifactRecord, b: ArtifactRecord): boolean {
   return (
@@ -563,8 +607,11 @@ export async function decideAdmission(input: {
   if (build.status === "INTERNAL_ERROR") return reject("DEPENDENCY_UNAVAILABLE");
   if (build.status !== "SUCCESS") {
     if (typeof prepared === "string") return reject(prepared);
+    const sandboxed = parseJson(build.stepOutputs[1]) as { rejected?: unknown } | undefined;
+    if (sandboxed?.rejected === "BUILD_TIMEOUT") return reject("BUILD_TIMEOUT");
     const assembled = parseJson(build.stepOutputs[2]) as { rejected?: unknown } | undefined;
     if (assembled?.rejected === "OUTPUT_LIMIT") return reject("OUTPUT_LIMIT");
+    if (assembled?.rejected === "MANIFEST_INVALID") return reject("MANIFEST_INVALID");
     return reject("BUILD_FAILED");
   }
   if (!prepared || typeof prepared === "string") return reject("PROVENANCE_INVALID");
@@ -582,14 +629,25 @@ export async function decideAdmission(input: {
   if ((assembled.outputBytes as number) > BUILD_RECIPE.maxOutputBytes)
     return reject("OUTPUT_LIMIT");
 
-  const manifestBytes = await input.readOutput(
+  // Oversized objects are a deterministic property of the build: reject, never throw.
+  const bounded = async (path: string, maxBytes: number) => {
+    try {
+      return await input.readOutput(path, maxBytes);
+    } catch (error) {
+      if (error instanceof BuildOutputTooLargeError) return "too-large" as const;
+      throw error;
+    }
+  };
+  const manifestBytes = await bounded(
     `${plan.outputPrefix}manifest.json`,
     BUILD_RECIPE.maxManifestBytes,
   );
-  if (!manifestBytes || manifestBytes.byteLength === 0) return reject("MANIFEST_INVALID");
+  if (manifestBytes === "too-large" || !manifestBytes || manifestBytes.byteLength === 0)
+    return reject("MANIFEST_INVALID");
   if (sha256(manifestBytes) !== assembled.manifestDigest) return reject("MANIFEST_MISMATCH");
-  const sbomBytes = await input.readOutput(`${plan.outputPrefix}sbom.json`, 16 * 1024 * 1024);
-  if (!sbomBytes || sha256(sbomBytes) !== prepared.sbomDigest) return reject("MANIFEST_MISMATCH");
+  const sbomBytes = await bounded(`${plan.outputPrefix}sbom.json`, 16 * 1024 * 1024);
+  if (sbomBytes === "too-large" || !sbomBytes || sha256(sbomBytes) !== prepared.sbomDigest)
+    return reject("MANIFEST_MISMATCH");
 
   let output;
   let catalog;
@@ -791,9 +849,14 @@ export class BuildAdmission {
     // Crash between submit and record: the provider tag finds the earlier build.
     let buildId = await this.options.provider.find(plan.tag);
     if (!buildId) {
+      // Never outlive the source record (M10 F2): an unpinned source expires at retainUntil.
+      const nowMs = this.clock.now().getTime();
+      const limit = source.pinnedBy ? Infinity : Date.parse(source.retainUntil);
+      const expires = Math.min(nowMs + SOURCE_READ_SECONDS * 1000, limit);
+      if (expires <= nowMs + 60_000) throw new BuildAdmissionError("SOURCE_INVALID");
       const access = await this.options.sources.createReadAccess({
         objectKey: source.objectKey,
-        expiresAt: new Date(this.clock.now().getTime() + SOURCE_READ_SECONDS * 1000),
+        expiresAt: new Date(expires),
       });
       const real = this.plan(
         submission,
@@ -835,20 +898,30 @@ export class BuildAdmission {
       return this.ensureSubmitted(record, submission, source);
     }
     const now = this.clock.now();
-    const build = await this.options.provider.get(record.buildId);
-    const terminal = !["QUEUED", "PENDING", "WORKING"].includes(build.status);
-    if (!terminal) {
-      if (now.getTime() - Date.parse(record.createdAt) <= BUILD_DEADLINE_MS) return record;
-      await this.options.provider.cancel(record.buildId);
-      return this.reject(record, "BUILD_TIMEOUT", build.images[0]?.digest);
+    const overdue = now.getTime() - Date.parse(record.createdAt) > BUILD_DEADLINE_MS;
+    let build: ProviderBuild;
+    let decision: AdmissionDecision;
+    try {
+      build = await this.options.provider.get(record.buildId);
+      const terminal = !["QUEUED", "PENDING", "WORKING"].includes(build.status);
+      if (!terminal) {
+        if (!overdue) return record;
+        await this.options.provider.cancel(record.buildId).catch(() => undefined);
+        return this.reject(record, "BUILD_TIMEOUT", build.images[0]?.digest);
+      }
+      decision = await decideAdmission({
+        plan: record,
+        record,
+        submission,
+        build,
+        readOutput: (path, maxBytes) => this.options.provider.readOutput(path, maxBytes),
+      });
+    } catch (error) {
+      // A build that still cannot be decided after its deadline is rejected, not retried
+      // forever: the record settles and retention can reclaim it.
+      if (!overdue || error instanceof ConflictError) throw error;
+      return this.reject(record, "DEPENDENCY_UNAVAILABLE");
     }
-    const decision = await decideAdmission({
-      plan: record,
-      record,
-      submission,
-      build,
-      readOutput: (path, maxBytes) => this.options.provider.readOutput(path, maxBytes),
-    });
     if (!decision.admitted) return this.reject(record, decision.code, decision.imageDigest);
     const finished = now.toISOString();
     return this.options.store.updateArtifact(
@@ -934,48 +1007,83 @@ async function removeBuildOutputs(
 /**
  * Retention sweep (M16 schedules it). Like source purges: fence by CAS, delete the image,
  * outputs and logs, then the tombstone. Pinned artifacts (active or rollback releases) stay.
+ * A `building` record past its build deadline (an abandoned or undecidable build) is reclaimed:
+ * its build is cancelled and it is rejected `BUILD_TIMEOUT`, so a later sweep purges it. The
+ * sweep pages by cursor past rows it skips or fails on, so they cannot starve the rest.
  */
 export async function purgeArtifacts(options: {
   readonly store: Pick<ArtifactStore, "expiredArtifacts" | "updateArtifact" | "deleteArtifact">;
   readonly provider: BuildProvider;
   readonly now?: Date;
+  /** Records acted on (deleted or reclaimed) per sweep. */
   readonly limit?: number;
-}): Promise<{ deleted: number; failed: number; skipped: number }> {
+  /** Rows examined per sweep, including skipped and failing ones (default 10 × limit). */
+  readonly maxScan?: number;
+}): Promise<{ deleted: number; reclaimed: number; failed: number; skipped: number }> {
   const now = options.now ?? new Date();
-  const records = await options.store.expiredArtifacts(now, options.limit ?? 100);
+  const limit = Math.max(1, Math.min(1000, options.limit ?? 100));
+  const maxScan = options.maxScan ?? limit * 10;
   let deleted = 0;
+  let reclaimed = 0;
   let failed = 0;
   let skipped = 0;
-  for (const record of records) {
-    try {
-      let fenced = record;
-      if (!record.purging) {
-        if (record.state === "building" && !record.finishedAt) {
-          skipped += 1;
+  let scanned = 0;
+  let after: ArtifactCursor | undefined;
+  while (deleted + reclaimed < limit && scanned < maxScan) {
+    const page = await options.store.expiredArtifacts(
+      now,
+      Math.min(limit, maxScan - scanned),
+      after,
+    );
+    if (page.length === 0) break;
+    for (const record of page) {
+      scanned += 1;
+      after = {
+        retainUntil: record.retainUntil,
+        workspaceId: record.workspaceId,
+        artifactId: record.artifactId,
+      };
+      try {
+        if (!record.purging && record.state === "building") {
+          if (now.getTime() - Date.parse(record.createdAt) <= BUILD_DEADLINE_MS) {
+            skipped += 1;
+            continue;
+          }
+          if (record.buildId) await options.provider.cancel(record.buildId).catch(() => undefined);
+          const rejected = await options.store.updateArtifact(
+            {
+              ...record,
+              state: "rejected",
+              error: "BUILD_TIMEOUT",
+              finishedAt: now.toISOString(),
+              retainUntil: new Date(
+                now.getTime() + HOSTED_PROFILE.logRetentionDays * DAY,
+              ).toISOString(),
+            },
+            record.revision,
+          );
+          await removeBuildOutputs(options.provider, rejected).catch(() => undefined);
+          reclaimed += 1;
           continue;
         }
-        try {
+        let fenced = record;
+        if (!record.purging)
           fenced = await options.store.updateArtifact(
             { ...record, purging: true },
             record.revision,
           );
-        } catch (error) {
-          if (error instanceof ConflictError) {
-            skipped += 1;
-            continue;
-          }
-          throw error;
-        }
+        await removeBuildOutputs(options.provider, fenced);
+        await options.provider.deleteLogs(fenced.logsBucket);
+        if (await options.store.deleteArtifact(fenced)) deleted += 1;
+        else skipped += 1;
+      } catch (error) {
+        // Renewed, pinned or settled since listed: not ours. Anything else is retried next sweep.
+        if (error instanceof ConflictError) skipped += 1;
+        else failed += 1;
       }
-      await removeBuildOutputs(options.provider, fenced);
-      await options.provider.deleteLogs(fenced.logsBucket);
-      if (await options.store.deleteArtifact(fenced)) deleted += 1;
-      else skipped += 1;
-    } catch {
-      failed += 1;
     }
   }
-  return { deleted, failed, skipped };
+  return { deleted, reclaimed, failed, skipped };
 }
 
 /**
@@ -983,7 +1091,7 @@ export async function purgeArtifacts(options: {
  * before the record, or a tampered push), once older than any build could be.
  */
 export async function cleanupOrphanedImages(options: {
-  readonly store: Pick<ArtifactStore, "artifactDigests">;
+  readonly store: Pick<ArtifactStore, "artifactKeys">;
   readonly provider: BuildProvider;
   readonly workspaceId: string;
   readonly appId: string;
@@ -991,11 +1099,16 @@ export async function cleanupOrphanedImages(options: {
 }): Promise<{ deleted: number; kept: number }> {
   const now = (options.now ?? new Date()).getTime();
   const path = `${options.workspaceId}/${options.appId}`;
-  const known = await options.store.artifactDigests(options.workspaceId, options.appId);
+  const known = await options.store.artifactKeys(options.workspaceId, options.appId);
   let deleted = 0;
   let kept = 0;
   for (const image of await options.provider.listImages(path)) {
-    if (known.has(image.digest) || now - Date.parse(image.createdAt) < ORPHAN_AGE_MS) {
+    // A finished but not yet settled build's image has no recorded digest, only its tag.
+    if (
+      known.digests.has(image.digest) ||
+      image.tags.some((tag) => known.artifactIds.has(tag)) ||
+      now - Date.parse(image.createdAt) < ORPHAN_AGE_MS
+    ) {
       kept += 1;
       continue;
     }

@@ -1,4 +1,5 @@
 import {
+  BuildOutputTooLargeError,
   BuildProviderError,
   type BuildConfig,
   type BuildProvider,
@@ -125,7 +126,7 @@ export class CloudBuildProvider implements BuildProvider {
   public async readOutput(path: string, maxBytes: number): Promise<Uint8Array | null> {
     return this.read(this.object(path), maxBytes);
   }
-  private async read(url: string, maxBytes: number): Promise<Uint8Array | null> {
+  private async read(url: string, maxBytes: number, truncate = false): Promise<Uint8Array | null> {
     const response = await this.call(`${url}?alt=media`, {
       headers: { range: `bytes=0-${maxBytes}` },
     });
@@ -134,7 +135,10 @@ export class CloudBuildProvider implements BuildProvider {
     if (response.status === 416) return new Uint8Array();
     if (!response.ok) throw new BuildProviderError("Build output unavailable");
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > maxBytes) throw new BuildProviderError("Build output too large");
+    if (bytes.byteLength > maxBytes) {
+      if (truncate) return bytes.subarray(0, maxBytes);
+      throw new BuildOutputTooLargeError();
+    }
     return bytes;
   }
   public async deleteOutputs(prefix: string): Promise<void> {
@@ -167,6 +171,7 @@ export class CloudBuildProvider implements BuildProvider {
     const bytes = await this.read(
       this.object(`${this.logPath(logsBucket)}/log-${buildId}.txt`, this.recipe.logsBucket),
       maxBytes,
+      true,
     );
     return bytes ? Buffer.from(bytes).toString("utf8") : null;
   }

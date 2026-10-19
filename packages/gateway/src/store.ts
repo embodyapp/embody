@@ -24,7 +24,8 @@ import {
   type SourceUsage,
 } from "./source-admission.js";
 import {
-  sameArtifactIdentity,
+  artifactTransitionAllowed,
+  type ArtifactCursor,
   type ArtifactRecord,
   type ArtifactStore,
   type ArtifactWrite,
@@ -392,25 +393,42 @@ export class MemoryGatewayStore implements GatewayStore, SourceStore, ArtifactSt
     const prior = this.artifacts.get(key);
     if (!prior || prior.revision !== expected || prior.purging)
       throw new ConflictError("Revision conflict");
-    if (!sameArtifactIdentity(prior, next))
-      throw new BadRequestError("Artifact identity is immutable");
+    if (!artifactTransitionAllowed(prior, next))
+      throw new BadRequestError("Artifact identity and decision are immutable");
     const value = { ...clone(next), revision: expected + 1 };
     this.artifacts.set(key, value);
     return clone(value);
   }
-  public async expiredArtifacts(now: Date, limit: number): Promise<ArtifactRecord[]> {
+  public async expiredArtifacts(
+    now: Date,
+    limit: number,
+    after?: ArtifactCursor,
+  ): Promise<ArtifactRecord[]> {
+    const key = (a: ArtifactCursor) =>
+      [new Date(a.retainUntil).toISOString(), a.workspaceId, a.artifactId] as const;
+    const compare = (a: ArtifactCursor, b: ArtifactCursor) => {
+      const [x, y] = [key(a), key(b)];
+      for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i]! < y[i]! ? -1 : 1;
+      return 0;
+    };
     return [...this.artifacts.values()]
       .filter((a) => Date.parse(a.retainUntil) <= now.getTime() && !a.pinnedBy)
-      .sort((a, b) => a.retainUntil.localeCompare(b.retainUntil))
+      .filter((a) => !after || compare(a, after) > 0)
+      .sort(compare)
       .slice(0, limit)
       .map(clone);
   }
-  public async artifactDigests(workspaceId: string, appId: string): Promise<ReadonlySet<string>> {
-    return new Set(
-      [...this.artifacts.values()]
-        .filter((a) => a.workspaceId === workspaceId && a.appId === appId && a.imageDigest)
-        .map((a) => a.imageDigest!),
+  public async artifactKeys(
+    workspaceId: string,
+    appId: string,
+  ): Promise<{ digests: ReadonlySet<string>; artifactIds: ReadonlySet<string> }> {
+    const records = [...this.artifacts.values()].filter(
+      (a) => a.workspaceId === workspaceId && a.appId === appId,
     );
+    return {
+      digests: new Set(records.flatMap((a) => (a.imageDigest ? [a.imageDigest] : []))),
+      artifactIds: new Set(records.map((a) => a.artifactId)),
+    };
   }
   public async deleteArtifact(record: ArtifactRecord): Promise<boolean> {
     const key = `${record.workspaceId}/${record.artifactId}`;
@@ -835,8 +853,8 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore, Artifact
       )
     ).rows[0]?.document;
     if (!prior) throw new ConflictError("Revision conflict");
-    if (!sameArtifactIdentity(prior, next))
-      throw new BadRequestError("Artifact identity is immutable");
+    if (!artifactTransitionAllowed(prior, next))
+      throw new BadRequestError("Artifact identity and decision are immutable");
     const value: ArtifactRecord = { ...next, revision: expected + 1 };
     const result = await this.pool.query(
       `UPDATE embody_platform_artifacts SET state=$4,image_digest=$5,retain_until=$6,pinned=$7,purging=$8,revision=$9,document=$10
@@ -857,22 +875,43 @@ export class PostgresGatewayStore implements GatewayStore, SourceStore, Artifact
     if (!result.rowCount) throw new ConflictError("Revision conflict");
     return value;
   }
-  public async expiredArtifacts(now: Date, limit: number): Promise<ArtifactRecord[]> {
-    return (
-      await this.pool.query<{ document: ArtifactRecord; purging: boolean }>(
-        "SELECT document,purging FROM embody_platform_artifacts WHERE retain_until<=$1 AND NOT pinned ORDER BY retain_until LIMIT $2",
-        [now, Math.max(1, Math.min(1000, Math.trunc(limit)))],
-      )
-    ).rows.map((row) => (row.purging ? { ...row.document, purging: true } : row.document));
+  public async expiredArtifacts(
+    now: Date,
+    limit: number,
+    after?: ArtifactCursor,
+  ): Promise<ArtifactRecord[]> {
+    const bounded = Math.max(1, Math.min(1000, Math.trunc(limit)));
+    // Byte-order collation: the cursor order must not depend on the database locale.
+    const order =
+      'ORDER BY retain_until, workspace_id COLLATE "C", artifact_id COLLATE "C" LIMIT $2';
+    const result = after
+      ? await this.pool.query<{ document: ArtifactRecord; purging: boolean }>(
+          `SELECT document,purging FROM embody_platform_artifacts WHERE retain_until<=$1 AND NOT pinned
+          AND (retain_until, workspace_id COLLATE "C", artifact_id COLLATE "C") > ($3::timestamptz, $4 COLLATE "C", $5 COLLATE "C") ${order}`,
+          [now, bounded, after.retainUntil, after.workspaceId, after.artifactId],
+        )
+      : await this.pool.query<{ document: ArtifactRecord; purging: boolean }>(
+          `SELECT document,purging FROM embody_platform_artifacts WHERE retain_until<=$1 AND NOT pinned ${order}`,
+          [now, bounded],
+        );
+    return result.rows.map((row) =>
+      row.purging ? { ...row.document, purging: true } : row.document,
+    );
   }
-  public async artifactDigests(workspaceId: string, appId: string): Promise<ReadonlySet<string>> {
+  public async artifactKeys(
+    workspaceId: string,
+    appId: string,
+  ): Promise<{ digests: ReadonlySet<string>; artifactIds: ReadonlySet<string> }> {
     const rows = (
-      await this.pool.query<{ image_digest: string }>(
-        "SELECT image_digest FROM embody_platform_artifacts WHERE workspace_id=$1 AND app_id=$2 AND image_digest IS NOT NULL",
+      await this.pool.query<{ artifact_id: string; image_digest: string | null }>(
+        "SELECT artifact_id,image_digest FROM embody_platform_artifacts WHERE workspace_id=$1 AND app_id=$2",
         [workspaceId, appId],
       )
     ).rows;
-    return new Set(rows.map((row) => row.image_digest));
+    return {
+      digests: new Set(rows.flatMap((row) => (row.image_digest ? [row.image_digest] : []))),
+      artifactIds: new Set(rows.map((row) => row.artifact_id)),
+    };
   }
   public async deleteArtifact(record: ArtifactRecord): Promise<boolean> {
     const result = await this.pool.query(

@@ -334,6 +334,7 @@ export async function runM11Cases(deps) {
       "unsupported-package-manager",
       "durable-as-request-only",
       "durable-undeclared-workflows",
+      "oversized-manifest",
     ])
       if (job(name)) checks[name] = decided(name);
     return { pass: Object.keys(checks).length > 0 && Object.values(checks).every(Boolean), checks };
@@ -490,6 +491,22 @@ export async function runM11Cases(deps) {
     };
   });
 
+  // Zero skips by construction: every case the run should record must be present.
+  const expected = [
+    "M11.idempotent-start",
+    "M11.c.scaffold-request-only",
+    "M11.c.scaffold-durable",
+    "M11.c.log-redaction",
+    "M11.a.sandbox-probe",
+    "M11.a.resource-bounds",
+    "M11.b.inputs-and-failures",
+    "M11.b.substitution",
+    "M11.b.never-promotable",
+    "M11.step5.retention",
+    ...(deps.retag ? ["M11.b.retag"] : []),
+  ];
+  for (const name of expected)
+    if (!(name in cases)) cases[name] = { pass: false, error: "case not recorded" };
   const pass = Object.values(cases).every((value) => value.pass === true);
   return {
     pass,

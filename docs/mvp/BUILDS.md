@@ -50,7 +50,7 @@ The sandbox starts from a per-build input image: the recipe image plus the sourc
 
 `decideAdmission` checks, in order, and the first failure is the outcome:
 
-1. **Provenance.** The provider's record of the build matches the platform plan exactly (steps, images, artifact location, service account, logs bucket, logging mode, timeout), compared by `configDigest`. The source URL is excluded from it.
+1. **Provenance.** The fields the platform sets in the provider's record of the build (steps' image, entrypoint, args, env and timeout; images; artifact location; service account; logs bucket; logging mode; build timeout) match the plan, compared by `configDigest` in their executed (substituted) form. The source URL is excluded from it. Fields the platform never sets (for example step `allowFailure`, `volumes` or `secretEnv`, `availableSecrets`, `options.pool`) are not compared: only the controller can create builds and it finds them by an unguessable artifact tag. Rejecting records that carry such fields is an M12 hardening item.
 2. **Status.** `TIMEOUT` → `BUILD_TIMEOUT`; `INTERNAL_ERROR` → `DEPENDENCY_UNAVAILABLE` (retryable); a prepare-step policy code (`LOCKFILE_REJECTED`, `UNSUPPORTED_RUNTIME`, …) or `OUTPUT_LIMIT` is reported as such; anything else is `BUILD_FAILED`.
 3. **Trusted step outputs.** The prepare output names the recipe and the exact verified source digest; the audit has no blocking advisory.
 4. **Image.** Exactly one image, with the planned name, and a `sha256` digest reported by the provider (the build's own claims are never used). The admitted reference is `<repo>/<ws>/<app>@sha256:…`.
@@ -79,7 +79,13 @@ A rejected artifact has no image reference or manifest, its public status has no
 
 Tags in the builds repository are unique artifact IDs and are **never deployed**: admission binds the digest from the provider's own record, M13 deploys only `repo@sha256:…`, and the live suite repoints an admitted artifact's tag at another image to show that neither the record nor a fresh decision changes. The repository keeps mutable tags on purpose: Artifact Registry refuses to delete a tagged version in an immutable-tag repository (`FAILED_PRECONDITION`, observed live), which rejection cleanup and retention require. Platform images live in a separate repository the builder can only read.
 
-**Residual risk:** a container escape on the build VM (a kernel or runc exploit) would reach the builder's token: push images to the builds repository, create objects in the outputs bucket and rewrite logs in the logs bucket. It cannot read sources, read secrets, reach databases or deploy, and the escaped build's own artifact is still bound to its own digest. Cloud Build runs each build on a fresh VM. The upgrade path is a private pool with no public egress plus a registry mirror for the prepare step (same per-minute price, more setup).
+**Residual risk:** a container escape on the build VM (a kernel or runc exploit) would reach the builder's token: push images to the builds repository, create objects in the outputs bucket, and **read** and rewrite every build's logs in the logs bucket (a confidentiality exposure of other tenants' build output; per-build log scoping is a hardening option). It cannot read sources, read secrets, reach databases or deploy, and the escaped build's own artifact is still bound to its own digest. Cloud Build runs each build on a fresh VM. The upgrade path is a private pool with no public egress plus a registry mirror for the prepare step (same per-minute price, more setup).
+
+## Obligations for later tasks
+
+- **M12** serializes each stage attempt (a lease) before calling `start`: two concurrent `start` calls for one attempt can both submit before either records a build ID (the loser's image is removed as an orphan, but it is wasted work).
+- **M13** must not treat `manifest.appId`/`appVersion` as identity (they are customer claims); the platform app ID is the record's `appId`. The artifact keeps only `catalogDigest`: M13 re-reads the retained `manifest.json` and checks it against `manifestDigest` to obtain the catalog for promotion.
+- **M15** serves `BuildAdmission.log` (bounded and redacted; an oversized log is truncated, never refused).
 
 ## Logs
 
@@ -92,10 +98,10 @@ Build logs are written by the provider to `gs://<logs bucket>/logs/<ws>/<app>/<a
 | Admitted, unpinned | 30 days after the build (`inactiveReleaseRetentionDays`) | `purgeArtifacts`: CAS fence, delete image, outputs and logs, then the record |
 | Admitted, pinned by a release (M13 sets `pinnedBy`) | while pinned | as above once unpinned |
 | Rejected | image and outputs deleted at rejection; record and logs 14 days (`logRetentionDays`) | purged |
-| Building (crash) | until settled; a build past 600 s + 10 min is cancelled and rejected `BUILD_TIMEOUT` | — |
+| Building | until settled; `settle` cancels a build still running 600 s + 10 min after creation and rejects it `BUILD_TIMEOUT`, and rejects a finished build it still cannot decide after that deadline `DEPENDENCY_UNAVAILABLE`. An abandoned `building` record is reclaimed by `purgeArtifacts` when it expires (cancelled, rejected `BUILD_TIMEOUT`, purged by a later sweep) | — |
 | Orphaned image (no record references its digest) | until older than the build deadline + 1 hour | `cleanupOrphanedImages` deletes it |
 
-M16 schedules the sweeps. Recommended backstops: an outputs-bucket lifecycle rule deleting `logs/` after 15 days, and Artifact Registry cleanup policies that never delete tagged versions referenced by pinned artifacts.
+M16 schedules the sweeps. `purgeArtifacts` pages by a (retainUntil, workspace, artifact) cursor and examines at most 10 × `limit` rows, so rows it skips or fails on (for example a version the registry refuses to delete) cannot starve the rest; they are retried on the next sweep. Recommended backstops: a logs-bucket lifecycle rule deleting `logs/` after 15 days, and Artifact Registry cleanup policies that never delete tagged versions referenced by pinned artifacts. `cleanupOrphanedImages` keeps any image whose digest a record references or whose tag is a recorded artifact ID (a finished build not yet settled has only its tag); it lists the whole repository, so M16 should list by package at scale.
 
 ## Cost (worksheet delta)
 
@@ -123,8 +129,8 @@ That moves the approved M09 running baseline from about $16.49 to about **$20.03
 | `UNSUPPORTED_RUNTIME` | Other pnpm version, or `@embody/*` not the platform build | Remove `packageManager` or pin `pnpm@11.25.0`; use the platform's framework version |
 | `VULNERABILITY_POLICY` | A locked dependency has a critical advisory | Update it (`pnpm update`), redeploy |
 | `BUILD_FAILED` | Install, build or extraction failed, or ran out of memory/processes | Read the deployment log; `pnpm build` must work without network after install |
-| `BUILD_TIMEOUT` / `OUTPUT_LIMIT` | Over 420 s in the sandbox, or output over 500 MiB | Smaller build; keep large assets out of `dist` |
-| `MANIFEST_INVALID` | No `dist/embody.config.js` default export, or an invalid catalog | Keep the scaffold layout; export `defineApp(...)` |
+| `BUILD_TIMEOUT` / `OUTPUT_LIMIT` | Over 420 s in the sandbox (the sandbox step reports `BUILD_TIMEOUT`), or output over 500 MiB | Smaller build; keep large assets out of `dist` |
+| `MANIFEST_INVALID` | No `dist/embody.config.js` default export, an invalid catalog, or a manifest over 256 KiB (for example thousands of declared event names) | Keep the scaffold layout; export `defineApp(...)` |
 | `UNSUPPORTED_PROFILE` / `CAPABILITY_MISMATCH` | App does not fit the declared profile, or declared flags differ from the app | Declare the durable profile with exactly the workflows/events/subscriptions the app has |
 | `MANIFEST_MISMATCH` / `IMAGE_INVALID` / `PROVENANCE_INVALID` | Build outputs or record do not match the platform's build | Platform fault or tampering; report it, do not retry blindly |
 | `DEPENDENCY_UNAVAILABLE` | Registry, advisory service or provider outage | Retry; M12 retries automatically |

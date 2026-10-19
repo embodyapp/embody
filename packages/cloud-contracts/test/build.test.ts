@@ -100,7 +100,14 @@ describe("M11 build input policy (trusted, data only)", () => {
   it("rejects unsupported package.json fields, scripts and dependency sources", () => {
     expect(reason(() => check(packageJson({ type: "commonjs" })))).toBe("INPUT_REJECTED");
     expect(reason(() => check(packageJson({ scripts: {} })))).toBe("INPUT_REJECTED");
-    for (const field of ["workspaces", "pnpm", "bundleDependencies", "overrides", "resolutions"])
+    for (const field of [
+      "workspaces",
+      "pnpm",
+      "bundleDependencies",
+      "overrides",
+      "resolutions",
+      "devEngines",
+    ])
       expect(reason(() => check(packageJson({ [field]: {} })))).toBe("INPUT_REJECTED");
     for (const spec of [
       "file:../x",

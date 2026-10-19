@@ -71,6 +71,8 @@ export const M11_FIXTURES = Object.freeze({
   "unsupported-package-manager": { profile: "request-only", expect: "UNSUPPORTED_RUNTIME" },
   oversized: { profile: "request-only", expect: "OUTPUT_LIMIT" },
   "memory-hog": { profile: "request-only", expect: "BUILD_FAILED" },
+  // Customer config inflates the extracted manifest past 256 KiB (review B1).
+  "oversized-manifest": { profile: "request-only", expect: "MANIFEST_INVALID" },
 });
 
 async function editJson(path, edit) {
@@ -101,6 +103,16 @@ export async function createFixture(kind, directory, deps) {
       text.replace(
         '  description: "Describe',
         '  publishes: ["app.submitted"],\n  description: "Describe',
+      ),
+    );
+  }
+  if (kind === "oversized-manifest") {
+    const text = await readFile(config, "utf8");
+    await writeFile(
+      config,
+      text.replace(
+        '  description: "Describe',
+        '  publishes: Array.from({ length: 20000 }, (_, i) => `app.event${i}`),\n  description: "Describe',
       ),
     );
   }

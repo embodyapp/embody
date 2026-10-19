@@ -100,6 +100,7 @@ await main("m11-local", async () => {
       dockerImage: DOCKER_CLI,
       rewriteSourceUrl: mapUrl,
       imageAliases: { [builderRef]: tag },
+      TooLarge: gateway.BuildOutputTooLargeError,
       cleanupImage: RUNTIME_IMAGE,
     });
     const store = new gateway.MemoryGatewayStore();

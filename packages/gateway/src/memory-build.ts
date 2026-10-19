@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  BuildOutputTooLargeError,
   BuildProviderError,
   type BuildConfig,
   type BuildProvider,
@@ -117,8 +118,7 @@ export class MemoryBuildProvider implements BuildProvider {
   public readOutput(path: string, maxBytes: number): Promise<Uint8Array | null> {
     this.check();
     const bytes = this.outputs.get(path);
-    if (bytes && bytes.byteLength > maxBytes)
-      return Promise.reject(new BuildProviderError("Build output too large"));
+    if (bytes && bytes.byteLength > maxBytes) return Promise.reject(new BuildOutputTooLargeError());
     return Promise.resolve(bytes ?? null);
   }
   public deleteOutputs(prefix: string): Promise<void> {
@@ -128,14 +128,14 @@ export class MemoryBuildProvider implements BuildProvider {
       if (key.startsWith(prefix)) this.outputs.delete(key);
     return Promise.resolve();
   }
-  public async readLog(
-    buildId: string,
-    logsBucket: string,
-    maxBytes: number,
-  ): Promise<string | null> {
+  public readLog(buildId: string, logsBucket: string, maxBytes: number): Promise<string | null> {
+    this.check();
     const logs = logsBucket.replace(/^gs:\/\/[^/]+\//, "");
-    const bytes = await this.readOutput(`${logs}/log-${buildId}.txt`, maxBytes);
-    return bytes ? Buffer.from(bytes).toString("utf8") : null;
+    const bytes = this.outputs.get(`${logs}/log-${buildId}.txt`);
+    // Logs are truncated, never refused: an oversized log must stay readable.
+    return Promise.resolve(
+      bytes ? Buffer.from(bytes.subarray(0, maxBytes)).toString("utf8") : null,
+    );
   }
   public deleteLogs(logsBucket: string): Promise<void> {
     return this.deleteOutputs(`${logsBucket.replace(/^gs:\/\/[^/]+\//, "")}/`);

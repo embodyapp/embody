@@ -230,6 +230,7 @@ const DEPENDENCY_FIELDS = [
   "peerDependencies",
 ] as const;
 const FORBIDDEN_PACKAGE_FIELDS = [
+  "devEngines",
   "workspaces",
   "pnpm",
   "bundleDependencies",
@@ -451,13 +452,15 @@ const SECRET_PATTERNS: readonly RegExp[] = [
  * platform knows, such as a signed source URL) and secret-shaped strings with `[REDACTED]`.
  */
 export function redactBuildLog(log: string, canaries: readonly string[] = []): string {
-  let text = Buffer.from(log).subarray(0, BUILD_RECIPE.maxLogBytes).toString("utf8");
+  // Known values are replaced before truncation, so a value cut by the bound cannot leak a prefix.
+  let text = log;
   for (const canary of canaries) {
     if (canary.length < 8) continue;
     text = text.split(canary).join("[REDACTED]");
     const encoded = encodeURIComponent(canary);
     if (encoded !== canary) text = text.split(encoded).join("[REDACTED]");
   }
+  text = Buffer.from(text).subarray(0, BUILD_RECIPE.maxLogBytes).toString("utf8");
   for (const pattern of SECRET_PATTERNS) text = text.replace(pattern, "[REDACTED]");
   return Buffer.byteLength(log) > BUILD_RECIPE.maxLogBytes ? `${text}\n[TRUNCATED]\n` : text;
 }

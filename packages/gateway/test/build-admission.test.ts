@@ -682,7 +682,7 @@ describe("M11 build orchestration", () => {
     });
     await f.store.updateArtifact({ ...pinned, pinnedBy: undefined } as never, pinned.revision);
     const result = await purgeArtifacts({ store: f.store, provider: f.provider, now: later });
-    expect(result).toEqual({ deleted: 1, failed: 0, skipped: 0 });
+    expect(result).toEqual({ deleted: 1, reclaimed: 0, failed: 0, skipped: 0 });
     expect(f.provider.deletedImages).toContain(
       `ws_build00001/app_build00001@${admitted.imageDigest}`,
     );
@@ -722,6 +722,182 @@ describe("M11 build orchestration", () => {
       `ws_build00001/app_build00001@${pin("orphan-old")}`,
     ]);
     expect(kept.state).toBe("admitted");
+  });
+});
+
+describe("M11 review regressions (B1, B2, findings 1, 5, 6, 7, 8)", () => {
+  const big = (c: BuildConfig) => {
+    // Honest provenance and trusted step outputs, but a manifest one byte over the limit.
+    const r = honestBuild(c);
+    const key = Object.keys(r.outputs!).find((k) => k.endsWith("manifest.json"))!;
+    const bytes = Buffer.alloc(BUILD_RECIPE.maxManifestBytes + 1, 0x20);
+    const steps = [...r.stepOutputs!];
+    steps[2] = JSON.stringify({ manifestDigest: sha(bytes), outputBytes: 1234 });
+    return { ...r, outputs: { ...r.outputs, [key]: bytes }, stepOutputs: steps };
+  };
+  it("B1: an oversized manifest settles as MANIFEST_INVALID instead of throwing", async () => {
+    const f = await fixture(big);
+    const record = await buildOnce(f);
+    expect(record).toMatchObject({ state: "rejected", error: "MANIFEST_INVALID" });
+    expect(f.provider.deletedPrefixes).toContain(record.outputPrefix);
+  });
+  it("B1: assembly and sandbox step rejections map to their codes", async () => {
+    for (const [index, payload, code] of [
+      [2, '{"rejected":"MANIFEST_INVALID"}', "MANIFEST_INVALID"],
+      [1, '{"rejected":"BUILD_TIMEOUT"}', "BUILD_TIMEOUT"],
+    ] as const) {
+      const f = await fixture((c) => {
+        const steps = [honestBuild(c).stepOutputs![0]!, "", ""];
+        steps[index] = payload;
+        return { status: "FAILURE", stepOutputs: steps };
+      });
+      expect((await buildOnce(f)).error).toBe(code);
+    }
+    expect(assembleScript()).toContain('{"rejected":"MANIFEST_INVALID"}');
+    expect(sandboxScript()).toContain('{"rejected":"BUILD_TIMEOUT"}');
+  });
+  it("B1: a finished build that cannot be decided is rejected after its deadline", async () => {
+    const f = await fixture();
+    const submission = f.submission();
+    const started = await f.admission.start({
+      submission,
+      deploymentId: "dep_build00001",
+      attempt: 1,
+    });
+    f.provider.completeAll();
+    const read = f.provider.readOutput.bind(f.provider);
+    f.provider.readOutput = () => Promise.reject(new Error("storage outage"));
+    await expect(f.admission.settle(started, submission)).rejects.toThrow("storage outage");
+    f.advance(BUILD_DEADLINE_MS + 1);
+    const settled = await f.admission.settle(started, submission);
+    expect(settled).toMatchObject({ state: "rejected", error: "DEPENDENCY_UNAVAILABLE" });
+    f.provider.readOutput = read;
+  });
+  it("B2: an expired building record is reclaimed, then purged", async () => {
+    const f = await fixture(() => undefined);
+    const submission = f.submission();
+    const started = await f.admission.start({
+      submission,
+      deploymentId: "dep_build00001",
+      attempt: 1,
+    });
+    const later = new Date(Date.parse(started.retainUntil) + 1000);
+    const first = await purgeArtifacts({ store: f.store, provider: f.provider, now: later });
+    expect(first).toMatchObject({ reclaimed: 1, deleted: 0 });
+    const reclaimed = await f.store.artifact("ws_build00001", "app_build00001", started.artifactId);
+    expect(reclaimed).toMatchObject({ state: "rejected", error: "BUILD_TIMEOUT" });
+    expect((await f.provider.get(started.buildId!)).status).toBe("CANCELLED");
+    const second = await purgeArtifacts({
+      store: f.store,
+      provider: f.provider,
+      now: new Date(Date.parse(reclaimed!.retainUntil) + 1000),
+    });
+    expect(second).toMatchObject({ deleted: 1 });
+  });
+  it("B2: failing rows ahead of a purgeable one cannot starve the sweep", async () => {
+    const store = new MemoryGatewayStore();
+    await store.createWorkspace("ws_build00001");
+    const provider = new MemoryBuildProvider(() => undefined);
+    const t0 = new Date("2030-01-01T00:00:00.000Z");
+    const record = (n: number, digest: string) =>
+      store.createArtifact({
+        workspaceId: "ws_build00001",
+        appId: "app_build00001",
+        deploymentId: `dep_build${String(n).padStart(5, "0")}`,
+        attempt: 1,
+        artifactId: `art_build${String(n).padStart(5, "0")}`,
+        sourceUploadId: "src_build00001",
+        sourceDigest: pin("source"),
+        state: "rejected",
+        error: "BUILD_FAILED",
+        imageDigest: digest,
+        recipe: BUILD_RECIPE.id,
+        configDigest: pin("config"),
+        image: `us-central1-docker.pkg.dev/embody-cloud/builds/ws_build00001/app_build00001:art_build${String(n).padStart(5, "0")}`,
+        outputPrefix: `builds/ws_build00001/app_build00001/art_build${String(n).padStart(5, "0")}/`,
+        logsBucket: `gs://embody-build-logs/logs/ws_build00001/app_build00001/art_build${String(n).padStart(5, "0")}`,
+        createdAt: t0.toISOString(),
+        finishedAt: t0.toISOString(),
+        // The stuck rows expire first, so they head every listing.
+        retainUntil: new Date(t0.getTime() + n * 1000).toISOString(),
+      });
+    for (let n = 1; n <= 5; n++) await record(n, pin(`stuck-${n}`));
+    await record(9, pin("good"));
+    const deleteImage = provider.deleteImage.bind(provider);
+    provider.deleteImage = (path, digest) =>
+      digest.startsWith(pin("good").slice(0, 20)) || digest === pin("good")
+        ? deleteImage(path, digest)
+        : Promise.reject(new Error("registry refuses"));
+    const result = await purgeArtifacts({
+      store,
+      provider,
+      now: new Date(t0.getTime() + 86_400_000),
+      limit: 2,
+    });
+    expect(result).toMatchObject({ deleted: 1, failed: 5 });
+    expect(await store.artifact("ws_build00001", "app_build00001", "art_build00009")).toBeNull();
+  });
+  it("finding 1: orphan cleanup keeps an unsettled build's tagged image", async () => {
+    const f = await fixture();
+    const submission = f.submission();
+    const started = await f.admission.start({
+      submission,
+      deploymentId: "dep_build00001",
+      attempt: 1,
+    });
+    f.provider.completeAll(); // pushed, not settled
+    const cleaned = await cleanupOrphanedImages({
+      store: f.store,
+      provider: f.provider,
+      workspaceId: "ws_build00001",
+      appId: "app_build00001",
+      now: new Date(f.clock.now().getTime() + ORPHAN_AGE_MS * 2),
+    });
+    expect(cleaned).toEqual({ deleted: 0, kept: 1 });
+    expect((await f.admission.settle(started, submission)).state).toBe("admitted");
+  });
+  it("finding 6: builder read access never outlives an unpinned source", async () => {
+    const f = await fixture();
+    const submission = f.submission();
+    f.advance(Date.parse(f.verified.retainUntil) - f.clock.now().getTime() - 120_000);
+    await f.admission.start({ submission, deploymentId: "dep_build00001", attempt: 1 });
+    const url = new URL(f.provider.submitted[0]!.substitutions._SOURCE_URL);
+    expect(Number(url.searchParams.get("expires")) * 1000).toBeLessThanOrEqual(
+      Date.parse(f.verified.retainUntil),
+    );
+    const g = await fixture();
+    g.advance(Date.parse(g.verified.retainUntil) - g.clock.now().getTime() - 30_000);
+    await expect(
+      g.admission.start({ submission: g.submission(), deploymentId: "dep_build00001", attempt: 1 }),
+    ).rejects.toMatchObject({ code: "SOURCE_INVALID" });
+  });
+  it("finding 7: an oversized log is truncated and still redacted, not refused", async () => {
+    const huge = `${"x".repeat(BUILD_RECIPE.maxLogBytes * 3)}\ntoken ya29.a0AfH6SMBcanarycanarycanary\n`;
+    const f = await fixture((c) =>
+      honestBuild(c, { log: `ya29.a0AfH6SMBcanarycanarycanary\n${huge}` }),
+    );
+    const record = await buildOnce(f);
+    const log = await f.admission.log(record);
+    expect(log.length).toBeLessThanOrEqual(BUILD_RECIPE.maxLogBytes + 64);
+    expect(log).not.toContain("ya29.");
+  });
+  it("finding 8: a settled decision cannot be rewritten", async () => {
+    const f = await fixture();
+    const admitted = await buildOnce(f);
+    for (const change of [
+      { state: "rejected", error: "BUILD_FAILED" },
+      { imageReference: `${admitted.imageReference}x` },
+      { manifestDigest: pin("other") },
+      { manifest: { ...admitted.manifest!, publishes: ["app.forged"] } },
+    ])
+      await expect(
+        f.store.updateArtifact({ ...admitted, ...change } as never, admitted.revision),
+      ).rejects.toThrow(/immutable/);
+    // Retention fields still change.
+    expect(
+      (await f.store.updateArtifact({ ...admitted, pinnedBy: "rel_aaaaaaaa" }, admitted.revision))
+        .pinnedBy,
+    ).toBe("rel_aaaaaaaa");
   });
 });
 

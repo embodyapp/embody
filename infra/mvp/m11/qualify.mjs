@@ -280,6 +280,8 @@ export async function runM11Suite(env, provider, deps) {
   const estimatedUsd = Number(
     (minutes * M11_LIMITS.buildMinuteUsd + M11_LIMITS.fixedUsd).toFixed(2),
   );
+  for (const name of ["M11.a.builder-iam", "propagation", "M11.b.retag", "cleanup"])
+    if (!(name in cases)) cases[name] = { pass: false, error: "case not recorded" };
   const pass =
     Object.values(cases).every((v) => v.pass === true) && estimatedUsd <= approval.budgetUsd;
   return {
