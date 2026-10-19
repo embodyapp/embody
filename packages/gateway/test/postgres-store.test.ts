@@ -18,6 +18,7 @@ import {
 import { appRecord, credentialInput, storeConformance } from "./store-conformance.js";
 import { sourceStoreConformance } from "./source-store-conformance.js";
 import { artifactStoreConformance } from "./artifact-store-conformance.js";
+import { deploymentStoreConformance } from "./deployment-store-conformance.js";
 import { createSourceArchive } from "@embody/cloud-contracts";
 import { MemorySourceObjectStore } from "../src/index.js";
 const url = process.env["EMBODY_PLATFORM_URL"];
@@ -34,6 +35,9 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
     Promise.resolve(new PostgresGatewayStore(url!)),
   );
   artifactStoreConformance("real artifact store", () =>
+    Promise.resolve(new PostgresGatewayStore(url!)),
+  );
+  deploymentStoreConformance("real deployment store", () =>
     Promise.resolve(new PostgresGatewayStore(url!)),
   );
   it("M10 admits, verifies and persists source identity across store instances", async () => {
@@ -720,7 +724,7 @@ describe.skipIf(!url)("platform PostgreSQL (mandatory in test:mvp)", () => {
           "SELECT tableowner=current_user AS owned FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'embody_platform_%'",
         )
       ).rows;
-      expect(tables).toHaveLength(7);
+      expect(tables).toHaveLength(9);
       expect(tables.every((row) => !row.owned)).toBe(true);
       await expect(store.migrate()).rejects.toThrow("maintenance authority");
       await expect(

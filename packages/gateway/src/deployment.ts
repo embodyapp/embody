@@ -152,6 +152,8 @@ export const deploymentTaskSchema = z.strictObject({
   appId: z.string().regex(/^app_[a-z0-9]{8,64}$/),
   deploymentId: z.string().regex(/^dep_[a-z0-9]{8,64}$/),
   reason: z.enum(DEPLOYMENT_TASK_REASONS),
+  /** The record epoch the task was created for; a later epoch means a newer wake exists. */
+  epoch: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
   /** PostgreSQL transaction that created the task (an early task retries while it is open). */
   txid: z
     .string()
@@ -345,8 +347,8 @@ export function decideSubmit(input: {
 export type ClaimDecision =
   | { readonly kind: "terminal" }
   | { readonly kind: "cleanup"; readonly record: DeploymentRecord }
-  | { readonly kind: "leased"; readonly until: string }
-  | { readonly kind: "early"; readonly dueAt: string }
+  | { readonly kind: "leased"; readonly until: string; readonly epoch: number }
+  | { readonly kind: "early"; readonly dueAt: string; readonly epoch: number }
   /** Committed without running a stage: deadline expiry or a crash-loop retry. */
   | { readonly kind: "settled"; readonly next: DeploymentRecord; readonly wake?: DeploymentWake }
   | { readonly kind: "claimed"; readonly next: DeploymentRecord; readonly wake: DeploymentWake };
@@ -448,16 +450,17 @@ export function decideClaim(record: DeploymentRecord, now: Date, token: string):
     return record.cleanup && Date.parse(record.dueAt) <= ms
       ? { kind: "cleanup", record }
       : record.cleanup
-        ? { kind: "early", dueAt: record.dueAt }
+        ? { kind: "early", dueAt: record.dueAt, epoch: record.epoch }
         : { kind: "terminal" };
   if (record.leaseUntil && Date.parse(record.leaseUntil) > ms)
-    return { kind: "leased", until: record.leaseUntil };
+    return { kind: "leased", until: record.leaseUntil, epoch: record.epoch };
   if (ms >= Date.parse(record.deadlineAt)) {
     const next = failed(record, "DEPENDENCY_UNAVAILABLE", "DEADLINE_EXCEEDED", ms);
     const wake = wakeFor(next, "cleanup");
     return { kind: "settled", next, ...(wake ? { wake } : {}) };
   }
-  if (Date.parse(record.dueAt) > ms) return { kind: "early", dueAt: record.dueAt };
+  if (Date.parse(record.dueAt) > ms)
+    return { kind: "early", dueAt: record.dueAt, epoch: record.epoch };
   if (record.crashes >= DEPLOYMENT_LIMITS.maxCrashes) {
     // Workers keep dying (or timing out) in this stage attempt: count it as a failed attempt.
     const next = retried(record, "WORKER_LOST", ms);

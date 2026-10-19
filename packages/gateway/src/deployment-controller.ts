@@ -64,6 +64,8 @@ export interface DeploymentControllerOptions {
   readonly builds: Pick<BuildAdmission, "start" | "settle" | "abandon">;
   readonly stages: DeploymentStages;
   readonly clock?: { now(): Date };
+  /** Test seam; production uses `DEPLOYMENT_LIMITS.handlerDeadlineMs`. Must stay below the lease. */
+  readonly handlerDeadlineMs?: number;
   /** One structured line per handled task; never payloads, URLs or provider output. */
   readonly log?: (record: DeploymentLogRecord) => void;
 }
@@ -98,6 +100,7 @@ export function deploymentWakeHook(queue: TaskQueue<DeploymentTaskBody>): Deploy
           appId: wake.appId,
           deploymentId: wake.deploymentId,
           reason: wake.reason,
+          epoch: wake.epoch,
           txid,
         },
       });
@@ -182,12 +185,18 @@ export class DeploymentController {
       case "terminal":
         return { status: 200, outcome: "terminal" };
       case "leased":
-        // Another worker holds it; if that worker died, this follow-up reclaims at lease expiry.
-        await this.followUp(task, new Date(Date.parse(decision.until) + 1000).toISOString());
-        return { status: 200, outcome: "leased" };
-      case "early":
-        await this.followUp(task, decision.dueAt);
-        return { status: 200, outcome: "early" };
+      case "early": {
+        // A later epoch committed its own wake in the same transaction: this task is superseded.
+        // Otherwise this task is the newest: re-arm it for the lease expiry (that worker may have
+        // died) or the due time (it came early).
+        if (decision.epoch > task.epoch) return { status: 200, outcome: "superseded" };
+        const target =
+          decision.kind === "leased"
+            ? new Date(Date.parse(decision.until) + 1000).toISOString()
+            : decision.dueAt;
+        await this.followUp(task, target);
+        return { status: 200, outcome: decision.kind };
+      }
       case "settled":
         return { status: 200, outcome: `settled:${decision.next.state}` };
       case "cleanup":
@@ -218,7 +227,10 @@ export class DeploymentController {
     try {
       outcome = await withDeadline(
         (signal) => this.stage(record, signal),
-        DEPLOYMENT_LIMITS.handlerDeadlineMs,
+        Math.min(
+          this.options.handlerDeadlineMs ?? DEPLOYMENT_LIMITS.handlerDeadlineMs,
+          DEPLOYMENT_LIMITS.handlerDeadlineMs,
+        ),
       );
     } catch (error) {
       // Over the handler deadline the stage may still be running: do not complete. The lease
@@ -418,6 +430,7 @@ export async function reconcileDeployments(
         appId: record.appId,
         deploymentId: record.deploymentId,
         reason: "recover",
+        epoch: record.epoch,
       },
     });
     if (outcome === "created") woken += 1;
