@@ -191,7 +191,7 @@ await main("m11-local", async () => {
     server?.close();
     await frameworkRegistry?.close();
     const leftovers = [
-      docker(["ps", "-aq", "--filter", "name=embody-m11-"], { allowFailure: true }),
+      docker(["ps", "-aq", "--filter", "name=embody-m11-step-"], { allowFailure: true }),
       docker(["ps", "-aq", "--filter", "name=embody-sandbox-art_"], { allowFailure: true }),
     ]
       .filter(Boolean)
