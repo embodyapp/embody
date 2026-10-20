@@ -1,0 +1,193 @@
+{
+  "gate": "mvp-cloud-m12",
+  "status": "passed",
+  "timestamp": "2026-10-20T06:31:22.614Z",
+  "commit": "5c65312b272d33bfe8d2beee269337f453782554",
+  "dirty": false,
+  "node": "v24.21.0",
+  "lockfileSha256": "a49024b0d7e69ea3ff966010cf4a7c8d51a6fb50d1bf148691de8ffc8ddcfaf4",
+  "schemaSourceSha256": "502cad9d92abe0d084394520c931a51d80f1bfa9b6378c6e9e38b69c6a714bb7",
+  "platformSchemaSourceSha256": "ead5261b0c3d869d3454049db1b7982cbd583af96e7eebf4e13c91cd185db458",
+  "postgresFixtureSha256": "5ee505a6ae07b9b1bfbb9a98493fa0495081732cf2ca423a42311e69f5dea580",
+  "counts": {
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0
+  },
+  "images": [],
+  "suites": ["m12"],
+  "releaseGate": false,
+  "pendingSuites": ["m13", "m14", "m15", "m16", "m17", "m20", "m21"],
+  "m12": {
+    "pass": true,
+    "runId": "f45104",
+    "cases": {
+      "M12.live.iam": {
+        "pass": true,
+        "checks": {
+          "workerExact": true,
+          "invokerOnlyInvokesWorker": true,
+          "noOwnerOrEditor": true
+        },
+        "worker": [
+          "builder:roles/iam.serviceAccountUser",
+          "buildsRepo:roles/artifactregistry.repoAdmin",
+          "invoker:roles/iam.serviceAccountUser",
+          "logsBucket:roles/storage.objectAdmin",
+          "outputBucket:roles/storage.objectAdmin",
+          "project:roles/cloudbuild.builds.editor",
+          "project:roles/cloudsql.client",
+          "queue:roles/cloudtasks.enqueuer",
+          "reader:roles/iam.serviceAccountTokenCreator",
+          "secret:roles/secretmanager.secretAccessor"
+        ],
+        "invoker": ["service:roles/run.invoker"]
+      },
+      "propagation": {
+        "pass": true,
+        "attempts": 4,
+        "seconds": 47
+      },
+      "M12.a.c.chain-zero-gateway": {
+        "pass": true,
+        "checks": {
+          "state": true,
+          "builds": true,
+          "candidates": true,
+          "generation": true,
+          "faultsFired": true,
+          "release": true,
+          "withinBound": true
+        },
+        "facts": {
+          "state": "active",
+          "stageAttempt": 1,
+          "releaseId": "rel_ffbe467adee18d98f3dd4c5a",
+          "builds": 1,
+          "candidates": 1,
+          "generationBefore": 1,
+          "generationAfter": 2,
+          "faultsFired": 3,
+          "elapsedMs": 404030
+        }
+      },
+      "M12.a.lost-task": {
+        "pass": true,
+        "checks": {
+          "state": true,
+          "builds": true,
+          "generation": true,
+          "release": true,
+          "withinBound": true
+        },
+        "facts": {
+          "state": "active",
+          "stageAttempt": 1,
+          "releaseId": "rel_9d6023412e65e85f6d5ff391",
+          "builds": 1,
+          "candidates": 1,
+          "generationBefore": 1,
+          "generationAfter": 2,
+          "faultsFired": 0,
+          "elapsedMs": 171120
+        },
+        "read": 200
+      },
+      "M12.a.rolled-back": {
+        "pass": true,
+        "deployment": "absent",
+        "sourcePinned": false
+      },
+      "M12.b.cancel-during-build": {
+        "pass": true,
+        "checks": {
+          "state": true,
+          "builds": true,
+          "candidates": true,
+          "generation": true,
+          "release": true,
+          "withinBound": true
+        },
+        "facts": {
+          "state": "cancelled",
+          "reason": "CANCELLED",
+          "stageAttempt": 1,
+          "builds": 1,
+          "candidates": 0,
+          "generationBefore": 1,
+          "generationAfter": 1,
+          "faultsFired": 0,
+          "elapsedMs": 47762
+        },
+        "cancelStatus": 200,
+        "buildStatus": "CANCELLED",
+        "artifact": "CANCELLED"
+      },
+      "M12.b.promotion-race": {
+        "pass": true,
+        "checks": {
+          "oneActive": true,
+          "loserStale": true,
+          "oneGenerationStep": true
+        },
+        "states": ["active", "failed"]
+      },
+      "M12.c.queue-pause": {
+        "pass": true,
+        "checks": {
+          "held": true,
+          "state": true,
+          "builds": true,
+          "generation": true,
+          "release": true,
+          "withinBound": true
+        },
+        "resumeToActiveSeconds": 20
+      },
+      "M12.d.ingress": {
+        "pass": true,
+        "checks": {
+          "anonymous": true,
+          "operatorToken": true,
+          "wrongAudience": true,
+          "otherIdentity": true,
+          "maliciousBody": true,
+          "foreignWorkspace": true,
+          "invokerAccepted": true,
+          "noStateChange": true
+        }
+      },
+      "cleanup": {
+        "pass": true,
+        "teardown": {
+          "pass": true,
+          "removed": [
+            "service",
+            "queue",
+            "secret",
+            "sql",
+            "serviceAccount:embody-test-m12-c-f45104",
+            "serviceAccount:embody-test-m12-i-f45104",
+            "bucket:embody-test-m12-src-f45104",
+            "bucket:embody-test-m12-out-f45104",
+            "bucket:embody-test-m12-log-f45104",
+            "repository:embody-test-m12-builds-f45104",
+            "repository:embody-test-m12-recipe-f45104",
+            "serviceAccount:embody-test-m12-b-f45104",
+            "serviceAccount:embody-test-m12-r-f45104",
+            "serviceAccount:embody-test-m12-x-f45104"
+          ]
+        },
+        "leftovers": [],
+        "projectIamUnchanged": true
+      }
+    },
+    "builds": 6,
+    "buildMinutes": 7.1,
+    "enabledServices": [],
+    "enablementDelta": 0,
+    "projectionUsd": 0.85,
+    "estimatedUsd": 0.53,
+    "budgetUsd": 6
+  }
+}
