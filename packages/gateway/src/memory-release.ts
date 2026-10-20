@@ -25,8 +25,9 @@ export class MemoryCandidateProvider implements CandidateProvider {
   public removed: string[] = [];
   /** Reads a new candidate stays `pending` before it becomes ready. */
   public readyAfterGets = 1;
-  /** Image references whose revisions never become ready (a crashing container). */
+  /** Images or service names whose revisions never become ready (a crashing container). */
   public readonly failingImages = new Set<string>();
+  public readonly failingNames = new Set<string>();
   public constructor(
     private readonly projectNumber = "123456789012",
     private readonly region = "us-central1",
@@ -51,7 +52,10 @@ export class MemoryCandidateProvider implements CandidateProvider {
     const service = this.services.get(name);
     if (service) {
       service.gets += 1;
-      if (service.gets > this.readyAfterGets && this.failingImages.has(service.spec.image))
+      if (
+        service.gets > this.readyAfterGets &&
+        (this.failingImages.has(service.spec.image) || this.failingNames.has(name))
+      )
         service.failed = true;
     }
     return Promise.resolve(this.state(name));
