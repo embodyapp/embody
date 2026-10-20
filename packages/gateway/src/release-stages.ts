@@ -220,7 +220,11 @@ export function migrationRefusal(
   const known = new Map(policy.map((entry) => [entry.version, entry]));
   if (applied.some((version) => !known.has(version))) return "SCHEMA_AHEAD";
   for (const entry of policy)
-    if (entry.version <= target && !applied.includes(entry.version) && entry.compatibility !== "expand")
+    if (
+      entry.version <= target &&
+      !applied.includes(entry.version) &&
+      entry.compatibility !== "expand"
+    )
       return "MIGRATION_REJECTED";
   const floor = Math.max(0, ...applied.map((version) => known.get(version)?.readerFloor ?? 0));
   if (target < floor) return "SCHEMA_INCOMPATIBLE";
@@ -275,7 +279,10 @@ export async function releaseRegistration(input: {
   if (!artifact.manifest || !artifact.manifestDigest) return "MANIFEST_MISSING";
   let bytes: Uint8Array | null;
   try {
-    bytes = await input.readOutput(`${artifact.outputPrefix}manifest.json`, BUILD_RECIPE.maxManifestBytes);
+    bytes = await input.readOutput(
+      `${artifact.outputPrefix}manifest.json`,
+      BUILD_RECIPE.maxManifestBytes,
+    );
   } catch (error) {
     if (error instanceof BuildOutputTooLargeError) return "MANIFEST_MISMATCH";
     throw error;
@@ -346,14 +353,17 @@ export class ReleaseStages implements DeploymentStages {
   private readonly validate: (registration: Registration) => void;
   public constructor(private readonly options: ReleaseStagesOptions) {
     this.validate =
-      options.validate ?? ((registration) => validateRegistration(registration, { credentials: {} }));
+      options.validate ??
+      ((registration) => validateRegistration(registration, { credentials: {} }));
     appResourceNames(options.platform.prefix, "ws_validate0", "app_validate0");
   }
 
   /** Cloud Run's deterministic service URL, when the platform's project number is configured. */
   private endpoint(name: string): string | undefined {
     const { projectNumber, region } = this.options.platform;
-    return projectNumber && region ? `https://${name}-${projectNumber}.${region}.run.app` : undefined;
+    return projectNumber && region
+      ? `https://${name}-${projectNumber}.${region}.run.app`
+      : undefined;
   }
   private names(record: DeploymentRecord): AppResourceNames {
     return appResourceNames(this.options.platform.prefix, record.workspaceId, record.appId);
@@ -531,15 +541,27 @@ export class ReleaseStages implements DeploymentStages {
     const rollback = context.deployment.rollbackOf !== undefined;
     const registration = await this.registration(context);
     if (typeof registration === "string")
-      return { ok: false, retryable: false, reason: registration, code: rollback ? "ROLLBACK_INCOMPATIBLE" : "CHECK_FAILED" };
-    const inUse = await this.options.database.activeWorkflowVersions(this.names(context.deployment));
+      return {
+        ok: false,
+        retryable: false,
+        reason: registration,
+        code: rollback ? "ROLLBACK_INCOMPATIBLE" : "CHECK_FAILED",
+      };
+    const inUse = await this.options.database.activeWorkflowVersions(
+      this.names(context.deployment),
+    );
     const refusal = workflowRefusal(
       inUse,
       context.artifact.manifest,
       context.active?.manifest.artifact,
     );
     if (refusal)
-      return { ok: false, retryable: false, reason: refusal, code: rollback ? "ROLLBACK_INCOMPATIBLE" : "CHECK_FAILED" };
+      return {
+        ok: false,
+        retryable: false,
+        reason: refusal,
+        code: rollback ? "ROLLBACK_INCOMPATIBLE" : "CHECK_FAILED",
+      };
     return { ok: true, registration };
   }
 

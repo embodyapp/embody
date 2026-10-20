@@ -4,18 +4,20 @@ import { GoogleReleaseProvider, ReleaseProviderError, cloudRunHealthProbe } from
 type Call = { url: string; method: string; body: unknown; auth: string | null };
 function fakeFetch(answer: (call: Call) => { status: number; body?: unknown }) {
   const calls: Call[] = [];
-  const fetcher = (async (input: string | URL, init?: RequestInit) => {
+  const fetcher = ((input: string | URL, init?: RequestInit) => {
     const call = {
       url: String(input),
       method: init?.method ?? "GET",
-      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      body: typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined,
       auth: new Headers(init?.headers).get("authorization"),
     };
     expect(init?.redirect).toBe("error");
     expect(init?.signal).toBeDefined();
     calls.push(call);
     const { status, body } = answer(call);
-    return new Response(body === undefined ? "" : JSON.stringify(body), { status });
+    return Promise.resolve(
+      new Response(body === undefined ? "" : JSON.stringify(body), { status }),
+    );
   }) as typeof fetch;
   return { calls, fetcher };
 }
@@ -54,6 +56,7 @@ describe("M13 Google Cloud release adapter request shapes", () => {
       "https://run.googleapis.com/v2/projects/embody-cloud/locations/us-central1/services?serviceId=emb-cabc",
     );
     expect(call!.auth).toBe("Bearer controller-token");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- request body under inspection
     const body = call!.body as Record<string, any>;
     expect(body["labels"]).toEqual(spec.labels);
     expect(body["template"]["scaling"]).toEqual({ minInstanceCount: 0, maxInstanceCount: 3 });
@@ -61,13 +64,19 @@ describe("M13 Google Cloud release adapter request shapes", () => {
     expect(body["template"]["containers"][0]["image"]).toBe(image);
     expect(body["template"]["containers"][0]["env"]).toEqual([
       { name: "NODE_ENV", value: "production" },
-      { name: "DATABASE_URL", valueSource: { secretKeyRef: { secret: "emb-a1-db", version: "latest" } } },
+      {
+        name: "DATABASE_URL",
+        valueSource: { secretKeyRef: { secret: "emb-a1-db", version: "latest" } },
+      },
     ]);
     expect(body["template"]["volumes"]).toEqual([
       { name: "cloudsql", cloudSqlInstance: { instances: ["embody-cloud:us-central1:embody"] } },
     ]);
     await expect(
-      new GoogleReleaseProvider(options(fetcher)).create({ ...spec, image: "repo/app:latest" }, signal),
+      new GoogleReleaseProvider(options(fetcher)).create(
+        { ...spec, image: "repo/app:latest" },
+        signal,
+      ),
     ).rejects.toBeInstanceOf(ReleaseProviderError);
   });
 
@@ -90,15 +99,21 @@ describe("M13 Google Cloud release adapter request shapes", () => {
       image,
       status: "ready",
     });
-    expect(GoogleReleaseProvider.stateOf({ ...service, latestReadyRevision: "r1" }, endpoint).status).toBe(
+    expect(
+      GoogleReleaseProvider.stateOf({ ...service, latestReadyRevision: "r1" }, endpoint).status,
+    ).toBe("pending");
+    expect(GoogleReleaseProvider.stateOf({ ...service, reconciling: true }, endpoint).status).toBe(
       "pending",
     );
-    expect(GoogleReleaseProvider.stateOf({ ...service, reconciling: true }, endpoint).status).toBe("pending");
     expect(
-      GoogleReleaseProvider.stateOf({ ...service, terminalCondition: { state: "CONDITION_FAILED" } }, endpoint)
-        .status,
+      GoogleReleaseProvider.stateOf(
+        { ...service, terminalCondition: { state: "CONDITION_FAILED" } },
+        endpoint,
+      ).status,
     ).toBe("failed");
-    expect(GoogleReleaseProvider.stateOf({ ...service, urls: [] }, endpoint).endpoint).toBeUndefined();
+    expect(
+      GoogleReleaseProvider.stateOf({ ...service, urls: [] }, endpoint).endpoint,
+    ).toBeUndefined();
   });
 
   it("sets exactly the given invokers, lists only this platform's candidates, deletes idempotently", async () => {
@@ -122,12 +137,19 @@ describe("M13 Google Cloud release adapter request shapes", () => {
     await provider.setInvokers("emb-cabc", ["serviceAccount:b@x", "serviceAccount:a@x"], signal);
     expect(calls[0]!.url).toMatch(/services\/emb-cabc:setIamPolicy$/);
     expect(calls[0]!.body).toEqual({
-      policy: { bindings: [{ role: "roles/run.invoker", members: ["serviceAccount:a@x", "serviceAccount:b@x"] }] },
+      policy: {
+        bindings: [
+          { role: "roles/run.invoker", members: ["serviceAccount:a@x", "serviceAccount:b@x"] },
+        ],
+      },
     });
     expect((await provider.list(signal)).map((state) => state.name)).toEqual(["emb-c1"]);
     await provider.remove("emb-cabc", signal);
     await expect(
-      new GoogleReleaseProvider(options(fakeFetch(() => ({ status: 500 })).fetcher)).remove("x", signal),
+      new GoogleReleaseProvider(options(fakeFetch(() => ({ status: 500 })).fetcher)).remove(
+        "x",
+        signal,
+      ),
     ).rejects.toBeInstanceOf(ReleaseProviderError);
   });
 
@@ -135,7 +157,10 @@ describe("M13 Google Cloud release adapter request shapes", () => {
     const { calls, fetcher } = fakeFetch((call) => {
       if (call.url.includes("/serviceAccounts/") && call.method === "GET") return { status: 404 };
       if (call.url.endsWith("/versions/latest"))
-        return { status: 200, body: { name: "projects/p/secrets/emb-a1-db/versions/7", state: "ENABLED" } };
+        return {
+          status: 200,
+          body: { name: "projects/p/secrets/emb-a1-db/versions/7", state: "ENABLED" },
+        };
       if (call.url.endsWith(":addVersion"))
         return { status: 200, body: { name: "projects/p/secrets/emb-a1-db/versions/8" } };
       if (call.url.includes("/secrets/emb-a1-db") && call.method === "GET") return { status: 404 };
@@ -143,7 +168,10 @@ describe("M13 Google Cloud release adapter request shapes", () => {
     });
     const provider = new GoogleReleaseProvider(options(fetcher));
     expect(await provider.ensureAccount("emb-a1", "runtime", signal)).toBe("pending");
-    expect(calls[1]!.body).toEqual({ accountId: "emb-a1", serviceAccount: { displayName: "runtime" } });
+    expect(calls[1]!.body).toEqual({
+      accountId: "emb-a1",
+      serviceAccount: { displayName: "runtime" },
+    });
     await provider.ensureSecret("emb-a1-db", "emb-a1@embody-cloud.iam.gserviceaccount.com", signal);
     const policy = calls.find((call) => call.url.endsWith("emb-a1-db:setIamPolicy"))!;
     expect(policy.body).toEqual({
@@ -176,13 +204,13 @@ describe("M13 Google Cloud release adapter request shapes", () => {
     const token = `e30.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.sig`;
     let health: unknown = { live: true, ready: true };
     const seen: string[] = [];
-    const fetcher = (async (input: string | URL, init?: RequestInit) => {
+    const fetcher = ((input: string | URL, init?: RequestInit) => {
       const url = String(input);
       seen.push(url);
       if (url.startsWith("http://metadata.google.internal"))
-        return new Response(token, { headers: { "metadata-flavor": "Google" } });
+        return Promise.resolve(new Response(token, { headers: { "metadata-flavor": "Google" } }));
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
-      return new Response(JSON.stringify(health));
+      return Promise.resolve(new Response(JSON.stringify(health)));
     }) as typeof fetch;
     const probe = cloudRunHealthProbe({
       serviceAccountEmail: "ctl@embody-cloud.iam.gserviceaccount.com",

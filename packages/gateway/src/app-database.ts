@@ -58,7 +58,10 @@ export class PostgresAppDatabase implements AppDatabase {
     this.lockTimeoutMs = options.lockTimeoutMs ?? 5_000;
   }
 
-  private async connect<T>(database: string | null, work: (client: Client) => Promise<T>): Promise<T> {
+  private async connect<T>(
+    database: string | null,
+    work: (client: Client) => Promise<T>,
+  ): Promise<T> {
     const url = new URL(this.options.provisionerUrl);
     if (database !== null) url.pathname = `/${database}`;
     const client = new Client({
@@ -139,7 +142,11 @@ export class PostgresAppDatabase implements AppDatabase {
     });
   }
 
-  public async setCredential(names: AppResourceNames, password: string, marker: string): Promise<void> {
+  public async setCredential(
+    names: AppResourceNames,
+    password: string,
+    marker: string,
+  ): Promise<void> {
     if (!PASSWORD.test(password) || !/^[A-Za-z0-9._/-]{1,200}$/.test(marker))
       throw new TypeError("Invalid credential");
     const runtime = ident(names.runtimeRole);
@@ -190,7 +197,10 @@ export class PostgresAppDatabase implements AppDatabase {
    * plan is re-checked under a per-database advisory lock, so concurrent deployments of one app
    * never apply a version twice, and a refused plan executes nothing.
    */
-  public async applyNextMigration(names: AppResourceNames, target: number): Promise<"applied" | "current"> {
+  public async applyNextMigration(
+    names: AppResourceNames,
+    target: number,
+  ): Promise<"applied" | "current"> {
     const owner = ident(names.ownerRole);
     const runtime = ident(names.runtimeRole);
     return this.connect(names.database, async (client) => {
@@ -245,7 +255,9 @@ export class PostgresAppDatabase implements AppDatabase {
     });
   }
 
-  public async activeWorkflowVersions(names: AppResourceNames): Promise<readonly WorkflowVersionInUse[]> {
+  public async activeWorkflowVersions(
+    names: AppResourceNames,
+  ): Promise<readonly WorkflowVersionInUse[]> {
     return this.connect(names.database, async (client) => {
       await client.query(`SET ROLE ${ident(names.ownerRole)}`);
       const fn = await client.query<{ fn: string | null }>(

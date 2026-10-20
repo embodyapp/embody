@@ -54,4 +54,10 @@ void deploymentWakeHook;
 const result = await controller.handle(JSON.parse(process.env.M13_TASK));
 process.stdout.write(`RESULT ${JSON.stringify(result)}\n`);
 process.stdout.write("DONE\n");
-await Promise.all([provider.close(), candidates.close(), identities.close(), tasks.close(), store.close()]);
+await Promise.all([
+  provider.close(),
+  candidates.close(),
+  identities.close(),
+  tasks.close(),
+  store.close(),
+]);

@@ -488,7 +488,10 @@ export function decideRollback(input: {
     : undefined;
   const fingerprint = submission ? submissionFingerprint(submission) : "";
   if (input.existing) {
-    if (input.existing.rollbackOf !== target.releaseId || input.existing.fingerprint !== fingerprint)
+    if (
+      input.existing.rollbackOf !== target.releaseId ||
+      input.existing.fingerprint !== fingerprint
+    )
       throw new DeploymentError("IDEMPOTENCY_CONFLICT");
     return { replay: true, record: input.existing };
   }
@@ -1006,7 +1009,11 @@ export function registrationRefusal(
 export function promotedRelease(
   record: DeploymentRecord,
   artifact: ArtifactRecord,
-  promote: { readonly releaseId: string; readonly generation: number; readonly registration?: Registration },
+  promote: {
+    readonly releaseId: string;
+    readonly generation: number;
+    readonly registration?: Registration;
+  },
   schemaVersion: number,
   now: Date,
 ): ReleaseRecord {
@@ -1078,7 +1085,9 @@ export function releasedPin<T extends { readonly pinnedBy?: string; readonly ret
   void _pin;
   return {
     ...rest,
-    retainUntil: iso(Math.max(Date.parse(record.retainUntil), now.getTime() + INACTIVE_RETENTION_MS)),
+    retainUntil: iso(
+      Math.max(Date.parse(record.retainUntil), now.getTime() + INACTIVE_RETENTION_MS),
+    ),
   } as unknown as T;
 }
 

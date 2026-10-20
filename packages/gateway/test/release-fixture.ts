@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { compileManifest, definePlugin, defineWorkflow, z, type EmbodyPlugin } from "@embody/core";
-import { BUILD_RECIPE, submissionFingerprint, type DeploymentSubmission } from "@embody/cloud-contracts";
+import {
+  BUILD_RECIPE,
+  submissionFingerprint,
+  type DeploymentSubmission,
+} from "@embody/cloud-contracts";
 import { STORAGE_MIGRATIONS } from "@embody/storage";
 import {
   BuildAdmission,
@@ -13,7 +17,6 @@ import {
   MemoryGatewayStore,
   MemoryHealthProbe,
   MemorySourceObjectStore,
-  PostgresGatewayStore,
   ReleaseStages,
   appResourceNames,
   deploymentWakeHook,
@@ -21,10 +24,19 @@ import {
   type DeploymentRecord,
   type DeploymentTaskBody,
   type MigrationPolicyEntry,
+  type PostgresGatewayStore,
   type ReleasePlatform,
   type SimulatedBuildResult,
 } from "../src/index.js";
-import { APP, MemoryTaskQueue, TestClock, drive, pin, recipe, requestOnly } from "./deployment-fixture.js";
+import {
+  APP,
+  MemoryTaskQueue,
+  TestClock,
+  drive,
+  pin,
+  recipe,
+  requestOnly,
+} from "./deployment-fixture.js";
 
 export const WS = "ws_release00001";
 export const NAME = "kanban";
@@ -40,7 +52,8 @@ export const durable = {
   persistentLocalState: false,
   genui: false,
 } as const;
-const sha = (bytes: Uint8Array | string) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+const sha = (bytes: Uint8Array | string) =>
+  `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 
 /** A request-only plugin; `actions` names its read actions (a different set is a new manifest). */
 export function plainPlugin(actions: readonly string[] = ["ping"]): EmbodyPlugin {
@@ -109,7 +122,9 @@ export function catalogBuild(
     }),
   );
   const sbom = Buffer.from('{"bomFormat":"CycloneDX"}\n');
-  const source = config.steps[0]!.env.find((e) => e.startsWith("EMBODY_SOURCE_DIGEST="))!.split("=")[1];
+  const source = config.steps[0]!.env.find((e) => e.startsWith("EMBODY_SOURCE_DIGEST="))!.split(
+    "=",
+  )[1];
   return {
     status: "SUCCESS",
     outputs: { [`${prefix}manifest.json`]: manifest, [`${prefix}sbom.json`]: sbom },
@@ -214,7 +229,14 @@ export async function releaseHarness(
   });
   await store.createWorkspace(ws);
   await store.putApp(
-    { workspaceId: ws, appId: APP, name: NAME, registration: null, activeRelease: null, state: "unavailable" },
+    {
+      workspaceId: ws,
+      appId: APP,
+      name: NAME,
+      registration: null,
+      activeRelease: null,
+      state: "unavailable",
+    },
     null,
   );
   const wake = deploymentWakeHook(queue);
@@ -256,7 +278,12 @@ export async function releaseHarness(
   const submit = async (value: DeploymentSubmission) =>
     (
       await store.submitDeployment(
-        { submission: value, fingerprint: submissionFingerprint(value), actorId: "alice", now: clock.now() },
+        {
+          submission: value,
+          fingerprint: submissionFingerprint(value),
+          actorId: "alice",
+          now: clock.now(),
+        },
         wake,
       )
     ).record;

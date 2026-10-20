@@ -44,7 +44,9 @@ const record = (value: unknown): Record<string, unknown> =>
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
 const strings = (value: unknown): Record<string, string> =>
   Object.fromEntries(
-    Object.entries(record(value)).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    Object.entries(record(value)).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
   );
 
 export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProvider {
@@ -52,7 +54,10 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
   private readonly token: () => Promise<string>;
   private readonly timeoutMs: number;
   public constructor(private readonly options: GoogleReleaseProviderOptions) {
-    if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(options.project) || !/^\d{6,20}$/.test(options.projectNumber))
+    if (
+      !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(options.project) ||
+      !/^\d{6,20}$/.test(options.projectNumber)
+    )
       throw new TypeError("Invalid project");
     this.fetcher = options.fetch ?? fetch;
     this.token = options.accessToken ?? metadataAccessToken(this.fetcher);
@@ -129,7 +134,10 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
     const state =
       condition["state"] === "CONDITION_FAILED" && !reconciling
         ? "failed"
-        : condition["state"] === "CONDITION_SUCCEEDED" && !reconciling && !!created && created === ready
+        : condition["state"] === "CONDITION_SUCCEEDED" &&
+            !reconciling &&
+            !!created &&
+            created === ready
           ? "ready"
           : "pending";
     return {
@@ -142,7 +150,13 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
     };
   }
   public async get(name: string, signal: AbortSignal): Promise<CandidateState | null> {
-    const result = await this.ok(`${RUN}/${this.location}/services/${name}`, "GET", undefined, signal, [404]);
+    const result = await this.ok(
+      `${RUN}/${this.location}/services/${name}`,
+      "GET",
+      undefined,
+      signal,
+      [404],
+    );
     if (result.status === 404) return null;
     return GoogleReleaseProvider.stateOf(result.body, this.endpointOf(name));
   }
@@ -162,7 +176,11 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
           maxInstanceRequestConcurrency: 4,
           scaling: { minInstanceCount: 0, maxInstanceCount: spec.maxInstances },
           ...(spec.cloudSqlConnection
-            ? { volumes: [{ name: "cloudsql", cloudSqlInstance: { instances: [spec.cloudSqlConnection] } }] }
+            ? {
+                volumes: [
+                  { name: "cloudsql", cloudSqlInstance: { instances: [spec.cloudSqlConnection] } },
+                ],
+              }
             : {}),
           containers: [
             {
@@ -172,7 +190,10 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
                   ? {
                       name: variable.name,
                       valueSource: {
-                        secretKeyRef: { secret: variable.secret.secret, version: variable.secret.version },
+                        secretKeyRef: {
+                          secret: variable.secret.secret,
+                          version: variable.secret.version,
+                        },
                       },
                     }
                   : { name: variable.name, value: variable.value ?? "" },
@@ -190,7 +211,11 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
       [409],
     );
   }
-  public async setInvokers(name: string, members: readonly string[], signal: AbortSignal): Promise<void> {
+  public async setInvokers(
+    name: string,
+    members: readonly string[],
+    signal: AbortSignal,
+  ): Promise<void> {
     await this.ok(
       `${RUN}/${this.location}/services/${name}:setIamPolicy`,
       "POST",
@@ -202,7 +227,12 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
     await this.ok(`${RUN}/${this.location}/services/${name}`, "DELETE", undefined, signal, [404]);
   }
   public async list(signal: AbortSignal): Promise<readonly CandidateState[]> {
-    const result = await this.ok(`${RUN}/${this.location}/services?pageSize=200`, "GET", undefined, signal);
+    const result = await this.ok(
+      `${RUN}/${this.location}/services?pageSize=200`,
+      "GET",
+      undefined,
+      signal,
+    );
     const services = Array.isArray(result.body["services"]) ? result.body["services"] : [];
     return services
       .map((service) => {
@@ -239,14 +269,21 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
     // IAM is eventually consistent: use the account from the next step on.
     return "pending";
   }
-  public async ensureSecret(secretId: string, accessorEmail: string, signal: AbortSignal): Promise<void> {
+  public async ensureSecret(
+    secretId: string,
+    accessorEmail: string,
+    signal: AbortSignal,
+  ): Promise<void> {
     const secret = `${SECRETS}/projects/${this.options.project}/secrets/${secretId}`;
     const found = await this.ok(secret, "GET", undefined, signal, [404]);
     if (found.status === 404)
       await this.ok(
         `${SECRETS}/projects/${this.options.project}/secrets?secretId=${secretId}`,
         "POST",
-        { replication: { automatic: {} }, labels: { [CANDIDATE_LABELS.platform]: this.options.prefix } },
+        {
+          replication: { automatic: {} },
+          labels: { [CANDIDATE_LABELS.platform]: this.options.prefix },
+        },
         signal,
         [409],
       );
@@ -255,7 +292,12 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
       "POST",
       {
         policy: {
-          bindings: [{ role: "roles/secretmanager.secretAccessor", members: [`serviceAccount:${accessorEmail}`] }],
+          bindings: [
+            {
+              role: "roles/secretmanager.secretAccessor",
+              members: [`serviceAccount:${accessorEmail}`],
+            },
+          ],
         },
       },
       signal,
@@ -272,7 +314,11 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
     if (result.status !== 200 || result.body["state"] !== "ENABLED") return null;
     return text(result.body["name"]).split("/").at(-1) || null;
   }
-  public async addSecretVersion(secretId: string, payload: string, signal: AbortSignal): Promise<string> {
+  public async addSecretVersion(
+    secretId: string,
+    payload: string,
+    signal: AbortSignal,
+  ): Promise<string> {
     const result = await this.ok(
       `${SECRETS}/projects/${this.options.project}/secrets/${secretId}:addVersion`,
       "POST",
@@ -280,7 +326,8 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
       signal,
     );
     const version = text(result.body["name"]).split("/").at(-1);
-    if (!version || !/^\d+$/.test(version)) throw new ReleaseProviderError("Invalid secret version");
+    if (!version || !/^\d+$/.test(version))
+      throw new ReleaseProviderError("Invalid secret version");
     return version;
   }
   public async ensureWakeQueue(
@@ -289,7 +336,11 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
     runtimeEmail: string,
     signal: AbortSignal,
   ): Promise<{ queue: string; invokerEmail: string } | "pending"> {
-    const invoker = await this.ensureAccount(invokerAccount, `embody wake invoker ${queueId}`, signal);
+    const invoker = await this.ensureAccount(
+      invokerAccount,
+      `embody wake invoker ${queueId}`,
+      signal,
+    );
     if (invoker === "pending") return "pending";
     const queue = `${this.location}/queues/${queueId}`;
     const found = await this.ok(`${TASKS}/${queue}`, "GET", undefined, signal, [404]);
@@ -300,7 +351,12 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
         {
           name: queue,
           rateLimits: { maxDispatchesPerSecond: 5, maxConcurrentDispatches: 2 },
-          retryConfig: { maxAttempts: -1, maxRetryDuration: "259200s", minBackoff: "1s", maxBackoff: "300s" },
+          retryConfig: {
+            maxAttempts: -1,
+            maxRetryDuration: "259200s",
+            minBackoff: "1s",
+            maxBackoff: "300s",
+          },
         },
         signal,
         [409],
@@ -311,13 +367,25 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
     await this.ok(
       `${TASKS}/${queue}:setIamPolicy`,
       "POST",
-      { policy: { bindings: [{ role: "roles/cloudtasks.enqueuer", members: [`serviceAccount:${runtimeEmail}`] }] } },
+      {
+        policy: {
+          bindings: [
+            { role: "roles/cloudtasks.enqueuer", members: [`serviceAccount:${runtimeEmail}`] },
+          ],
+        },
+      },
       signal,
     );
     await this.ok(
       `${IAM}/projects/${this.options.project}/serviceAccounts/${invoker.email}:setIamPolicy`,
       "POST",
-      { policy: { bindings: [{ role: "roles/iam.serviceAccountUser", members: [`serviceAccount:${runtimeEmail}`] }] } },
+      {
+        policy: {
+          bindings: [
+            { role: "roles/iam.serviceAccountUser", members: [`serviceAccount:${runtimeEmail}`] },
+          ],
+        },
+      },
       signal,
     );
     return { queue, invokerEmail: invoker.email };
@@ -333,7 +401,10 @@ export function cloudRunHealthProbe(options: {
   readonly fetch?: typeof fetch;
 }): HealthProbe {
   const fetcher = options.fetch ?? fetch;
-  const token = cloudRunInvocationToken({ serviceAccountEmail: options.serviceAccountEmail, fetch: fetcher });
+  const token = cloudRunInvocationToken({
+    serviceAccountEmail: options.serviceAccountEmail,
+    fetch: fetcher,
+  });
   return {
     async ready(endpoint, signal) {
       try {

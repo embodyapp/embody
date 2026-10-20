@@ -692,7 +692,7 @@ export function storeConformance(
         {
           ...other,
           appId: "app_other0001",
-          registration: { ...other.registration!, appId: "other" },
+          registration: { ...other.registration, appId: "other" },
         },
         null,
       );
@@ -1025,7 +1025,7 @@ export function storeConformance(
           ...hidden,
           appId: "app_hidden0001",
           registration: {
-            ...hidden.registration!,
+            ...hidden.registration,
             appId: "hidden",
           },
         },

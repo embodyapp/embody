@@ -53,7 +53,8 @@ await main("m13", async () => {
     await evidence("m13", "passed", counts, [image], {
       providers:
         "in-memory and PostgreSQL-table fakes for Cloud Run, IAM, Secret Manager and Cloud Tasks; adapter request shapes only; Cloud Run in the live suite",
-      appDatabase: "real PostgreSQL per-app database, roles and framework migrations via the provisioner role",
+      appDatabase:
+        "real PostgreSQL per-app database, roles and framework migrations via the provisioner role",
       crashMatrix:
         "after-migration, after-secret-version, after-candidate-create, after-promote (update with prior pins released); plus the M12 matrix",
     });

@@ -5,7 +5,12 @@ import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Kernel, definePlugin, defineWorkflow, z, type Principal } from "@embody/core";
-import { BUILD_RECIPE, HOSTED_PROFILE, submissionFingerprint, type DeploymentSubmission } from "@embody/cloud-contracts";
+import {
+  BUILD_RECIPE,
+  HOSTED_PROFILE,
+  submissionFingerprint,
+  type DeploymentSubmission,
+} from "@embody/cloud-contracts";
 import { WorkflowWorker } from "@embody/host";
 import { PostgresStorage, STORAGE_RUNTIME_FUNCTIONS } from "@embody/storage";
 import {
@@ -27,7 +32,12 @@ import {
 } from "../src/index.js";
 import { APP, pin, requestOnly } from "./deployment-fixture.js";
 import { NAME, plainPlugin, releaseHarness } from "./release-fixture.js";
-import { createFixtureTables, createTableBuildProvider, createTableQueue, recipe } from "./fixtures/m12-fixtures.mjs";
+import {
+  createFixtureTables,
+  createTableBuildProvider,
+  createTableQueue,
+  recipe,
+} from "./fixtures/m12-fixtures.mjs";
 import {
   appDatabase,
   candidateSweep,
@@ -42,7 +52,10 @@ import {
 const url = process.env["EMBODY_PLATFORM_URL"];
 const migrationUrl = process.env["EMBODY_PLATFORM_MIGRATION_URL"];
 const provisionerUrl = process.env["EMBODY_PROVISIONER_URL"];
-if (process.env["EMBODY_PLATFORM_REQUIRED"] === "true" && (!url || !migrationUrl || !provisionerUrl))
+if (
+  process.env["EMBODY_PLATFORM_REQUIRED"] === "true" &&
+  (!url || !migrationUrl || !provisionerUrl)
+)
   throw new Error("Required platform PostgreSQL and provisioner configuration missing");
 const enabled = !!url && !!migrationUrl && !!provisionerUrl;
 const DAY = 86_400_000;
@@ -54,7 +67,11 @@ const principal = (orgId: string): Principal => ({
   roles: [],
   scopes: ["app:*"],
 });
-async function query<T extends object>(connectionString: string, sql: string, values: unknown[] = []) {
+async function query<T extends object>(
+  connectionString: string,
+  sql: string,
+  values: unknown[] = [],
+) {
   const client = new Client({ connectionString });
   client.on("error", () => undefined);
   await client.connect();
@@ -89,11 +106,16 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       await database.ensure(names); // idempotent
       const password = randomBytes(24).toString("base64url");
       await database.setCredential(names, password, "1");
-      while ((await database.applyNextMigration(names, BUILD_RECIPE.storageSchemaVersion)) === "applied");
+      while (
+        (await database.applyNextMigration(names, BUILD_RECIPE.storageSchemaVersion)) === "applied"
+      );
       return { names, runtimeUrl: database.runtimeUrl(names, password) };
     };
     const boot = async (runtimeUrl: string, plugins = [plainPlugin()]) => {
-      const storage = new PostgresStorage({ connectionString: runtimeUrl, max: 2 }, { schemaMode: "verify" });
+      const storage = new PostgresStorage(
+        { connectionString: runtimeUrl, max: 2 },
+        { schemaMode: "verify" },
+      );
       const kernel = new Kernel({ plugins, storage, profile: "request-only" });
       await kernel.boot();
       return kernel;
@@ -103,42 +125,83 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       const { names, runtimeUrl } = await provision();
       expect(await database.appliedMigrations(names)).toEqual([1, 2, 3, 4, 5, 6]);
       expect(await database.credentialMarker(names)).toBe("1");
-      const roles = await query<{ rolname: string; rolcanlogin: boolean; rolsuper: boolean; rolcreatedb: boolean; rolcreaterole: boolean; rolbypassrls: boolean; rolconnlimit: number }>(
+      const roles = await query<{
+        rolname: string;
+        rolcanlogin: boolean;
+        rolsuper: boolean;
+        rolcreatedb: boolean;
+        rolcreaterole: boolean;
+        rolbypassrls: boolean;
+        rolconnlimit: number;
+      }>(
         provisionerUrl!,
         "SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolbypassrls, rolconnlimit FROM pg_roles WHERE rolname = ANY($1) ORDER BY rolname",
         [[names.ownerRole, names.runtimeRole]],
       );
       expect(roles).toEqual([
-        { rolname: names.ownerRole, rolcanlogin: false, rolsuper: false, rolcreatedb: false, rolcreaterole: false, rolbypassrls: false, rolconnlimit: -1 },
-        { rolname: names.runtimeRole, rolcanlogin: true, rolsuper: false, rolcreatedb: false, rolcreaterole: false, rolbypassrls: false, rolconnlimit: 15 },
+        {
+          rolname: names.ownerRole,
+          rolcanlogin: false,
+          rolsuper: false,
+          rolcreatedb: false,
+          rolcreaterole: false,
+          rolbypassrls: false,
+          rolconnlimit: -1,
+        },
+        {
+          rolname: names.runtimeRole,
+          rolcanlogin: true,
+          rolsuper: false,
+          rolcreatedb: false,
+          rolcreaterole: false,
+          rolbypassrls: false,
+          rolconnlimit: 15,
+        },
       ]);
       const kernel = await boot(runtimeUrl);
-      const created = (await kernel.execute("app.card.create", { data: { title: "hello" } }, { principal: principal("org-a") })) as { id: string };
+      const created = (await kernel.execute(
+        "app.card.create",
+        { data: { title: "hello" } },
+        { principal: principal("org-a") },
+      )) as { id: string };
       expect(created.id).toBeDefined();
       await kernel.stop();
       // The runtime has no DDL, no other app's database; the provisioner cannot read app data.
-      await expect(query(runtimeUrl, "CREATE TABLE public.m13_forbidden (id int)")).rejects.toThrow(/permission denied/);
+      await expect(query(runtimeUrl, "CREATE TABLE public.m13_forbidden (id int)")).rejects.toThrow(
+        /permission denied/,
+      );
       const other = await provision();
       const foreign = new URL(runtimeUrl);
       foreign.pathname = `/${other.names.database}`;
-      await expect(query(foreign.toString(), "SELECT 1")).rejects.toThrow(/permission denied|not permitted/);
+      await expect(query(foreign.toString(), "SELECT 1")).rejects.toThrow(
+        /permission denied|not permitted/,
+      );
       const asProvisioner = new URL(provisionerUrl!);
       asProvisioner.pathname = `/${names.database}`;
-      await expect(query(asProvisioner.toString(), "SELECT * FROM public.embody_entities")).rejects.toThrow(/permission denied/);
+      await expect(
+        query(asProvisioner.toString(), "SELECT * FROM public.embody_entities"),
+      ).rejects.toThrow(/permission denied/);
     });
 
     it("M13.b a destructive migration is refused before execution and a failing one rolls back: data unchanged", async () => {
       const { names, runtimeUrl } = await provision();
       const kernel = await boot(runtimeUrl);
       for (let i = 0; i < 5; i++)
-        await kernel.execute("app.card.create", { data: { title: `row ${i}` } }, { principal: principal("org-a") });
+        await kernel.execute(
+          "app.card.create",
+          { data: { title: `row ${i}` } },
+          { principal: principal("org-a") },
+        );
       await kernel.stop();
       const checksum = await database.checksum(names);
       expect(checksum).not.toBe("empty");
       const destructive = new PostgresAppDatabase({
         provisionerUrl: provisionerUrl!,
         runtimeHost: "127.0.0.1",
-        migrations: [...migrations, { version: 7, compatibility: "contract", postgres: "DELETE FROM embody_entities" }],
+        migrations: [
+          ...migrations,
+          { version: 7, compatibility: "contract", postgres: "DELETE FROM embody_entities" },
+        ],
         runtimeFunctions: STORAGE_RUNTIME_FUNCTIONS,
       });
       await expect(destructive.applyNextMigration(names, 7)).rejects.toMatchObject({
@@ -150,7 +213,12 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
         runtimeHost: "127.0.0.1",
         migrations: [
           ...migrations,
-          { version: 7, compatibility: "expand", postgres: "ALTER TABLE embody_entities ADD COLUMN m13_note text; UPDATE embody_entities SET m13_note = 'x'; SELECT 1/0;" },
+          {
+            version: 7,
+            compatibility: "expand",
+            postgres:
+              "ALTER TABLE embody_entities ADD COLUMN m13_note text; UPDATE embody_entities SET m13_note = 'x'; SELECT 1/0;",
+          },
         ],
         runtimeFunctions: STORAGE_RUNTIME_FUNCTIONS,
       });
@@ -168,13 +236,24 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
     it("M13.b an applied expand migration leaves the previous release bootable with its data", async () => {
       const { names, runtimeUrl } = await provision();
       const kernel = await boot(runtimeUrl);
-      await kernel.execute("app.card.create", { data: { title: "before" } }, { principal: principal("org-a") });
+      await kernel.execute(
+        "app.card.create",
+        { data: { title: "before" } },
+        { principal: principal("org-a") },
+      );
       await kernel.stop();
       const checksum = await database.checksum(names);
       const newer = new PostgresAppDatabase({
         provisionerUrl: provisionerUrl!,
         runtimeHost: "127.0.0.1",
-        migrations: [...migrations, { version: 7, compatibility: "expand", postgres: "CREATE INDEX m13_entities_created ON embody_entities (created_at)" }],
+        migrations: [
+          ...migrations,
+          {
+            version: 7,
+            compatibility: "expand",
+            postgres: "CREATE INDEX m13_entities_created ON embody_entities (created_at)",
+          },
+        ],
         runtimeFunctions: STORAGE_RUNTIME_FUNCTIONS,
       });
       expect(await newer.applyNextMigration(names, 7)).toBe("applied");
@@ -198,7 +277,9 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
             fulfil: defineWorkflow(z.object({}))({
               version: "1.0.0",
               resultStep: "ship",
-              steps: { ship: { handler: () => (done.push(extra ? "v2-code" : "v1-code"), { ok: true }) } },
+              steps: {
+                ship: { handler: () => (done.push(extra ? "v2-code" : "v1-code"), { ok: true }) },
+              },
             }),
             ...(extra
               ? {
@@ -212,7 +293,10 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
           },
         });
       const start = async (plugins: ReturnType<typeof plugin>[]) => {
-        const storage = new PostgresStorage({ connectionString: runtimeUrl, max: 2 }, { schemaMode: "verify" });
+        const storage = new PostgresStorage(
+          { connectionString: runtimeUrl, max: 2 },
+          { schemaMode: "verify" },
+        );
         const kernel = new Kernel({ plugins, storage });
         await kernel.boot();
         return { kernel, storage };
@@ -226,12 +310,21 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       await v1.kernel.stop();
       const inUse = await database.activeWorkflowVersions(names);
       expect(inUse).toEqual([{ definition: "app.fulfil", version: "1.0.0", instances: 1 }]);
-      const manifest = (workflows: { target: string; version: string; steps: { name: string; dependsOn: string[] }[] }[]) =>
-        ({ workflows }) as never;
+      const manifest = (
+        workflows: {
+          target: string;
+          version: string;
+          steps: { name: string; dependsOn: string[] }[];
+        }[],
+      ) => ({ workflows }) as never;
       const ship = [{ name: "ship", dependsOn: [] as string[] }];
-      expect(workflowRefusal(inUse, manifest([{ target: "app.fulfil", version: "2.0.0", steps: ship }]), undefined)).toBe(
-        "WORKFLOW_VERSION_IN_USE",
-      );
+      expect(
+        workflowRefusal(
+          inUse,
+          manifest([{ target: "app.fulfil", version: "2.0.0", steps: ship }]),
+          undefined,
+        ),
+      ).toBe("WORKFLOW_VERSION_IN_USE");
       expect(
         workflowRefusal(
           inUse,
@@ -244,7 +337,11 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       ).toBeNull();
       // The next release keeps fulfil@1.0.0: the instance finishes on it.
       const v2 = await start([plugin(true)]);
-      const worker = new WorkflowWorker({ storage: v2.storage, kernel: v2.kernel, cancelPollMs: 0 });
+      const worker = new WorkflowWorker({
+        storage: v2.storage,
+        kernel: v2.kernel,
+        cancelPollMs: 0,
+      });
       for (let tick = 0; tick < 4; tick++) await worker.tick();
       const status = (await v2.kernel.execute(
         "app.fulfil.status",
@@ -280,7 +377,10 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       const h = await harness();
       const first = await h.deploy([plainPlugin(["ping"])]);
       expect(first.state).toBe("active");
-      expect((await h.catalog()).registration).toMatchObject({ appId: NAME, endpoint: first.candidate!.endpoint });
+      expect((await h.catalog()).registration).toMatchObject({
+        appId: NAME,
+        endpoint: first.candidate!.endpoint,
+      });
       const second = await h.deploy([plainPlugin(["ping", "pong"])]);
       const app = await h.catalog();
       expect(app).toMatchObject({ activeRelease: second.releaseId, state: "idle", generation: 3 });
@@ -288,11 +388,16 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       expect(app.registration!.manifest.actions).toHaveProperty(["app.pong"]);
       const old = (await store.release(h.workspaceId, APP, first.releaseId!))!;
       expect(old.inactiveSince).toBeDefined();
-      expect((await store.artifact(h.workspaceId, APP, first.artifactId!))!.pinnedBy).toBeUndefined();
-      expect((await store.source(h.workspaceId, APP, first.submission.source.uploadId))!.pinnedBy).toBeUndefined();
+      expect(
+        (await store.artifact(h.workspaceId, APP, first.artifactId!))!.pinnedBy,
+      ).toBeUndefined();
+      expect(
+        (await store.source(h.workspaceId, APP, first.submission.source.uploadId))!.pinnedBy,
+      ).toBeUndefined();
       // M12 re-review N4: the PostgreSQL pinned column always agrees with the document.
       for (const table of ["artifacts", "sources"] as const)
-        for (const row of await pinColumns(table, h.workspaceId)) expect(row.pinned).toBe(row.by !== null);
+        for (const row of await pinColumns(table, h.workspaceId))
+          expect(row.pinned).toBe(row.by !== null);
       expect((await pinColumns("sources", h.workspaceId)).filter((row) => row.pinned)).toEqual([
         { pinned: true, by: second.releaseId },
       ]);
@@ -308,18 +413,25 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       const observe = (async () => {
         while (!done) {
           const app = (await reader.snapshot(h.workspaceId))!.apps[0]!;
-          seen.push(`${app.activeRelease}|${app.registration!.endpoint}|${"app.pong" in app.registration!.manifest.actions}|${app.generation}`);
+          seen.push(
+            `${app.activeRelease}|${app.registration!.endpoint}|${"app.pong" in app.registration!.manifest.actions}|${app.generation}`,
+          );
         }
       })();
       const updates: DeploymentRecord[] = [];
-      for (let i = 0; i < 3; i++) updates.push(await h.deploy([plainPlugin(i % 2 ? ["ping"] : ["ping", "pong"])]));
+      for (let i = 0; i < 3; i++)
+        updates.push(await h.deploy([plainPlugin(i % 2 ? ["ping"] : ["ping", "pong"])]));
       done = true;
       await observe;
       for (const update of updates)
-        releases.set(update.releaseId!, (await store.release(h.workspaceId, APP, update.releaseId!))!);
+        releases.set(
+          update.releaseId!,
+          (await store.release(h.workspaceId, APP, update.releaseId!))!,
+        );
       const expected = new Set(
         [...releases.values()].map(
-          (r) => `${r.releaseId}|${r.registration!.endpoint}|${"app.pong" in r.registration!.manifest.actions}|${r.generation}`,
+          (r) =>
+            `${r.releaseId}|${r.registration!.endpoint}|${"app.pong" in r.registration!.manifest.actions}|${r.generation}`,
         ),
       );
       expect(seen.length).toBeGreaterThan(3);
@@ -355,10 +467,20 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
         reader.claimDeployment(b, h.clock.now(), h.wake),
       ]);
       const manifest = (await h.catalog()).registration!.manifest;
-      const outcome = (target: PostgresGatewayStore, record: DeploymentRecord, claim: (typeof claims)[number]) => {
+      const outcome = (
+        target: PostgresGatewayStore,
+        record: DeploymentRecord,
+        claim: (typeof claims)[number],
+      ) => {
         const next = (claim.decision as { next: DeploymentRecord }).next;
         return target.completeDeployment(
-          { workspaceId: h.workspaceId, appId: APP, deploymentId: record.deploymentId, epoch: next.epoch, leaseToken: next.leaseToken! },
+          {
+            workspaceId: h.workspaceId,
+            appId: APP,
+            deploymentId: record.deploymentId,
+            epoch: next.epoch,
+            leaseToken: next.leaseToken!,
+          },
           {
             kind: "promote",
             releaseId: `rel_${randomBytes(8).toString("hex")}`,
@@ -375,7 +497,10 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
           h.wake,
         );
       };
-      const [ra, rb] = await Promise.all([outcome(store, a, claims[0]), outcome(reader, b, claims[1])]);
+      const [ra, rb] = await Promise.all([
+        outcome(store, a, claims[0]),
+        outcome(reader, b, claims[1]),
+      ]);
       expect([ra.state, rb.state].sort()).toEqual(["active", "failed"]);
       expect([ra, rb].find((r) => r.state === "failed")!.error).toBe("STALE_GENERATION");
       const app = await h.catalog();
@@ -389,7 +514,14 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       const v1Manifest = (await h.catalog()).registration!.manifest;
       await h.deploy([plainPlugin(["ping", "pong"])]);
       const generation = (await h.catalog()).generation;
-      const input = { workspaceId: h.workspaceId, appId: APP, releaseId: v1.releaseId!, expectedGeneration: generation, actorId: "alice", now: h.clock.now() };
+      const input = {
+        workspaceId: h.workspaceId,
+        appId: APP,
+        releaseId: v1.releaseId!,
+        expectedGeneration: generation,
+        actorId: "alice",
+        now: h.clock.now(),
+      };
       const first = await store.submitRollback(input, h.wake);
       const replay = await store.submitRollback(input, h.wake);
       expect(replay).toEqual({ record: first.record, replay: true });
@@ -397,7 +529,9 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       const done = (await h.reload(first.record))!;
       expect(done).toMatchObject({ state: "active", rollbackOf: v1.releaseId });
       expect((await h.catalog()).registration!.manifest).toEqual(v1Manifest);
-      expect((await store.artifact(h.workspaceId, APP, v1.artifactId!))!.pinnedBy).toBe(done.releaseId);
+      expect((await store.artifact(h.workspaceId, APP, v1.artifactId!))!.pinnedBy).toBe(
+        done.releaseId,
+      );
       h.clock.advance((HOSTED_PROFILE.inactiveReleaseRetentionDays + 1) * DAY);
       const latest = (await h.catalog()).generation;
       await expect(
@@ -411,9 +545,16 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       const records: DeploymentRecord[] = [];
       for (let i = 0; i < 9; i++) records.push(await h.deploy([plainPlugin()], {}, bytes));
       h.clock.advance((HOSTED_PROFILE.deploymentRetentionDays + 1) * DAY);
-      const purged = await purgeExpiredSources({ store, objects: h.objects, now: h.clock.now(), limit: 100 });
+      const purged = await purgeExpiredSources({
+        store,
+        objects: h.objects,
+        now: h.clock.now(),
+        limit: 100,
+      });
       expect(purged.deleted).toBeGreaterThanOrEqual(8);
-      expect(await store.source(h.workspaceId, APP, records.at(-1)!.submission.source.uploadId)).not.toBeNull();
+      expect(
+        await store.source(h.workspaceId, APP, records.at(-1)!.submission.source.uploadId),
+      ).not.toBeNull();
       for (let i = 0; i < 8; i++) await h.submission({}, bytes);
     });
 
@@ -422,7 +563,11 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       const first = await h.deploy([plainPlugin(["ping"])]);
       await h.deploy([plainPlugin(["ping", "pong"])]);
       // Reconstruct an M12-era row: no lifecycle, still pinning its artifact and source.
-      await query(migrationUrl!, "UPDATE embody_platform_releases SET document = document - 'inactiveSince' - 'drainUntil' - 'retainUntil' WHERE workspace_id=$1 AND release_id=$2", [h.workspaceId, first.releaseId]);
+      await query(
+        migrationUrl!,
+        "UPDATE embody_platform_releases SET document = document - 'inactiveSince' - 'drainUntil' - 'retainUntil' WHERE workspace_id=$1 AND release_id=$2",
+        [h.workspaceId, first.releaseId],
+      );
       for (const [table, key, value] of [
         ["artifacts", "artifact_id", first.artifactId],
         ["sources", "upload_id", first.submission.source.uploadId],
@@ -437,11 +582,18 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       await maintenance.close();
       const release = (await store.release(h.workspaceId, APP, first.releaseId!))!;
       expect(release.inactiveSince).toBeDefined();
-      expect(Date.parse(release.retainUntil!) - Date.parse(release.inactiveSince!)).toBe(HOSTED_PROFILE.inactiveReleaseRetentionDays * DAY);
-      expect((await store.artifact(h.workspaceId, APP, first.artifactId!))!.pinnedBy).toBeUndefined();
-      expect((await store.source(h.workspaceId, APP, first.submission.source.uploadId))!.pinnedBy).toBeUndefined();
+      expect(Date.parse(release.retainUntil!) - Date.parse(release.inactiveSince!)).toBe(
+        HOSTED_PROFILE.inactiveReleaseRetentionDays * DAY,
+      );
+      expect(
+        (await store.artifact(h.workspaceId, APP, first.artifactId!))!.pinnedBy,
+      ).toBeUndefined();
+      expect(
+        (await store.source(h.workspaceId, APP, first.submission.source.uploadId))!.pinnedBy,
+      ).toBeUndefined();
       for (const table of ["artifacts", "sources"] as const)
-        for (const row of await pinColumns(table, h.workspaceId)) expect(row.pinned).toBe(row.by !== null);
+        for (const row of await pinColumns(table, h.workspaceId))
+          expect(row.pinned).toBe(row.by !== null);
     });
   });
 
@@ -461,14 +613,32 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       identities = createTableIdentities(url!);
     });
     afterAll(async () => {
-      await Promise.all([store.close(), queue.close(), provider.close(), candidates.close(), identities.close()]);
+      await Promise.all([
+        store.close(),
+        queue.close(),
+        provider.close(),
+        candidates.close(),
+        identities.close(),
+      ]);
     });
     const controller = () =>
       new DeploymentController({
         store,
         queue,
-        builds: new BuildAdmission({ store, provider, recipe, sources: new MemorySourceObjectStore({ clock }), clock }),
-        stages: releaseStages({ store, candidates, identities, database: appDatabase(provisionerUrl!), outputs: provider }),
+        builds: new BuildAdmission({
+          store,
+          provider,
+          recipe,
+          sources: new MemorySourceObjectStore({ clock }),
+          clock,
+        }),
+        stages: releaseStages({
+          store,
+          candidates,
+          identities,
+          database: appDatabase(provisionerUrl!),
+          outputs: provider,
+        }),
         sweeper: candidateSweep(store, candidates),
         clock,
       });
@@ -481,7 +651,10 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
         if (!due.length) {
           const pending = (await queue.pending(ws)) as Task[];
           if (!pending.length) return results;
-          offset += Math.max(1000, Math.min(...pending.map((t) => Date.parse(t.scheduleAt))) - clock.now().getTime());
+          offset += Math.max(
+            1000,
+            Math.min(...pending.map((t) => Date.parse(t.scheduleAt))) - clock.now().getTime(),
+          );
           continue;
         }
         const result = await worker.handle(due[0]!.body);
@@ -493,14 +666,35 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
     };
     const seed = async (ws: string) => {
       await store.createWorkspace(ws);
-      await store.putApp({ workspaceId: ws, appId: APP, name: NAME, registration: null, activeRelease: null, state: "unavailable" }, null);
+      await store.putApp(
+        {
+          workspaceId: ws,
+          appId: APP,
+          name: NAME,
+          registration: null,
+          activeRelease: null,
+          state: "unavailable",
+        },
+        null,
+      );
       let n = 0;
       return async (): Promise<DeploymentSubmission> => {
         n += 1;
         const key = `source_key_${String(n).padStart(8, "0")}`;
         const digest = pin(`source-${ws}-${key}`);
-        const { record } = await store.admitSource({ workspaceId: ws, appId: APP, idempotencyKey: key, digest, bytes: 100, actorId: "alice", now: clock.now() });
-        const verified = await store.updateSource({ ...record, state: "verified", verifiedAt: clock.now().toISOString() }, record.revision);
+        const { record } = await store.admitSource({
+          workspaceId: ws,
+          appId: APP,
+          idempotencyKey: key,
+          digest,
+          bytes: 100,
+          actorId: "alice",
+          now: clock.now(),
+        });
+        const verified = await store.updateSource(
+          { ...record, state: "verified", verifiedAt: clock.now().toISOString() },
+          record.revision,
+        );
         const app = await store.appStatus(ws, APP);
         return {
           version: 1,
@@ -515,11 +709,26 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       };
     };
     const submit = async (submission: DeploymentSubmission) =>
-      (await store.submitDeployment({ submission, fingerprint: submissionFingerprint(submission), actorId: "alice", now: clock.now() }, deploymentWakeHook(queue))).record;
+      (
+        await store.submitDeployment(
+          {
+            submission,
+            fingerprint: submissionFingerprint(submission),
+            actorId: "alice",
+            now: clock.now(),
+          },
+          deploymentWakeHook(queue),
+        )
+      ).record;
     const child = fileURLToPath(new URL("./fixtures/m13-crash-child.mjs", import.meta.url));
     const run = async (task: DeploymentTaskBody, point: string) => {
       const proc = spawn(process.execPath, [child], {
-        env: { ...process.env, M13_TASK: JSON.stringify(task), M13_CRASH_AT: point, M13_CLOCK_OFFSET: String(offset) },
+        env: {
+          ...process.env,
+          M13_TASK: JSON.stringify(task),
+          M13_CRASH_AT: point,
+          M13_CLOCK_OFFSET: String(offset),
+        },
         stdio: ["ignore", "pipe", "pipe"],
       });
       let stdout = "";
@@ -527,7 +736,10 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       proc.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
       try {
         return await new Promise<boolean>((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error(`${point} not reached: ${stderr}`)), 30_000);
+          const timer = setTimeout(
+            () => reject(new Error(`${point} not reached: ${stderr}`)),
+            30_000,
+          );
           proc.stdout.on("data", (chunk: Buffer) => {
             stdout += chunk.toString();
             if (stdout.includes(`PAUSED ${point}`)) {
@@ -560,7 +772,10 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
         if (!due.length) {
           const pending = (await queue.pending(ws)) as Task[];
           if (!pending.length) throw new Error(`${point} never reached`);
-          offset += Math.max(1000, Math.min(...pending.map((t) => Date.parse(t.scheduleAt))) - clock.now().getTime());
+          offset += Math.max(
+            1000,
+            Math.min(...pending.map((t) => Date.parse(t.scheduleAt))) - clock.now().getTime(),
+          );
           continue;
         }
         if (await run(due[0]!.body, point)) return due[0]!;
@@ -572,7 +787,10 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
     const expectOneActive = async (ws: string, record: DeploymentRecord, generation: number) => {
       const final = (await store.deployment(ws, APP, record.deploymentId))!;
       expect(final.state).toBe("active");
-      expect(await store.appStatus(ws, APP)).toMatchObject({ generation: generation + 1, activeReleaseId: final.releaseId });
+      expect(await store.appStatus(ws, APP)).toMatchObject({
+        generation: generation + 1,
+        activeReleaseId: final.releaseId,
+      });
       const app = (await store.snapshot(ws))!.apps[0]!;
       expect(app.registration!.endpoint).toBe(final.candidate!.endpoint);
       const own = (await candidates.forWorkspace(ws)).filter(
@@ -594,7 +812,9 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       expect(applied.length).toBeGreaterThanOrEqual(1);
       await drive(ws);
       await expectOneActive(ws, record, 1);
-      expect(await appDatabase(provisionerUrl!).appliedMigrations(names)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(await appDatabase(provisionerUrl!).appliedMigrations(names)).toEqual([
+        1, 2, 3, 4, 5, 6,
+      ]);
     });
 
     it("killed after a credential version was written, before the role: the credential converges", async () => {
@@ -608,8 +828,15 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       const names = appResourceNames(platform.prefix, ws, APP);
       // The orphaned version was superseded; the role matches the newest version, whose URL works.
       expect(await identities.versions(names.databaseSecret)).toBe(2);
-      expect(await appDatabase(provisionerUrl!).credentialMarker(names)).toBe(await identities.latestSecretVersion(names.databaseSecret));
-      expect(await query<{ ok: number }>(await identities.payload(names.databaseSecret), "SELECT 1 AS ok")).toEqual([{ ok: 1 }]);
+      expect(await appDatabase(provisionerUrl!).credentialMarker(names)).toBe(
+        await identities.latestSecretVersion(names.databaseSecret, new AbortController().signal),
+      );
+      expect(
+        await query<{ ok: number }>(
+          await identities.payload(names.databaseSecret),
+          "SELECT 1 AS ok",
+        ),
+      ).toEqual([{ ok: 1 }]);
     });
 
     it("killed after the candidate was created, before its receipt: it is adopted, never duplicated", async () => {
@@ -632,7 +859,8 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
       const second = await submit(await next());
       const task = await crashAt(ws, "after-promote");
       await settle();
-      for (let i = 0; i < 3; i++) expect((await controller().handle(task.body)).outcome).toBe("terminal");
+      for (let i = 0; i < 3; i++)
+        expect((await controller().handle(task.body)).outcome).toBe("terminal");
       await drive(ws);
       const final = await expectOneActive(ws, second, 2);
       expect((await store.release(ws, APP, firstDone.releaseId!))!.inactiveSince).toBeDefined();

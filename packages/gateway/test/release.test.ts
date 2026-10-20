@@ -41,7 +41,11 @@ describe("M13.a first deploy registers the app; updates switch route and manifes
     expect(app.state).toBe("idle");
     expect(app.generation).toBe(2);
     // Namespace from the platform record, never the build's `appId` claim ("my-app").
-    expect(app.registration).toMatchObject({ appId: NAME, endpoint, healthCheckUrl: `${endpoint}/health` });
+    expect(app.registration).toMatchObject({
+      appId: NAME,
+      endpoint,
+      healthCheckUrl: `${endpoint}/health`,
+    });
     expect(app.registration!.manifest.actions).toHaveProperty(["app.ping"]);
     expect(app.registration!.manifest.actions).not.toHaveProperty(["app.pong"]);
     expect(release.registration).toEqual(app.registration);
@@ -79,7 +83,9 @@ describe("M13.a first deploy registers the app; updates switch route and manifes
       secret: { secret: h.names.databaseSecret, version: "latest" },
     });
     expect(JSON.stringify(candidate.spec.env)).not.toMatch(/postgresql:\/\//);
-    expect(h.identities.secrets.get(h.names.databaseSecret)?.accessor).toBe(candidate.spec.serviceAccount);
+    expect(h.identities.secrets.get(h.names.databaseSecret)?.accessor).toBe(
+      candidate.spec.serviceAccount,
+    );
     const db = h.database.databases.get(h.names.database)!;
     expect(db.applied).toEqual([1, 2, 3, 4, 5, 6]);
     expect(db.marker).toBe("1");
@@ -119,6 +125,9 @@ describe("M13.a first deploy registers the app; updates switch route and manifes
   });
 });
 
+/** The deployment ID of a route response (the body is untyped JSON). */
+const idOf = (response: { json(): unknown }) =>
+  (response.json() as { deploymentId: string }).deploymentId;
 const failedWith = (record: DeploymentRecord | null, code: string, reason: string) => {
   expect(record).toMatchObject({ state: "failed", error: code, reason });
 };
@@ -155,7 +164,14 @@ describe("M13.a manifest and namespace integrity", () => {
     const h = await releaseHarness();
     const record = await h.deploy([plainPlugin()], {
       secretReferences: [
-        { version: 1, workspaceId: WS, appId: APP, name: "API_KEY", secretId: "sec_aaaaaaaa", secretVersion: 1 },
+        {
+          version: 1,
+          workspaceId: WS,
+          appId: APP,
+          name: "API_KEY",
+          secretId: "sec_aaaaaaaa",
+          secretVersion: 1,
+        },
       ],
     } as never);
     failedWith(record, "INVALID_INPUT", "SECRETS_UNSUPPORTED");
@@ -174,9 +190,9 @@ describe("M13.b a failed update leaves the old route usable", () => {
     await h.run({ rounds: 2000 });
     const failed = await h.reload(record);
     failedWith(failed, "CHECK_FAILED", "READINESS_TIMEOUT");
-    expect(
-      Date.parse(failed!.updatedAt) - Date.parse(failed!.stageStartedAt!),
-    ).toBeLessThanOrEqual(0);
+    expect(Date.parse(failed!.updatedAt) - Date.parse(failed!.stageStartedAt!)).toBeLessThanOrEqual(
+      0,
+    );
     expect(await h.catalog()).toEqual(before);
     expect(h.candidates.services.has(first.candidate!.service)).toBe(true);
     // Cleanup removed the failed candidate (ownership-checked).
@@ -272,7 +288,13 @@ describe("M13.c concurrent promotions and stale workers cannot overwrite the win
     const winner = await h.catalog();
     await expect(
       h.store.completeDeployment(
-        { workspaceId: WS, appId: APP, deploymentId: a.deploymentId, epoch: held.epoch, leaseToken: held.leaseToken! },
+        {
+          workspaceId: WS,
+          appId: APP,
+          deploymentId: a.deploymentId,
+          epoch: held.epoch,
+          leaseToken: held.leaseToken!,
+        },
         { kind: "promote", releaseId: "rel_stalerelease01" },
         h.clock.now(),
         h.wake,
@@ -388,8 +410,12 @@ describe("M13.d rollback restores previous code with data intact; incompatible r
     expect(replay.statusCode).toBe(200);
     expect(replay.json()).toEqual(accepted.json());
     await h.run();
-    const done = (await h.store.deployment(WS, APP, accepted.json().deploymentId))!;
-    expect(done).toMatchObject({ state: "active", rollbackOf: v1.releaseId, artifactId: v1.artifactId });
+    const done = (await h.store.deployment(WS, APP, idOf(accepted)))!;
+    expect(done).toMatchObject({
+      state: "active",
+      rollbackOf: v1.releaseId,
+      artifactId: v1.artifactId,
+    });
     const app = await h.catalog();
     const release = (await h.store.release(WS, APP, done.releaseId!))!;
     expect(release).toMatchObject({ rollbackOf: v1.releaseId, artifactId: v1.artifactId });
@@ -398,7 +424,9 @@ describe("M13.d rollback restores previous code with data intact; incompatible r
     expect(app.registration!.manifest).toEqual(v1App.registration!.manifest);
     expect(app.registration!.endpoint).toBe(done.candidate!.endpoint);
     expect(app.registration!.endpoint).not.toBe(v1App.registration!.endpoint);
-    expect(h.candidates.services.get(done.candidate!.service)!.spec.image).toBe(release.imageReference);
+    expect(h.candidates.services.get(done.candidate!.service)!.spec.image).toBe(
+      release.imageReference,
+    );
     expect(JSON.stringify([...db.rows])).toBe(rows);
     expect(db.applied).toEqual([1, 2, 3, 4, 5, 6]);
     // v1's artifact is pinned again by the new release; v2 now drains and is retained 30 days.
@@ -423,7 +451,8 @@ describe("M13.d rollback restores previous code with data intact; incompatible r
     expect(expired.statusCode).toBe(409);
     expect(expired.json().error).toEqual({
       code: "ROLLBACK_INCOMPATIBLE",
-      message: "Rollback target is no longer retained or is incompatible with current data or workflows.",
+      message:
+        "Rollback target is no longer retained or is incompatible with current data or workflows.",
     });
     await gateway.close();
   });
@@ -444,7 +473,7 @@ describe("M13.d rollback restores previous code with data intact; incompatible r
     expect(accepted.statusCode).toBe(202);
     await h.run();
     failedWith(
-      await h.store.deployment(WS, APP, accepted.json().deploymentId),
+      await h.store.deployment(WS, APP, idOf(accepted)),
       "ROLLBACK_INCOMPATIBLE",
       "SCHEMA_INCOMPATIBLE",
     );
@@ -455,7 +484,10 @@ describe("M13.d rollback restores previous code with data intact; incompatible r
   it("refuses a rollback whose code lacks a workflow version still in use", async () => {
     const h = await releaseHarness();
     const caps = { capabilities: durable } as never;
-    const v1 = await h.deploy([workflowPlugin({ fulfil: { version: "1.0.0", steps: ["ship"] } })], caps);
+    const v1 = await h.deploy(
+      [workflowPlugin({ fulfil: { version: "1.0.0", steps: ["ship"] } })],
+      caps,
+    );
     await h.deploy(
       [
         workflowPlugin({
@@ -475,7 +507,7 @@ describe("M13.d rollback restores previous code with data intact; incompatible r
     const accepted = await rollback(v1.releaseId!);
     await h.run();
     failedWith(
-      await h.store.deployment(WS, APP, accepted.json().deploymentId),
+      await h.store.deployment(WS, APP, idOf(accepted)),
       "ROLLBACK_INCOMPATIBLE",
       "WORKFLOW_VERSION_IN_USE",
     );
@@ -488,7 +520,10 @@ describe("M13.e workflow versions and subscriptions switch with the active gener
   it("keeps running versions: a release retaining v1 promotes; dropping or changing v1 is refused", async () => {
     const h = await releaseHarness();
     const caps = { capabilities: durable } as never;
-    const v1 = await h.deploy([workflowPlugin({ fulfil: { version: "1.0.0", steps: ["ship"] } })], caps);
+    const v1 = await h.deploy(
+      [workflowPlugin({ fulfil: { version: "1.0.0", steps: ["ship"] } })],
+      caps,
+    );
     expect(v1.state).toBe("active");
     const db = h.database.databases.get(h.names.database)!;
     db.workflows.push({ definition: "app.fulfil", version: "1.0.0", instances: 1 });
@@ -504,7 +539,10 @@ describe("M13.e workflow versions and subscriptions switch with the active gener
     );
     expect(kept.state).toBe("active");
     const generation = (await h.catalog()).generation;
-    const dropped = await h.deploy([workflowPlugin({ fulfil: { version: "2.0.0", steps: ["ship"] } })], caps);
+    const dropped = await h.deploy(
+      [workflowPlugin({ fulfil: { version: "2.0.0", steps: ["ship"] } })],
+      caps,
+    );
     failedWith(dropped, "CHECK_FAILED", "WORKFLOW_VERSION_IN_USE");
     const changed = await h.deploy(
       [workflowPlugin({ fulfil: { version: "1.0.0", steps: ["pack", "ship"] } })],
@@ -515,7 +553,10 @@ describe("M13.e workflow versions and subscriptions switch with the active gener
     expect((await h.catalog()).activeRelease).toBe(kept.releaseId);
     // Once the v1 instances finish, the release replacing v1 promotes.
     db.workflows.length = 0;
-    const replaced = await h.deploy([workflowPlugin({ fulfil: { version: "2.0.0", steps: ["ship"] } })], caps);
+    const replaced = await h.deploy(
+      [workflowPlugin({ fulfil: { version: "2.0.0", steps: ["ship"] } })],
+      caps,
+    );
     expect(replaced.state).toBe("active");
     // Durable candidates get the app's own wake queue and invoker, and the drain URL.
     const candidate = h.candidates.services.get(replaced.candidate!.service)!;
@@ -523,7 +564,9 @@ describe("M13.e workflow versions and subscriptions switch with the active gener
       name: "EMBODY_DRAIN_URL",
       value: `${replaced.candidate!.endpoint}/_embody/drain`,
     });
-    expect(candidate.invokers).toContain(`serviceAccount:${h.names.invokerAccount}@embody-cloud.iam.gserviceaccount.com`);
+    expect(candidate.invokers).toContain(
+      `serviceAccount:${h.names.invokerAccount}@embody-cloud.iam.gserviceaccount.com`,
+    );
   });
 
   it("subscriptions switch in the same write as the active release and generation", async () => {
@@ -536,9 +579,9 @@ describe("M13.e workflow versions and subscriptions switch with the active gener
     const app = await h.catalog();
     expect(app.activeRelease).toBe(second.releaseId);
     expect(app.registration!.manifest.eventSubscriptions).toEqual(["shop.cancelled"]);
-    expect((await h.store.release(WS, APP, second.releaseId!))!.manifest.artifact!.subscriptions).toEqual([
-      "shop.cancelled",
-    ]);
+    expect(
+      (await h.store.release(WS, APP, second.releaseId!))!.manifest.artifact!.subscriptions,
+    ).toEqual(["shop.cancelled"]);
   });
 });
 
@@ -562,7 +605,11 @@ describe("M13 retention: replaced releases do not hold the workspace source quot
     );
     // After the deployment (90 d) and inactive-release (30 d) retentions, the sweep frees them.
     h.clock.advance((HOSTED_PROFILE.deploymentRetentionDays + 1) * DAY);
-    const purged = await purgeExpiredSources({ store: h.store, objects: h.objects, now: h.clock.now() });
+    const purged = await purgeExpiredSources({
+      store: h.store,
+      objects: h.objects,
+      now: h.clock.now(),
+    });
     expect(purged.deleted).toBe(8);
     expect(await h.store.source(WS, APP, active.submission.source.uploadId)).not.toBeNull();
     // 90 MiB were promoted; with only the active release pinned, 10 MiB more fit many times over.
@@ -577,8 +624,11 @@ describe("M13 candidate sweep is ownership-checked and bounded", () => {
     const running = await h.submit(await h.submission());
     const runningName = candidateName(platform.prefix, running);
     const base = h.candidates.services.get(active.candidate!.service)!.spec;
-    const spec = (name: string, labels: Record<string, string>, annotations: Record<string, string>) =>
-      h.candidates.create({ ...base, name, labels, annotations });
+    const spec = (
+      name: string,
+      labels: Record<string, string>,
+      annotations: Record<string, string>,
+    ) => h.candidates.create({ ...base, name, labels, annotations });
     const ownerOf = (deploymentId: string) => ({ workspaceId: WS, appId: APP, deploymentId });
     const annotationsOf = (deploymentId: string) => ({
       "embody.dev/workspace": WS,
@@ -597,8 +647,16 @@ describe("M13 candidate sweep is ownership-checked and bounded", () => {
     const orphan = candidateName(platform.prefix, cancelled);
     await spec(orphan, labelsOf(cancelled.deploymentId), annotationsOf(cancelled.deploymentId));
     // Foreign: another platform prefix, a forged owner label, a name that does not match.
-    await spec("other-c0123", labelsOf(cancelled.deploymentId, "oth"), annotationsOf(cancelled.deploymentId));
-    await spec("emb-cforged000000000000000000", labelsOf(cancelled.deploymentId), annotationsOf(cancelled.deploymentId));
+    await spec(
+      "other-c0123",
+      labelsOf(cancelled.deploymentId, "oth"),
+      annotationsOf(cancelled.deploymentId),
+    );
+    await spec(
+      "emb-cforged000000000000000000",
+      labelsOf(cancelled.deploymentId),
+      annotationsOf(cancelled.deploymentId),
+    );
     await spec(
       candidateName(platform.prefix, ownerOf("dep_forgedowner001")),
       labelsOf(cancelled.deploymentId),

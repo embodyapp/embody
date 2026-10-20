@@ -3,6 +3,7 @@
 // connections, so they survive a SIGKILLed worker the way the providers would. The app database
 // itself is the real thing: PostgresAppDatabase on the fixture instance as the provisioner role.
 import { createRequire } from "node:module";
+import { URL } from "node:url";
 import { STORAGE_MIGRATIONS, STORAGE_RUNTIME_FUNCTIONS } from "@embody/storage";
 import { CandidateSweep, PostgresAppDatabase, ReleaseStages } from "../../dist/index.js";
 
@@ -37,7 +38,12 @@ export async function createM13Tables(migrationUrl, runtimeRole) {
       CREATE TABLE IF NOT EXISTS m13_fixture_accounts (id text PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS m13_fixture_secrets (secret text NOT NULL, version serial, payload text NOT NULL, PRIMARY KEY (secret, version));
       CREATE TABLE IF NOT EXISTS m13_fixture_secret_acl (secret text PRIMARY KEY, accessor text NOT NULL);`);
-    for (const table of ["m13_fixture_candidates", "m13_fixture_accounts", "m13_fixture_secrets", "m13_fixture_secret_acl"])
+    for (const table of [
+      "m13_fixture_candidates",
+      "m13_fixture_accounts",
+      "m13_fixture_secrets",
+      "m13_fixture_secret_acl",
+    ])
       await pool.query(`GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE ${table} TO ${role}`);
     await pool.query(`GRANT USAGE ON SEQUENCE m13_fixture_secrets_version_seq TO ${role}`);
   } finally {
@@ -107,7 +113,9 @@ export function createTableIdentities(connectionString, afterAddVersion = async 
   const email = (id) => `${id}@embody-cloud.iam.gserviceaccount.com`;
   return {
     async ensureAccount(id) {
-      await pool.query("INSERT INTO m13_fixture_accounts (id) VALUES ($1) ON CONFLICT DO NOTHING", [id]);
+      await pool.query("INSERT INTO m13_fixture_accounts (id) VALUES ($1) ON CONFLICT DO NOTHING", [
+        id,
+      ]);
       return { email: email(id) };
     },
     async ensureSecret(secret, accessor) {
@@ -118,7 +126,10 @@ export function createTableIdentities(connectionString, afterAddVersion = async 
     },
     async latestSecretVersion(secret) {
       const row = (
-        await pool.query("SELECT max(version)::text AS v FROM m13_fixture_secrets WHERE secret = $1", [secret])
+        await pool.query(
+          "SELECT max(version)::text AS v FROM m13_fixture_secrets WHERE secret = $1",
+          [secret],
+        )
       ).rows[0];
       return row?.v ?? null;
     },
@@ -142,12 +153,18 @@ export function createTableIdentities(connectionString, afterAddVersion = async 
     },
     async versions(secret) {
       return Number(
-        (await pool.query("SELECT count(*)::int AS n FROM m13_fixture_secrets WHERE secret = $1", [secret]))
-          .rows[0].n,
+        (
+          await pool.query("SELECT count(*)::int AS n FROM m13_fixture_secrets WHERE secret = $1", [
+            secret,
+          ])
+        ).rows[0].n,
       );
     },
     async ensureWakeQueue(queue, invoker) {
-      return { queue: `projects/embody-cloud/locations/us-central1/queues/${queue}`, invokerEmail: email(invoker) };
+      return {
+        queue: `projects/embody-cloud/locations/us-central1/queues/${queue}`,
+        invokerEmail: email(invoker),
+      };
     },
     close: () => pool.end(),
   };

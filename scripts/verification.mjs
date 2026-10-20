@@ -70,7 +70,10 @@ export function redact(text, env = process.env) {
   const secrets = Object.entries(env)
     .filter(
       ([key, value]) =>
-        value && /(?:PASSWORD|TOKEN|SECRET|POSTGRES.*URL|PLATFORM.*URL|PROVISIONER.*URL|CREDENTIAL)/u.test(key),
+        value &&
+        /(?:PASSWORD|TOKEN|SECRET|POSTGRES.*URL|PLATFORM.*URL|PROVISIONER.*URL|CREDENTIAL)/u.test(
+          key,
+        ),
     )
     .flatMap(([, value]) => {
       try {

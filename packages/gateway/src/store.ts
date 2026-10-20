@@ -663,7 +663,8 @@ export class MemoryGatewayStore
   ): Promise<ReleaseRecord | null> {
     return clone(
       [...this.releases.values()].find(
-        (r) => r.workspaceId === workspaceId && r.appId === appId && r.deploymentId === deploymentId,
+        (r) =>
+          r.workspaceId === workspaceId && r.appId === appId && r.deploymentId === deploymentId,
       ) ?? null,
     );
   }
@@ -1579,7 +1580,9 @@ export class PostgresGatewayStore
         const source = target?.sourceUploadId
           ? await this.lockSource(client, ws, target.sourceUploadId)
           : undefined;
-        const artifact = target ? await this.lockArtifact(client, ws, target.artifactId) : undefined;
+        const artifact = target
+          ? await this.lockArtifact(client, ws, target.artifactId)
+          : undefined;
         const usage = (
           await client.query<{ app: number; workspace: number }>(
             `SELECT count(*) FILTER (WHERE app_id=$2)::int AS app, count(*)::int AS workspace
@@ -1702,7 +1705,11 @@ export class PostgresGatewayStore
       )
     ).rows[0];
     return row
-      ? { ...row.document, ...(row.purging ? { purging: true } : {}), revision: Number(row.revision) }
+      ? {
+          ...row.document,
+          ...(row.purging ? { purging: true } : {}),
+          revision: Number(row.revision),
+        }
       : undefined;
   }
   private async lockSource(
@@ -1717,7 +1724,11 @@ export class PostgresGatewayStore
       )
     ).rows[0];
     return row
-      ? { ...row.document, ...(row.purging ? { purging: true } : {}), revision: Number(row.revision) }
+      ? {
+          ...row.document,
+          ...(row.purging ? { purging: true } : {}),
+          revision: Number(row.revision),
+        }
       : undefined;
   }
   /** CAS write of an artifact's pin and retention; the column mirrors `pinnedBy`. */

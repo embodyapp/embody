@@ -179,7 +179,10 @@ export class MemoryAppDatabase implements AppDatabase {
   public appliedMigrations(names: AppResourceNames): Promise<readonly number[]> {
     return Promise.resolve([...this.db(names).applied]);
   }
-  public applyNextMigration(names: AppResourceNames, target: number): Promise<"applied" | "current"> {
+  public applyNextMigration(
+    names: AppResourceNames,
+    target: number,
+  ): Promise<"applied" | "current"> {
     const db = this.db(names);
     const next = this.policy.find((m) => m.version <= target && !db.applied.includes(m.version));
     if (!next) return Promise.resolve("current");

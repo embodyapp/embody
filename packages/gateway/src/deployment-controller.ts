@@ -374,8 +374,7 @@ export class DeploymentController {
             : await this.options.stages.check(context);
         if (result.ok)
           return { kind: "advance", ...(result.candidate ? { candidate: result.candidate } : {}) };
-        if (result.pending)
-          return { kind: "poll", delayMs: DEPLOYMENT_LIMITS.stagePollMs };
+        if (result.pending) return { kind: "poll", delayMs: DEPLOYMENT_LIMITS.stagePollMs };
         if (result.retryable) return { kind: "retry", reason: result.reason };
         return {
           kind: "fail",
@@ -443,7 +442,8 @@ export class DeploymentController {
     const rollback = record.rollbackOf
       ? await store.release(record.workspaceId, record.appId, record.rollbackOf)
       : undefined;
-    if (record.rollbackOf && (!rollback || rollback.artifactId !== artifact.artifactId)) return null;
+    if (record.rollbackOf && (!rollback || rollback.artifactId !== artifact.artifactId))
+      return null;
     const status = await store.appStatus(record.workspaceId, record.appId);
     const active = status?.activeReleaseId
       ? await store.release(record.workspaceId, record.appId, status.activeReleaseId)
