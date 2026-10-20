@@ -118,6 +118,7 @@ export function createTableIdentities(connectionString, afterAddVersion = async 
       ]);
       return { email: email(id) };
     },
+    async ensureDatabaseClient() {},
     async ensureSecret(secret, accessor) {
       await pool.query(
         "INSERT INTO m13_fixture_secret_acl (secret, accessor) VALUES ($1,$2) ON CONFLICT (secret) DO UPDATE SET accessor = EXCLUDED.accessor",

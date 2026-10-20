@@ -269,6 +269,41 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
     // IAM is eventually consistent: use the account from the next step on.
     return "pending";
   }
+  /**
+   * Adds the runtime to the project's unconditional `roles/cloudsql.client` binding (etag-guarded
+   * read-modify-write; a concurrent change fails this step and the next one retries). The
+   * controller's own project IAM grant is conditioned to modify this role only.
+   */
+  public async ensureDatabaseClient(email: string, signal: AbortSignal): Promise<void> {
+    const resource = `https://cloudresourcemanager.googleapis.com/v1/projects/${this.options.project}`;
+    const member = `serviceAccount:${email}`;
+    const role = "roles/cloudsql.client";
+    const { body: policy } = await this.ok(
+      `${resource}:getIamPolicy`,
+      "POST",
+      { options: { requestedPolicyVersion: 3 } },
+      signal,
+    );
+    const bindings = Array.isArray(policy["bindings"])
+      ? (policy["bindings"] as Record<string, unknown>[])
+      : [];
+    const plain = bindings.find(
+      (binding) => binding["role"] === role && binding["condition"] === undefined,
+    );
+    const members = Array.isArray(plain?.["members"]) ? (plain["members"] as string[]) : [];
+    if (members.includes(member)) return;
+    const next = plain
+      ? bindings.map((binding) =>
+          binding === plain ? { ...binding, members: [...members, member] } : binding,
+        )
+      : [...bindings, { role, members: [member] }];
+    await this.ok(
+      `${resource}:setIamPolicy`,
+      "POST",
+      { policy: { ...policy, bindings: next } },
+      signal,
+    );
+  }
   public async ensureSecret(
     secretId: string,
     accessorEmail: string,

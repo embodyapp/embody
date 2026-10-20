@@ -45,7 +45,7 @@ One bounded step per task; anything that starts a provider operation returns `pe
 
 | Step | Resource (per app unless noted) | Idempotency |
 |---|---|---|
-| Runtime identity | service account `<prefix>-a<hash>`: no project roles | get, else create (then `pending` for IAM propagation) |
+| Runtime identity | service account `<prefix>-a<hash>`; its only project role is `roles/cloudsql.client` (the Cloud SQL connector authorizes by identity; database access stays per app role) | get, else create (then `pending` for IAM propagation); the Cloud SQL client binding by an etag-guarded project policy edit |
 | Database | database `embody_<prefix>_a<hash>`, owner role `…_o` (no login), runtime role `…_r` (login, `CONNECTION LIMIT 15` = 3 instances × pool 5, statement and idle-in-transaction timeouts 30 s) on the shared Cloud SQL instance (MD05) | existence checks |
 | Credential | secret `<prefix>-a<hash>-db` holding the runtime `DATABASE_URL`; only accessor: the runtime identity | the role's comment records the secret version its password came from; a mismatch (a crash between writing the version and the role) rotates again. The controller never reads a payload |
 | Migration | next pending framework migration (below) | one per step, re-planned under an advisory lock |
@@ -94,7 +94,7 @@ Subscriptions are part of the catalog (`eventSubscriptions`) and the release man
 | Failed or cancelled deployment's candidate | until cleanup | cleanup (`abandon`, ownership-checked, 10 tries); the candidate sweep catches anything later, including a candidate a timed-out stage created after a cancellation (M12 review finding 1; the controller also runs `abandonIfEnded` when such a stage settles) |
 | Candidate with no deployment record | none | the candidate sweep |
 | Release and deployment rows | indefinitely | M16 (M12 review finding 7) |
-| App identity, database, roles, secret, wake queue | the app's lifetime (one set per app, never per deployment) | app delete (M15) |
+| App identity (and its Cloud SQL client binding), database, roles, secret, wake queue | the app's lifetime (one set per app, never per deployment) | app delete (M15) |
 | Secret versions superseded by a credential rotation | until M15 rotation policy | M15 (at most one per crashed convergence) |
 
 **Candidate sweep.** `CandidateSweep` lists this platform's candidates and removes one only when its labels and annotations name exactly one workspace, app and deployment of this platform (anything else is foreign and untouched) and that deployment failed, was cancelled or no longer exists, or its release was replaced and has drained. It removes at most 10 per pass. It runs after delivered worker tasks (at most once a minute per instance) and on `POST /_embody/tasks/reconcile`, never on a timer, so an idle platform stays at zero. Every deployment creates one candidate and delivers several tasks, so removal keeps pace with creation; on an idle platform, drained candidates wait for the next task or reconcile, cost nothing at min 0 instances and do not grow.
@@ -103,8 +103,8 @@ Subscriptions are part of the catalog (`eventSubscriptions`) and the release man
 
 | Identity | M13 grants | Never |
 |---|---|---|
-| Deployment worker (controller) | Cloud Run `run.services.create/get/list/delete/getIamPolicy/setIamPolicy` in the region; `iam.serviceAccounts.create/get` and `actAs` on app runtime identities only (IAM condition on the `<prefix>-a` name prefix); `setIamPolicy` on app invoker identities (`<prefix>-w`); Secret Manager `secrets.create/get/setIamPolicy`, `versions.add/get` on `<prefix>-a…-db` secrets (no `versions.access`); Cloud Tasks queue `create/get/setIamPolicy` on `<prefix>-a` queues; `cloudsql.client`; the database provisioner credential | `actAs` on the gateway, builder or any platform identity; reading secret payloads; app actions (no signing key) |
-| App runtime | its own secret (accessor), its own queue (enqueuer) and `actAs` on its own invoker | any project role, other apps' databases, secrets or queues, the platform database |
+| Deployment worker (controller) | project IAM admin **conditioned** (`api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', []).hasOnly(['roles/cloudsql.client'])`) so it can grant runtimes the Cloud SQL client role and nothing else; Cloud Run `run.services.create/get/list/delete/getIamPolicy/setIamPolicy` in the region; `iam.serviceAccounts.create/get` and `actAs` on app runtime identities only (IAM condition on the `<prefix>-a` name prefix); `setIamPolicy` on app invoker identities (`<prefix>-w`); Secret Manager `secrets.create/get/setIamPolicy`, `versions.add/get` on `<prefix>-a…-db` secrets (no `versions.access`); Cloud Tasks queue `create/get/setIamPolicy` on `<prefix>-a` queues; `cloudsql.client`; the database provisioner credential | `actAs` on the gateway, builder or any platform identity; reading secret payloads; app actions (no signing key) |
+| App runtime | `roles/cloudsql.client` (connector only); its own secret (accessor), its own queue (enqueuer) and `actAs` on its own invoker | any other project role, other apps' databases (no `CONNECT`, other passwords), secrets or queues, the platform database |
 | App wake invoker | `run.invoker` on its app's candidates | anything else |
 | Gateway | `run.invoker` on every candidate (set per candidate) | as M05 |
 

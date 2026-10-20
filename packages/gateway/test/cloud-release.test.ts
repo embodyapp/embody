@@ -190,6 +190,41 @@ describe("M13 Google Cloud release adapter request shapes", () => {
     expect(calls.some((call) => call.url.includes(":access"))).toBe(false);
   });
 
+  it("grants the runtime Cloud SQL client by an etag-guarded project policy edit, once", async () => {
+    let policy: Record<string, unknown> = {
+      etag: "BwX1",
+      version: 3,
+      bindings: [
+        { role: "roles/viewer", members: ["user:a@example.com"] },
+        {
+          role: "roles/cloudsql.client",
+          members: ["serviceAccount:x@p"],
+          condition: { title: "t" },
+        },
+      ],
+    };
+    const { calls, fetcher } = fakeFetch((call) => {
+      if (call.url.endsWith(":getIamPolicy")) return { status: 200, body: policy };
+      policy = (call.body as { policy: Record<string, unknown> }).policy;
+      return { status: 200, body: policy };
+    });
+    const provider = new GoogleReleaseProvider(options(fetcher));
+    const email = "emb-a1@embody-cloud.iam.gserviceaccount.com";
+    await provider.ensureDatabaseClient(email, signal);
+    await provider.ensureDatabaseClient(email, signal);
+    const writes = calls.filter((call) => call.url.endsWith(":setIamPolicy"));
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.url).toBe(
+      "https://cloudresourcemanager.googleapis.com/v1/projects/embody-cloud:setIamPolicy",
+    );
+    expect(policy).toMatchObject({ etag: "BwX1" });
+    expect(policy["bindings"]).toEqual([
+      { role: "roles/viewer", members: ["user:a@example.com"] },
+      { role: "roles/cloudsql.client", members: ["serviceAccount:x@p"], condition: { title: "t" } },
+      { role: "roles/cloudsql.client", members: [`serviceAccount:${email}`] },
+    ]);
+  });
+
   it("health probe: invoker token for the exact origin, ready only on ready:true, bounded", async () => {
     const endpoint = "https://emb-cabc-123456789012.us-central1.run.app";
     const now = Math.floor(Date.now() / 1000);

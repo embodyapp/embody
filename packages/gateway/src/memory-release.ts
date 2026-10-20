@@ -88,6 +88,8 @@ export class MemoryAppIdentityProvider implements AppIdentityProvider {
   public readonly accounts = new Set<string>();
   public readonly secrets = new Map<string, { accessor: string; versions: string[] }>();
   public readonly queues = new Map<string, { invoker: string; enqueuer: string }>();
+  /** Identities holding the project's Cloud SQL client role. */
+  public readonly databaseClients = new Set<string>();
   /** Calls that report `pending` before an account exists (IAM propagation). */
   public pendingAccountCalls = 0;
   public constructor(private readonly project = "embody-cloud") {}
@@ -100,6 +102,10 @@ export class MemoryAppIdentityProvider implements AppIdentityProvider {
       }
     }
     return Promise.resolve({ email: `${accountId}@${this.project}.iam.gserviceaccount.com` });
+  }
+  public ensureDatabaseClient(email: string): Promise<void> {
+    this.databaseClients.add(email);
+    return Promise.resolve();
   }
   public ensureSecret(secretId: string, accessorEmail: string): Promise<void> {
     const secret = this.secrets.get(secretId);

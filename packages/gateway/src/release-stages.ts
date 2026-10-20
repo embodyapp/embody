@@ -151,6 +151,12 @@ export interface AppIdentityProvider {
     displayName: string,
     signal: AbortSignal,
   ): Promise<{ readonly email: string } | "pending">;
+  /**
+   * The Cloud SQL connector authorizes by identity: the runtime needs `roles/cloudsql.client`
+   * on the project. Database access itself stays per app (its own role, password and database).
+   * The controller may grant this one role and no other (conditional project IAM admin).
+   */
+  ensureDatabaseClient(email: string, signal: AbortSignal): Promise<void>;
   /** Creates or adopts the secret; its only accessor is `accessorEmail`. */
   ensureSecret(secretId: string, accessorEmail: string, signal: AbortSignal): Promise<void>;
   /** Name of the newest enabled version (metadata only: the controller never reads payloads). */
@@ -402,6 +408,7 @@ export class ReleaseStages implements DeploymentStages {
       signal,
     );
     if (account === "pending") return pending("IDENTITY_PENDING");
+    await identities.ensureDatabaseClient(account.email, signal);
     await database.ensure(names);
     await identities.ensureSecret(names.databaseSecret, account.email, signal);
     // Converge the runtime credential without the controller ever reading a secret payload:

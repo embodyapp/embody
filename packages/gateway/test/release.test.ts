@@ -86,6 +86,8 @@ describe("M13.a first deploy registers the app; updates switch route and manifes
     expect(h.identities.secrets.get(h.names.databaseSecret)?.accessor).toBe(
       candidate.spec.serviceAccount,
     );
+    // The Cloud SQL connector authorizes by identity; data access stays per app role.
+    expect([...h.identities.databaseClients]).toEqual([candidate.spec.serviceAccount]);
     const db = h.database.databases.get(h.names.database)!;
     expect(db.applied).toEqual([1, 2, 3, 4, 5, 6]);
     expect(db.marker).toBe("1");
