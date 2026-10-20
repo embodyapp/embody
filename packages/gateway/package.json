@@ -27,7 +27,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "test": "vitest run --exclude test/postgres-store.test.ts --exclude test/deployment.postgres.test.ts",
+    "test": "vitest run --exclude test/postgres-store.test.ts --exclude test/deployment.postgres.test.ts --exclude test/release.postgres.test.ts",
     "test:postgres": "node ../../scripts/platform-prerequisites.mjs && vitest run test/postgres-store.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
