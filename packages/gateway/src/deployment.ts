@@ -270,6 +270,8 @@ export function wakeFor(
 // App view used by every decision: the catalog app is authoritative (M04 generation, M12 fence).
 
 export interface AppControl {
+  /** The catalog namespace (M13 registers the first release under it). */
+  readonly name?: string;
   readonly generation: number;
   readonly lifecycleFence: number;
   readonly status: "enabled" | "disabled" | "deleted";
@@ -277,7 +279,9 @@ export interface AppControl {
 }
 export function appControl(app: CatalogApp | null | undefined): AppControl | null {
   if (!app) return null;
+  const name = app.name ?? app.registration?.appId;
   return {
+    ...(name !== undefined ? { name } : {}),
     generation: app.generation,
     lifecycleFence: app.lifecycleFence ?? 0,
     status: app.state === "deleted" ? "deleted" : app.state === "disabled" ? "disabled" : "enabled",
