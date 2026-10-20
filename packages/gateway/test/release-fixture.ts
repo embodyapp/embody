@@ -106,7 +106,7 @@ export function subscriberPlugin(events: readonly string[]): EmbodyPlugin {
 export function catalogBuild(
   config: BuildConfig,
   plugins: readonly EmbodyPlugin[],
-  appId = "my-app",
+  appId = NAME,
 ): SimulatedBuildResult {
   const prefix = config.artifacts.objects.location.replace(/^gs:\/\/[^/]+\//, "");
   const manifest = Buffer.from(
@@ -179,12 +179,16 @@ export async function releaseHarness(
   const store = options.store ?? new MemoryGatewayStore();
   const ws = options.workspaceId ?? WS;
   const objects = new MemorySourceObjectStore({ clock });
-  const state: { plugins: readonly EmbodyPlugin[] } = { plugins: [plainPlugin()] };
-  const perBuild = new Map<string, readonly EmbodyPlugin[]>();
+  const state: { plugins: readonly EmbodyPlugin[]; appId: string } = {
+    plugins: [plainPlugin()],
+    appId: NAME,
+  };
+  const perBuild = new Map<string, { plugins: readonly EmbodyPlugin[]; appId: string }>();
   const provider = new MemoryBuildProvider((config) => {
     const id = config.tags[1]!;
-    if (!perBuild.has(id)) perBuild.set(id, state.plugins);
-    return catalogBuild(config, perBuild.get(id)!);
+    if (!perBuild.has(id)) perBuild.set(id, { plugins: state.plugins, appId: state.appId });
+    const build = perBuild.get(id)!;
+    return catalogBuild(config, build.plugins, build.appId);
   }, clock);
   const submitted: string[] = [];
   const realSubmit = provider.submit.bind(provider);

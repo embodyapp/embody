@@ -40,7 +40,7 @@ describe("M13.a first deploy registers the app; updates switch route and manifes
     expect(app.activeRelease).toBe(deployed.releaseId);
     expect(app.state).toBe("idle");
     expect(app.generation).toBe(2);
-    // Namespace from the platform record, never the build's `appId` claim ("my-app").
+    // Namespace from the platform record (the build's own name must match it, see below).
     expect(app.registration).toMatchObject({
       appId: NAME,
       endpoint,
@@ -158,6 +158,14 @@ describe("M13.a manifest and namespace integrity", () => {
     failedWith(await h.reload(record), "CHECK_FAILED", "MANIFEST_MISMATCH");
     expect(await h.catalog()).toEqual(before);
     expect(before.activeRelease).toBe(first.releaseId);
+  });
+
+  it("a build whose own app name differs from the platform name is refused (it could serve no call)", async () => {
+    const h = await releaseHarness();
+    h.state.appId = "someone-else";
+    const record = await h.deploy([plainPlugin()]);
+    failedWith(record, "CHECK_FAILED", "APP_NAME_MISMATCH");
+    expect((await h.catalog()).registration).toBeNull();
   });
 
   it("customer secret references are refused until M15 serves them", async () => {

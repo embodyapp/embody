@@ -670,7 +670,8 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
         {
           workspaceId: ws,
           appId: APP,
-          name: NAME,
+          // The table build provider names the built app "my-app"; the platform name must match it.
+          name: "my-app",
           registration: null,
           activeRelease: null,
           state: "unavailable",

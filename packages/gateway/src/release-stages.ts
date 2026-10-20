@@ -288,6 +288,10 @@ export async function releaseRegistration(input: {
     throw error;
   }
   if (!bytes) return "MANIFEST_MISSING";
+  // The build's app name is a claim and never identity: the platform name is. But the hosted host
+  // verifies the gateway's principal tokens against its own `defineApp({ appId })`, and the gateway
+  // issues them for the platform name, so a release whose built name differs could serve no call.
+  if (artifact.manifest.appId !== input.name) return "APP_NAME_MISMATCH";
   if (sha256(bytes) !== artifact.manifestDigest) return "MANIFEST_MISMATCH";
   let catalog;
   try {
