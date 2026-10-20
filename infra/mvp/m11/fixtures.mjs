@@ -83,7 +83,7 @@ async function editJson(path, edit) {
 
 /**
  * Creates fixture `kind` under `directory` (must not exist) and returns its packed source.
- * `deps`: { createApp, packSource, registryUrl, pnpm?: string, foreignSourceUrl? }.
+ * `deps`: { createApp, packSource, registryUrl, pnpm?: string, foreignSourceUrl?, customize? }.
  */
 export async function createFixture(kind, directory, deps) {
   const spec = M11_FIXTURES[kind];
@@ -145,6 +145,8 @@ export async function createFixture(kind, directory, deps) {
       )}`;
     });
 
+  // Later suites (M13) vary a clean scaffold before it is locked and packed.
+  await deps.customize?.(directory);
   if (kind !== "missing-lockfile") {
     // Async: the framework registry may run in this same process.
     const [command, ...prefix] = deps.pnpm ?? ["corepack", "pnpm@11.25.0"];

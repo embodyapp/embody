@@ -19,7 +19,10 @@ import {
   createDeploymentWorker,
 } from "../../../packages/gateway/dist/index.js";
 import { cloudTasksQueue } from "../../../packages/host/dist/index.js";
-import { STORAGE_MIGRATIONS, STORAGE_RUNTIME_FUNCTIONS } from "../../../packages/storage/dist/index.js";
+import {
+  STORAGE_MIGRATIONS,
+  STORAGE_RUNTIME_FUNCTIONS,
+} from "../../../packages/storage/dist/index.js";
 
 const env = process.env;
 const required = [
