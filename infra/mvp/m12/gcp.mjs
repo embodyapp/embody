@@ -411,12 +411,22 @@ export function createM12GcpProvider({
       const { Pool } = createRequire(
         new URL("../../../packages/gateway/package.json", import.meta.url),
       )("pg");
+
+      /** An idle connection the server or proxy drops is an 'error' event; without a listener it kills
+       * the process (live run 4ab5cd). Queries still reject, and the pool reconnects. */
+      const quiet = (pool) => {
+        pool.on("error", () => undefined);
+        return pool;
+      };
+
       const local = (user, password, database) =>
         `postgresql://${user}:${encodeURIComponent(password)}@127.0.0.1:${port}/${database}`;
-      const admin = new Pool({
-        connectionString: local("postgres", context.adminPassword, "postgres"),
-        max: 1,
-      });
+      const admin = quiet(
+        new Pool({
+          connectionString: local("postgres", context.adminPassword, "postgres"),
+          max: 1,
+        }),
+      );
       for (let i = 0; ; i++) {
         try {
           await admin.query("SELECT 1");
@@ -447,7 +457,7 @@ export function createM12GcpProvider({
       }
       const migrationUrl = local("embody_platform_migrator", migratorPassword, "embody_platform");
       const runtimeUrl = local("embody_platform_runtime", runtimePassword, "embody_platform");
-      const owner = new Pool({ connectionString: migrationUrl, max: 1 });
+      const owner = quiet(new Pool({ connectionString: migrationUrl, max: 1 }));
       try {
         await owner.query("REVOKE ALL ON SCHEMA public FROM PUBLIC");
         await owner.query("GRANT USAGE ON SCHEMA public TO embody_platform_runtime");
@@ -457,7 +467,7 @@ export function createM12GcpProvider({
       const migrator = new gateway.PostgresGatewayStore(migrationUrl);
       await migrator.migrate();
       await migrator.close();
-      const grant = new Pool({ connectionString: migrationUrl, max: 1 });
+      const grant = quiet(new Pool({ connectionString: migrationUrl, max: 1 }));
       try {
         const tables = await grant.query(
           "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'embody_platform_%'",
@@ -475,7 +485,7 @@ export function createM12GcpProvider({
       await api(`${SECRETS}/projects/${project}/secrets/${context.secret}:addVersion`, "POST", {
         payload: { data: Buffer.from(workerUrl).toString("base64") },
       });
-      const pool = new Pool({ connectionString: runtimeUrl, max: 2 });
+      const pool = quiet(new Pool({ connectionString: runtimeUrl, max: 2 }));
       return {
         runtimeUrl,
         async plantFaults(deploymentId, points) {

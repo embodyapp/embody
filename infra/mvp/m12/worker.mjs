@@ -40,7 +40,13 @@ const url = dsn.href;
 const { Pool } = createRequire(new URL("../../../packages/gateway/package.json", import.meta.url))(
   "pg",
 );
-const faults = new Pool({ connectionString: url, max: 1 });
+/** An idle connection the server or proxy drops is an 'error' event; without a listener it kills
+ * the process (live run 4ab5cd). Queries still reject, and the pool reconnects. */
+const quiet = (pool) => {
+  pool.on("error", () => undefined);
+  return pool;
+};
+const faults = quiet(new Pool({ connectionString: url, max: 1 }));
 /** Exits the process at `point` once per deployment when the suite planted that fault. */
 async function crashAt(point, deploymentId) {
   if (!deploymentId) return;

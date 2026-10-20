@@ -8,6 +8,12 @@ import { compileManifest, definePlugin, z } from "@embody/core";
 import { BUILD_RECIPE } from "@embody/cloud-contracts";
 
 const { Pool } = createRequire(import.meta.url)("pg");
+/** An idle connection the server or proxy drops is an 'error' event; without a listener it kills
+ * the process (live run 4ab5cd). Queries still reject, and the pool reconnects. */
+const quiet = (pool) => {
+  pool.on("error", () => undefined);
+  return pool;
+};
 const sha = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 export const pin = (n) => sha(n);
 
@@ -25,7 +31,7 @@ export const recipe = {
 
 /** Fixture tables, created by the maintenance role; the platform runtime gets DML only. */
 export async function createFixtureTables(migrationUrl, runtimeRole) {
-  const pool = new Pool({ connectionString: migrationUrl, max: 1 });
+  const pool = quiet(new Pool({ connectionString: migrationUrl, max: 1 }));
   const role = `"${runtimeRole.replaceAll('"', '""')}"`;
   try {
     await pool.query("SELECT pg_advisory_lock(6240412)");
@@ -50,7 +56,7 @@ export async function createFixtureTables(migrationUrl, runtimeRole) {
 
 /** Cloud Tasks semantics: a task is a row written on its own connection; names are unique. */
 export function createTableQueue(connectionString) {
-  const pool = new Pool({ connectionString, max: 2 });
+  const pool = quiet(new Pool({ connectionString, max: 2 }));
   return {
     outage: false,
     async enqueue(task) {
@@ -148,7 +154,7 @@ function honest(config) {
  * a resource and its receipt.
  */
 export function createTableBuildProvider(connectionString, afterSubmit = async () => undefined) {
-  const pool = new Pool({ connectionString, max: 2 });
+  const pool = quiet(new Pool({ connectionString, max: 2 }));
   const executed = (value, url) =>
     value.split("$$").join("\u0000").replaceAll("$_SOURCE_URL", url).split("\u0000").join("$");
   return {
@@ -243,7 +249,7 @@ export function createTableBuildProvider(connectionString, afterSubmit = async (
  * `afterCreate` is the crash point between creating the candidate and recording it.
  */
 export function createTableStages(connectionString, afterCreate = async () => undefined) {
-  const pool = new Pool({ connectionString, max: 2 });
+  const pool = quiet(new Pool({ connectionString, max: 2 }));
   const nameOf = (deployment) => `cand-${deployment.workspaceId}-${deployment.deploymentId}`;
   return {
     nameOf,
