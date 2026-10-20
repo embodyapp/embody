@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { compileManifest, definePlugin, defineWorkflow, z, type PluginDefinition } from "@embody/core";
+import { compileManifest, definePlugin, defineWorkflow, z, type EmbodyPlugin } from "@embody/core";
 import { BUILD_RECIPE, submissionFingerprint, type DeploymentSubmission } from "@embody/cloud-contracts";
 import { STORAGE_MIGRATIONS } from "@embody/storage";
 import {
@@ -13,6 +13,7 @@ import {
   MemoryGatewayStore,
   MemoryHealthProbe,
   MemorySourceObjectStore,
+  PostgresGatewayStore,
   ReleaseStages,
   appResourceNames,
   deploymentWakeHook,
@@ -42,7 +43,7 @@ export const durable = {
 const sha = (bytes: Uint8Array | string) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 
 /** A request-only plugin; `actions` names its read actions (a different set is a new manifest). */
-export function plainPlugin(actions: readonly string[] = ["ping"]): PluginDefinition {
+export function plainPlugin(actions: readonly string[] = ["ping"]): EmbodyPlugin {
   return definePlugin({
     id: "app",
     version: "0.1.0",
@@ -58,7 +59,7 @@ export function plainPlugin(actions: readonly string[] = ["ping"]): PluginDefini
 /** A durable plugin with workflows `name@version` and the given step names. */
 export function workflowPlugin(
   workflows: Readonly<Record<string, { version: string; steps: readonly string[] }>>,
-): PluginDefinition {
+): EmbodyPlugin {
   return definePlugin({
     id: "app",
     version: "0.1.0",
@@ -79,7 +80,7 @@ export function workflowPlugin(
 }
 
 /** A durable plugin subscribing to `events` (the catalog's `eventSubscriptions`). */
-export function subscriberPlugin(events: readonly string[]): PluginDefinition {
+export function subscriberPlugin(events: readonly string[]): EmbodyPlugin {
   return definePlugin({
     id: "app",
     version: "0.1.0",
@@ -91,7 +92,7 @@ export function subscriberPlugin(events: readonly string[]): PluginDefinition {
 /** What the recipe produces for an honest build of `plugins` (as `honestBuild`, any catalog). */
 export function catalogBuild(
   config: BuildConfig,
-  plugins: readonly PluginDefinition[],
+  plugins: readonly EmbodyPlugin[],
   appId = "my-app",
 ): SimulatedBuildResult {
   const prefix = config.artifacts.objects.location.replace(/^gs:\/\/[^/]+\//, "");
@@ -151,12 +152,20 @@ export const storagePolicy: readonly MigrationPolicyEntry[] = STORAGE_MIGRATIONS
  * with a *reserved* app (name only, no registration). `h.plugins` is the catalog the next build
  * produces; `h.deploy(...)` uploads a fresh source and submits.
  */
-export async function releaseHarness(options: { policy?: readonly MigrationPolicyEntry[] } = {}) {
+export async function releaseHarness(
+  options: {
+    policy?: readonly MigrationPolicyEntry[];
+    /** Defaults to a memory store; the PostgreSQL suite passes a real one. */
+    store?: MemoryGatewayStore | PostgresGatewayStore;
+    workspaceId?: string;
+  } = {},
+) {
   const clock = new TestClock();
-  const store = new MemoryGatewayStore();
+  const store = options.store ?? new MemoryGatewayStore();
+  const ws = options.workspaceId ?? WS;
   const objects = new MemorySourceObjectStore({ clock });
-  const state: { plugins: readonly PluginDefinition[] } = { plugins: [plainPlugin()] };
-  const perBuild = new Map<string, readonly PluginDefinition[]>();
+  const state: { plugins: readonly EmbodyPlugin[] } = { plugins: [plainPlugin()] };
+  const perBuild = new Map<string, readonly EmbodyPlugin[]>();
   const provider = new MemoryBuildProvider((config) => {
     const id = config.tags[1]!;
     if (!perBuild.has(id)) perBuild.set(id, state.plugins);
@@ -203,9 +212,9 @@ export async function releaseHarness(options: { policy?: readonly MigrationPolic
     sweeper: sweep,
     clock,
   });
-  await store.createWorkspace(WS);
+  await store.createWorkspace(ws);
   await store.putApp(
-    { workspaceId: WS, appId: APP, name: NAME, registration: null, activeRelease: null, state: "unavailable" },
+    { workspaceId: ws, appId: APP, name: NAME, registration: null, activeRelease: null, state: "unavailable" },
     null,
   );
   const wake = deploymentWakeHook(queue);
@@ -219,7 +228,7 @@ export async function releaseHarness(options: { policy?: readonly MigrationPolic
     const key = `source_key_${String(sources).padStart(8, "0")}`;
     const digest = pin(`source-${key}`);
     const { record } = await store.admitSource({
-      workspaceId: WS,
+      workspaceId: ws,
       appId: APP,
       idempotencyKey: key,
       digest,
@@ -231,10 +240,10 @@ export async function releaseHarness(options: { policy?: readonly MigrationPolic
       { ...record, state: "verified", verifiedAt: clock.now().toISOString() },
       record.revision,
     );
-    const app = await store.appStatus(WS, APP);
+    const app = await store.appStatus(ws, APP);
     return {
       version: 1,
-      workspaceId: WS,
+      workspaceId: ws,
       appId: APP,
       idempotencyKey: `deploy_key_${String(sources).padStart(8, "0")}`,
       source: { uploadId: verified.uploadId, digest, bytes },
@@ -257,7 +266,7 @@ export async function releaseHarness(options: { policy?: readonly MigrationPolic
     store.deployment(record.workspaceId, record.appId, record.deploymentId);
   /** Builds `plugins`, deploys and drives the queue until idle; returns the final record. */
   const deploy = async (
-    plugins: readonly PluginDefinition[],
+    plugins: readonly EmbodyPlugin[],
     overrides: Partial<DeploymentSubmission> = {},
     bytes = 100,
   ) => {
@@ -266,8 +275,8 @@ export async function releaseHarness(options: { policy?: readonly MigrationPolic
     await run();
     return (await reload(record))!;
   };
-  const catalog = async () => (await store.snapshot(WS))!.apps.find((app) => app.appId === APP)!;
-  const names = appResourceNames(platform.prefix, WS, APP);
+  const catalog = async () => (await store.snapshot(ws))!.apps.find((app) => app.appId === APP)!;
+  const names = appResourceNames(platform.prefix, ws, APP);
   return {
     clock,
     store,
@@ -292,6 +301,7 @@ export async function releaseHarness(options: { policy?: readonly MigrationPolic
     catalog,
     names,
     completeBuilds,
+    workspaceId: ws,
   };
 }
 export { APP };
