@@ -80,8 +80,8 @@ const opaque = (error: unknown): never => {
 /**
  * M12 management routes. Order on every request: authenticate (workspace hook) → exact app grant
  * → durable quota/audit admission → store. Submission commits the deployment, its idempotency
- * binding, the source pin and the first controller task in one transaction and returns at once
- * (202, or 200 for a replay) without waiting for any build. Requests also run bounded MD12
+ * binding, the source retention and the first controller task in one transaction and returns at
+ * once (202, or 200 for a replay) without waiting for any build. Requests also run bounded MD12
  * recovery for the workspace's overdue deployments; it never fails or delays the request beyond
  * two seconds.
  */

@@ -167,6 +167,11 @@ describe.skipIf(!url || !migrationUrl)("M12 controller on real PostgreSQL (test:
         status: 200,
         outcome: "missing",
       });
+      // The rolled-back submission neither pinned nor extended the source.
+      expect(await store.source(ws2, APP, second.source.uploadId)).toMatchObject({
+        revision: second.source.revision,
+        retainUntil: second.source.retainUntil,
+      });
       expect((await store.source(ws2, APP, second.source.uploadId))?.pinnedBy).toBeUndefined();
     } finally {
       await early.close();
@@ -343,7 +348,7 @@ describe.skipIf(!url || !migrationUrl)("M12 controller on real PostgreSQL (test:
     /** After a SIGKILL the server releases the row lock once it notices the closed socket. */
     const settle = async () => new Promise((resolve) => setTimeout(resolve, 200));
 
-    it("killed after enqueue, before commit: nothing committed, source unpinned, the task is a no-op", async () => {
+    it("killed after enqueue, before commit: nothing committed, source unchanged, the task is a no-op", async () => {
       const ws = workspace();
       const { submission, source } = await seed(ws);
       await run(
@@ -352,6 +357,10 @@ describe.skipIf(!url || !migrationUrl)("M12 controller on real PostgreSQL (test:
       );
       await settle();
       expect(await only(ws)).toEqual([]);
+      expect(await store.source(ws, APP, source.uploadId)).toMatchObject({
+        revision: source.revision,
+        retainUntil: source.retainUntil,
+      });
       expect((await store.source(ws, APP, source.uploadId))?.pinnedBy).toBeUndefined();
       const results = await drive(ws);
       expect(results.map((r) => r.outcome)).toEqual(["missing"]);

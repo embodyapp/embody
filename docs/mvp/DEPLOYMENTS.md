@@ -6,7 +6,7 @@ M12 turns an accepted submission into one active release, or a visible failure, 
 
 ```text
 CLI ──POST /deployments──► gateway ──one transaction──► platform DB: deployment row (= job),
-                              │                           idempotency key, source pin, audit
+                              │                           idempotency key, source retention, audit
                               └─ before COMMIT ─► Cloud Tasks (controller queue): wake task
 202 + deployment ID ◄─────────┘
                                    Cloud Tasks ──OIDC (controller invoker)──► deployment worker
@@ -78,13 +78,13 @@ Committed work always has a task, but tasks can still be lost outside the platfo
 
 There is no periodic sweep and no gateway timer: an idle platform with no deployments in flight creates no tasks and wakes nothing. A deployment whose tasks were all lost and that nobody looks at waits for the next request or reconcile.
 
-## Submission, idempotency and source pinning (step 1)
+## Submission, idempotency and source retention (step 1)
 
 `POST /v1/workspaces/:ws/apps/:app/deployments` with a [`DeploymentSubmission`](./CONTRACTS.md#api-and-cli-mapping) (16 KiB):
 
 1. Authenticate (workspace credential), exact `deployment:submit` grant, durable quota/audit admission (M07).
 2. `verifySubmissionSource` (M10).
-3. One transaction under the workspace lock: replay or conflict by `(workspace, app, idempotencyKey)` and `submissionFingerprint` (same key and body, in any key order, returns the original deployment with `200`, even after it finished; a different body is `409 IDEMPOTENCY_CONFLICT`); the app must exist (`404`), be enabled (`403`) and be at `expectedGeneration` (`409 STALE_GENERATION`); the source is re-checked under lock and **pinned** (CAS on its revision: a concurrent purge fence fails the submission) for the deployment's 90-day retention; the deployment row is inserted (`accepted`, attempt 1, epoch 1, deadline 2 h) and the first task enqueued.
+3. One transaction under the workspace lock: replay or conflict by `(workspace, app, idempotencyKey)` and `submissionFingerprint` (same key and body, in any key order, returns the original deployment with `200`, even after it finished; a different body is `409 IDEMPOTENCY_CONFLICT`); the app must exist (`404`), be enabled (`403`) and be at `expectedGeneration` (`409 STALE_GENERATION`); the source is re-checked under lock and its `retainUntil` is extended to the deployment's 90-day retention (CAS on its revision: a concurrent purge fence fails the submission). It is **not pinned**: when that retention ends, whatever the deployment's outcome, the source sweep removes it and the workspace's 100 MiB source quota no longer counts it (MD15; review B1 of `e0266ee`). Only a release pins source; the deployment row is inserted (`accepted`, attempt 1, epoch 1, deadline 2 h) and the first task enqueued.
 4. `202` with the `DeploymentStatus`; no build is waited for.
 
 `GET …/deployments/:id` returns the status (`deployment:read`). `GET /v1/workspaces/:ws/apps/:app` returns `AppStatus` (`app:read`): `generation`, `lifecycleFence`, status and `activeReleaseId`; read it before submitting. Errors: `400` invalid, `401` unauthenticated, `403` permission or disabled app, `404` unknown or unauthorized app/deployment (other workspaces and apps are never revealed), `409` key conflict, stale generation or cancellation conflict, `413` body too large, `429` quota or active-deployment limit, `503` store or queue outage.
@@ -95,7 +95,7 @@ The promoting step's completion is one transaction that locks the workspace row 
 
 - inserts the release record (`rel_…`, the deployment, the artifact, its digest `imageReference`, and a `ReleaseManifest` validated against the contract, embedding the admitted artifact manifest);
 - CAS-updates the catalog app: `activeRelease`, generation + 1, revision + 1, workspace revision + 1;
-- pins the artifact to the release (`pinnedBy`), so retention never purges it;
+- pins the artifact and the deployment's source to the release (`pinnedBy`), so retention never purges them (MD15: an active release keeps its source indefinitely). If the source is gone (a purge tombstone), the deployment fails `DEPENDENCY_UNAVAILABLE` (`SOURCE_MISSING`) instead of promoting;
 - marks the deployment `active`.
 
 Two deployments of one app that both reach promotion: one wins, the other fails `STALE_GENERATION`. A late or cancelled worker fails its fence. **M13 extends this same transaction** with the candidate's route and manifest switch (M13.a); M12 does not change the catalog registration.
@@ -143,7 +143,7 @@ Clocks: leases and due times compare the workers' clocks (NTP on Cloud Run); the
 
 | Killed | Result |
 |---|---|
-| after enqueue, before commit | no deployment, source unpinned; the task answers `missing` |
+| after enqueue, before commit | no deployment, source unchanged (revision and retention); the task answers `missing` |
 | after commit, before the response | the task drives one active deployment; a client retry replays it |
 | committed, task lost (commit/enqueue gap) | recovery wakes it; one active deployment |
 | after the claim (worker lost mid-step) | the lease wake (lease + 1 s) reclaims it; attempt 1 completes |
@@ -180,8 +180,8 @@ Faults are rows in a fixture table the qualification worker reads (`m12_fixture_
 
 ## Not yet proven / later tasks
 
-- **M13:** real provisioning/check stages (Cloud Run candidate, migrations, smoke), the route/manifest switch inside the promotion transaction, rollback, unpinning replaced releases.
+- **M13:** real provisioning/check stages (Cloud Run candidate, migrations, smoke), the route/manifest switch inside the promotion transaction, rollback, unpinning replaced releases (artifact and source; a source shared by several releases is pinned by the newest, so unpinning must check that no retained release still references it).
 - **M14:** CLI `deploy`/`status`/cancel over these routes.
-- **M16:** schedules retention: deployments and key bindings expire after 90 days (`retainUntil`); unpin sources no deployment or release references; purge sweeps for artifacts and orphans.
+- **M16:** schedules retention: deployments and key bindings expire after 90 days (`retainUntil`); deletes deployment and release rows past retention; schedules the source, artifact and orphan sweeps. Deployment-referenced source already leaves the quota and the sweep's skip set when its retention ends (no unpinning needed).
 - **M21:** event relay tasks on the shared queue path.
 - **Residual risks:** a worker that dies after starting a build but before recording the artifact's build ID leaves at most one build running to its 600 s provider timeout (adopted on the next claim). The submission transaction holds the workspace lock while it enqueues (≤ 5 s), so submissions in one workspace serialize.

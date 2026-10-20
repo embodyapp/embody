@@ -45,6 +45,7 @@ import {
   isOverdue,
   newDeploymentId,
   releaseManifest,
+  releaseSourceUsable,
   wakeFor,
   type AppControl,
   type ClaimDecision,
@@ -598,6 +599,8 @@ export class MemoryGatewayStore
       const app = this.catalogApp(fence.workspaceId, fence.appId);
       let applied = outcome;
       let artifact: ArtifactRecord | undefined;
+      const sourceKey = `${record.workspaceId}/${record.submission.source.uploadId}`;
+      const source = this.sources.get(sourceKey);
       if (outcome.kind === "promote") {
         artifact = record.artifactId
           ? this.artifacts.get(`${record.workspaceId}/${record.artifactId}`)
@@ -610,6 +613,8 @@ export class MemoryGatewayStore
           artifact.appId !== record.appId
         )
           applied = { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: "ARTIFACT_MISSING" };
+        else if (!releaseSourceUsable(record, source))
+          applied = { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: "SOURCE_MISSING" };
       }
       const decision = decideComplete({
         record: clone(record),
@@ -644,6 +649,11 @@ export class MemoryGatewayStore
           ...artifact!,
           pinnedBy: release.releaseId,
           revision: artifact!.revision + 1,
+        });
+        this.sources.set(sourceKey, {
+          ...source!,
+          pinnedBy: release.releaseId,
+          revision: source!.revision + 1,
         });
       }
       this.deployments.set(key, decision.next);
@@ -1322,23 +1332,24 @@ export class PostgresGatewayStore
         });
         if (decision.replay) return { record: decision.record, replay: true };
         const record: DeploymentRecord = { ...decision.record, revision: 1 };
-        const pinned: SourceRecord = {
+        // Retention extended to the deployment's (MD15), not pinned: see decideSubmit.
+        const retained: SourceRecord = {
           ...decision.source,
           revision: Number(source!.revision) + 1,
         };
-        const pin = await client.query(
-          `UPDATE embody_platform_sources SET pinned=true,retain_until=$4,revision=$5,document=$6
+        const retain = await client.query(
+          `UPDATE embody_platform_sources SET retain_until=$4,revision=$5,document=$6
           WHERE workspace_id=$1 AND upload_id=$2 AND revision=$3 AND NOT purging`,
           [
-            pinned.workspaceId,
-            pinned.uploadId,
+            retained.workspaceId,
+            retained.uploadId,
             source!.revision,
-            pinned.retainUntil,
-            pinned.revision,
-            pinned,
+            retained.retainUntil,
+            retained.revision,
+            retained,
           ],
         );
-        if (pin.rowCount !== 1) throw new DeploymentError("INVALID_INPUT");
+        if (retain.rowCount !== 1) throw new DeploymentError("INVALID_INPUT");
         await client.query(
           `INSERT INTO embody_platform_deployments(workspace_id,deployment_id,app_id,idempotency_key,state,due_at,lease_until,cleanup,retain_until,revision,document)
           VALUES($1,$2,$3,$4,$5,$6,NULL,false,$7,1,$8)`,
@@ -1414,6 +1425,7 @@ export class PostgresGatewayStore
       const app = await this.catalogDocument(client, fence.workspaceId, fence.appId);
       let applied = outcome;
       let artifact: ArtifactRecord | undefined;
+      let source: SourceRecord | undefined;
       if (outcome.kind === "promote") {
         const row = record.artifactId
           ? (
@@ -1430,6 +1442,24 @@ export class PostgresGatewayStore
           artifact.appId !== record.appId
         )
           applied = { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: "ARTIFACT_MISSING" };
+        else {
+          // The release pins its source (MD15); lock order: workspace, deployment, artifact, source.
+          const row = (
+            await client.query<{ document: SourceRecord; purging: boolean; revision: string }>(
+              "SELECT document,purging,revision FROM embody_platform_sources WHERE workspace_id=$1 AND upload_id=$2 FOR UPDATE",
+              [record.workspaceId, record.submission.source.uploadId],
+            )
+          ).rows[0];
+          source = row
+            ? {
+                ...row.document,
+                ...(row.purging ? { purging: true } : {}),
+                revision: Number(row.revision),
+              }
+            : undefined;
+          if (!releaseSourceUsable(record, source))
+            applied = { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: "SOURCE_MISSING" };
+        }
       }
       const decision = decideComplete({
         record,
@@ -1492,6 +1522,17 @@ export class PostgresGatewayStore
           [pinned.workspaceId, pinned.artifactId, pinned.revision, pinned, artifact!.revision],
         );
         if (pin.rowCount !== 1) throw new ConflictError("Artifact revision conflict");
+        const kept: SourceRecord = {
+          ...source!,
+          pinnedBy: releaseId,
+          revision: source!.revision + 1,
+        };
+        const keep = await client.query(
+          `UPDATE embody_platform_sources SET pinned=true,revision=$3,document=$4
+          WHERE workspace_id=$1 AND upload_id=$2 AND revision=$5 AND NOT purging`,
+          [kept.workspaceId, kept.uploadId, kept.revision, kept, source!.revision],
+        );
+        if (keep.rowCount !== 1) throw new ConflictError("Source revision conflict");
       }
       await this.writeDeployment(client, decision.next, record.revision);
       if (decision.wake) await wake([decision.wake], await txid());

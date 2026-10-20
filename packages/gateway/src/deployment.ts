@@ -255,7 +255,7 @@ export type SubmitDecision =
   | {
       readonly replay: false;
       readonly record: Omit<DeploymentRecord, "revision">;
-      /** The source record pinned for the deployment's retention (CAS on its revision). */
+      /** The source record retained for the deployment's retention (CAS on its revision). */
       readonly source: SourceRecord;
     };
 
@@ -330,15 +330,15 @@ export function decideSubmit(input: {
     deadlineAt: iso(now + DEPLOYMENT_LIMITS.deploymentDeadlineMs),
     retainUntil: iso(retainUntil),
   };
-  // Pinned for the deployment's retention: the source sweep never deletes a pinned record, and
-  // the build reads exactly this object (SOURCES "Source retention"). M16 unpins it once no
-  // deployment or release references it.
-  const pinned: SourceRecord = {
+  // Retained as long as the deployment (MD15: 90 days), not pinned: the source sweep and the
+  // workspace quota release it when that retention ends, whatever the deployment's outcome. The
+  // build reads exactly this object long before then (deadline 2 h). Only a release pins source
+  // indefinitely (promotion, below).
+  const retained: SourceRecord = {
     ...source,
-    pinnedBy: source.pinnedBy ?? input.deploymentId,
     retainUntil: iso(Math.max(Date.parse(source.retainUntil), retainUntil)),
   };
-  return { replay: false, record, source: pinned };
+  return { replay: false, record, source: retained };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -681,6 +681,27 @@ export function isOverdue(record: DeploymentRecord, now: Date): boolean {
   );
 }
 
+/**
+ * The deployment's own source, still live: promotion pins it to the release in the same
+ * transaction (MD15: an active release keeps its source indefinitely), so a release never points
+ * at source the sweep may delete.
+ */
+export function releaseSourceUsable(
+  record: DeploymentRecord,
+  source: SourceRecord | null | undefined,
+): source is SourceRecord {
+  return (
+    !!source &&
+    !source.purging &&
+    source.workspaceId === record.workspaceId &&
+    source.appId === record.appId &&
+    source.uploadId === record.submission.source.uploadId &&
+    source.state === "verified" &&
+    source.digest === record.submission.source.digest &&
+    source.bytes === record.submission.source.bytes
+  );
+}
+
 /** Release manifest for a promoted deployment, validated against the M02 contract. */
 export function releaseManifest(
   record: DeploymentRecord,
@@ -723,7 +744,7 @@ export function deploymentStatus(record: DeploymentRecord): DeploymentStatus {
 
 /** Persistence for M12; implemented by the memory and PostgreSQL gateway stores. */
 export interface DeploymentStore {
-  /** Atomic: idempotency binding, app/source checks, source pin, insert, wake before commit. */
+  /** Atomic: idempotency, app/source checks, source retention, insert, wake before commit. */
   submitDeployment(
     input: SubmitInput,
     wake: DeploymentWakeHook,

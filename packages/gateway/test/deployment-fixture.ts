@@ -101,6 +101,7 @@ export async function seedDeployableApp(
   workspaceId: string,
   now: Date,
   key = "source_key_0000001",
+  bytes = 100,
 ) {
   await store.createWorkspace(workspaceId).catch(() => undefined);
   const app =
@@ -112,7 +113,7 @@ export async function seedDeployableApp(
     appId: APP,
     idempotencyKey: key,
     digest,
-    bytes: 100,
+    bytes,
     actorId: "alice",
     now,
   });
@@ -132,7 +133,7 @@ export async function seedDeployableApp(
       workspaceId,
       appId: APP,
       idempotencyKey,
-      source: { uploadId: verified.uploadId, digest, bytes: 100 },
+      source: { uploadId: verified.uploadId, digest, bytes },
       expectedGeneration: app.generation,
       capabilities: requestOnly,
       secretReferences: [],
