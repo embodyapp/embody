@@ -24,15 +24,15 @@ The fix was written by the reviewing session at the owner's request. A focused r
 - DEPLOYMENTS: submission step 3 (retention, not a pin), promotion (the release pins its source; `SOURCE_MISSING`), the local crash table, and the M13 and M16 lines.
 - SOURCES: the MD15 paragraph's implementation pointer (the decision itself is unchanged), and the bucket lifecycle backstop note.
 
-## Verification (clean tree on the fix commit, Node 24.21.0, disposable Compose project `embody-m12-review-e0266ee`)
+## Verification (clean tree at `fbf3e9c`, `dirty: false` in every evidence JSON, Node 24.21.0, fresh disposable Compose project `embody-m12-review-e0266ee`)
 
 | Command | Result |
 |---|---|
-| `pnpm verify` | COUNTS |
-| `pnpm test:verification` | COUNTS |
-| `pnpm test:postgres` | COUNTS |
-| `pnpm test:gateway-store` | COUNTS |
-| `pnpm test:mvp` | COUNTS |
-| `pnpm test:m12` | COUNTS |
+| `pnpm verify` | passed (lint, license, typecheck, tests, build, API report, format). Run without DB variables, so the optional DB tests skip by design; the mandatory DB gates below run them |
+| `pnpm test:verification` | 101 passed, 0 skipped |
+| `pnpm test:postgres` | 16 passed, 0 skipped |
+| `pnpm test:gateway-store` | **68** passed, 0 skipped (+2 review-B1 cases on PostgreSQL) |
+| `pnpm test:mvp` | **602** passed, 0 skipped: postgres 16, gateway-store 68, cloud-contracts 106, auth 6, host 113, MCP 18, gateway 259, CLI 16 |
+| `pnpm test:m12` | **127** passed, 0 skipped (+2 review-B1 cases on the memory store) |
 
 No live run: the fix stays inside `decideSubmit`, the promotion transaction and the store queries, and no live case exercises source retention. The live suite's rolled-back case still checks `pinnedBy`, which is now always absent after a submission. Its primary check (no deployment row) is unaffected, but its source check becomes weak. Change it to compare `retainUntil` when the live suite next changes.
