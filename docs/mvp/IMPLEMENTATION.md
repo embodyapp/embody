@@ -237,7 +237,7 @@ Steps:
 1. Provision restricted app identity/database/secrets and create candidate from admitted digest with min zero. Runtime has no migration/platform authority.
 2. Run bounded migrations separately. Limit MVP updates to compatible schema/data changes; reject unsupported destructive migrations before execution. Route rollback cannot undo data mutations.
 3. Validate candidate manifest, readiness and authorized side-effect-free smoke; atomically switch active route/manifest only on success.
-4. Keep previous release serving after failed build/check; drain existing calls with clear generation semantics. Retain rollback images/config references.
+4. Keep previous release serving after failed build/check; drain existing calls with clear generation semantics. Retain rollback images/config references. Unpin the artifact and source of releases past their inactive retention (MD15: 30 days); M12 pins a source to the newest release that promoted it, so unpin a shared source only when no retained release references it (M12 re-review N1).
 5. Permit compatible rollback by digest/config with fresh checks; fail safely if schema or secret compatibility prevents it.
 6. Bind subscriptions and workflow definitions with the route/manifest switch. Keep every workflow definition version that still has running instances available after promotion or rollback; refuse a release that drops one.
 

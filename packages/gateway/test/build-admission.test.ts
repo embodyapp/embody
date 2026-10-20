@@ -12,6 +12,7 @@ import {
   GcsSourceObjectStore,
   ORPHAN_AGE_MS,
   artifactStatus,
+  artifactTransitionAllowed,
   assembleScript,
   cleanupOrphanedImages,
   decideAdmission,
@@ -1037,5 +1038,132 @@ describe("M11 provider adapters (request shape only; not provider evidence)", ()
         method: "GET",
       }),
     ).toThrow(/not configured/);
+  });
+});
+
+describe("M12 hardening of M11 admission (provenance fields, N3, abandon)", () => {
+  const plan = planBuild(recipe, {
+    workspaceId: "ws_build00001",
+    appId: "app_build00001",
+    deploymentId: "dep_build00001",
+    artifactId: "art_build00001",
+    sourceDigest: pin("source"),
+    sourceBytes: 100,
+    sourceUrl: "https://storage.googleapis.com/b/o",
+  });
+  const raw = (extra: Record<string, unknown> = {}, step: Record<string, unknown> = {}) => ({
+    id: "0b1c2d3e-aaaa",
+    status: "SUCCESS",
+    ...plan.config,
+    steps: plan.config.steps.map((s, i) => ({ ...s, status: "SUCCESS", ...(i === 1 ? step : {}) })),
+    results: { images: [{ name: plan.image, digest: pin("img") }], buildStepOutputs: [] },
+    ...extra,
+  });
+  it("lists security-relevant request fields the platform never sets", () => {
+    expect(toProviderBuild(raw()).unplanned).toEqual([]);
+    // Provider-populated and empty fields are not unplanned.
+    expect(
+      toProviderBuild(raw({ source: {}, availableSecrets: undefined }, { dir: "", waitFor: [] }))
+        .unplanned,
+    ).toEqual([]);
+    expect(
+      toProviderBuild(
+        raw(
+          {
+            availableSecrets: { secretManager: [{ versionName: "x", env: "S" }] },
+            source: { storageSource: { bucket: "b", object: "o" } },
+            options: { ...plan.config.options, pool: { name: "p" }, volumes: [{ name: "v" }] },
+          },
+          { secretEnv: ["S"], allowFailure: true, waitFor: ["-"] },
+        ),
+      ).unplanned,
+    ).toEqual([
+      "availableSecrets",
+      "source",
+      "options.pool",
+      "options.volumes",
+      "steps[1].secretEnv",
+      "steps[1].allowFailure",
+      "steps[1].waitFor",
+    ]);
+  });
+  it("rejects a build whose provider record carries unplanned fields as PROVENANCE_INVALID", async () => {
+    const f = await fixture();
+    const submission = f.submission();
+    const started = await f.admission.start({
+      submission,
+      deploymentId: "dep_build00001",
+      attempt: 1,
+    });
+    f.provider.completeAll();
+    const get = f.provider.get.bind(f.provider);
+    f.provider.get = async (id) => ({ ...(await get(id)), unplanned: ["availableSecrets"] });
+    const settled = await f.admission.settle(started, submission);
+    expect(settled).toMatchObject({ state: "rejected", error: "PROVENANCE_INVALID" });
+  });
+  it("N3: while building only the build ID and retention fields may change", async () => {
+    const f = await fixture();
+    const submission = f.submission();
+    const started = await f.admission.start({
+      submission,
+      deploymentId: "dep_build00001",
+      attempt: 1,
+    });
+    const { buildId: _id, ...unsubmitted } = started;
+    void _id;
+    expect(artifactTransitionAllowed(unsubmitted as typeof started, started)).toBe(true);
+    for (const change of [
+      { manifestDigest: pin("m") },
+      { imageDigest: pin("i") },
+      { finishedAt: "2030-01-01T00:00:00.000Z" },
+      { error: "BUILD_FAILED" as const },
+      { createdAt: "2031-01-01T00:00:00.000Z" },
+      { outputPrefix: "builds/other/" },
+      { logsBucket: "gs://elsewhere" },
+    ])
+      expect(artifactTransitionAllowed(started, { ...started, ...change })).toBe(false);
+    expect(
+      artifactTransitionAllowed(started, { ...started, retainUntil: "2031-01-01T00:00:00.000Z" }),
+    ).toBe(true);
+    await expect(
+      f.store.updateArtifact({ ...started, manifestDigest: pin("m") }, started.revision),
+    ).rejects.toThrow(/immutable/);
+  });
+  it("abandon cancels the provider build and rejects the attempt CANCELLED; a decided record stands", async () => {
+    const f = await fixture();
+    const submission = f.submission();
+    const started = await f.admission.start({
+      submission,
+      deploymentId: "dep_build00001",
+      attempt: 1,
+    });
+    const cancelled = await f.admission.abandon(started);
+    expect(cancelled).toMatchObject({ state: "rejected", error: "CANCELLED" });
+    expect(artifactStatus(cancelled).error?.code).toBe("CANCELLED");
+    expect((await f.provider.get(started.buildId!)).status).toBe("CANCELLED");
+    const decided = await fixture();
+    const admitted = await buildOnce(decided);
+    expect(admitted.state).toBe("admitted");
+    expect(await decided.admission.abandon(admitted)).toEqual(admitted);
+    // Crash between submit and record: abandon finds the build by its tag.
+    const submit = f.provider.submit.bind(f.provider);
+    let created = "";
+    f.provider.submit = async (config) => {
+      created = (await submit(config)).buildId;
+      throw new Error("crashed before the receipt");
+    };
+    await expect(
+      f.admission.start({ submission, deploymentId: "dep_build00002", attempt: 1 }),
+    ).rejects.toThrow(/receipt/);
+    const unrecorded = await f.store.artifactForAttempt(
+      "ws_build00001",
+      "app_build00001",
+      "dep_build00002",
+      1,
+    );
+    expect(unrecorded?.buildId).toBeUndefined();
+    const found = await f.admission.abandon(unrecorded!);
+    expect(found).toMatchObject({ state: "rejected", error: "CANCELLED" });
+    expect((await f.provider.get(created)).status).toBe("CANCELLED");
   });
 });

@@ -50,7 +50,7 @@ The sandbox starts from a per-build input image: the recipe image plus the sourc
 
 `decideAdmission` checks, in order, and the first failure is the outcome:
 
-1. **Provenance.** The fields the platform sets in the provider's record of the build (steps' image, entrypoint, args, env and timeout; images; artifact location; service account; logs bucket; logging mode; build timeout) match the plan, compared by `configDigest` in their executed (substituted) form. The source URL is excluded from it. Fields the platform never sets (for example step `allowFailure`, `volumes` or `secretEnv`, `availableSecrets`, `options.pool`) are not compared: only the controller can create builds and it finds them by an unguessable artifact tag. Rejecting records that carry such fields is an M12 hardening item.
+1. **Provenance.** The fields the platform sets in the provider's record of the build (steps' image, entrypoint, args, env and timeout; images; artifact location; service account; logs bucket; logging mode; build timeout) match the plan, compared by `configDigest` in their executed (substituted) form. The source URL is excluded from it. Fields the platform never sets are not part of the digest; since M12 a record that carries any security-relevant one (build `availableSecrets`, `secrets` or a `source`; `options.pool`, `workerPool`, `env`, `secretEnv`, `volumes` or `automapSubstitutions`; step `secretEnv`, `volumes`, `allowFailure`, `allowExitCodes`, `waitFor`, `script`, `dir` or `automapSubstitutions`) is rejected `PROVENANCE_INVALID` (`ProviderBuild.unplanned`).
 2. **Status.** `TIMEOUT` → `BUILD_TIMEOUT`; `INTERNAL_ERROR` → `DEPENDENCY_UNAVAILABLE` (retryable); a prepare-step policy code (`LOCKFILE_REJECTED`, `UNSUPPORTED_RUNTIME`, …) or `OUTPUT_LIMIT` is reported as such; anything else is `BUILD_FAILED`.
 3. **Trusted step outputs.** The prepare output names the recipe and the exact verified source digest; the audit has no blocking advisory.
 4. **Image.** Exactly one image, with the planned name, and a `sha256` digest reported by the provider (the build's own claims are never used). The admitted reference is `<repo>/<ws>/<app>@sha256:…`.
@@ -83,7 +83,7 @@ Tags in the builds repository are unique artifact IDs and are **never deployed**
 
 ## Obligations for later tasks
 
-- **M12** serializes each stage attempt (a lease) before calling `start`: two concurrent `start` calls for one attempt can both submit before either records a build ID (the loser's image is removed as an orphan, but it is wasted work).
+- **M12** (done, [DEPLOYMENTS](./DEPLOYMENTS.md)) serializes each stage attempt under a deployment lease before calling `start`, settles every 15 s, treats a `DEPENDENCY_UNAVAILABLE` rejection (including an overdue `settle`'s, review N2) as the next attempt, and cancels the builds of cancelled or failed deployments with `BuildAdmission.abandon` (rejection code `CANCELLED`). While a record is `building` only its build ID and retention fields may change (review N3).
 - **M13** must not treat `manifest.appId`/`appVersion` as identity (they are customer claims); the platform app ID is the record's `appId`. The artifact keeps only `catalogDigest`: M13 re-reads the retained `manifest.json` and checks it against `manifestDigest` to obtain the catalog for promotion.
 - **M15** serves `BuildAdmission.log` (bounded and redacted; an oversized log is truncated, never refused).
 
@@ -134,6 +134,7 @@ That moves the approved M09 running baseline from about $16.49 to about **$20.03
 | `UNSUPPORTED_PROFILE` / `CAPABILITY_MISMATCH` | App does not fit the declared profile, or declared flags differ from the app | Declare the durable profile with exactly the workflows/events/subscriptions the app has |
 | `MANIFEST_MISMATCH` / `IMAGE_INVALID` / `PROVENANCE_INVALID` | Build outputs or record do not match the platform's build | Platform fault or tampering; report it, do not retry blindly |
 | `DEPENDENCY_UNAVAILABLE` | Registry, advisory service or provider outage | Retry; M12 retries automatically |
+| `CANCELLED` | The deployment was cancelled (or failed) while the build ran; M12 cancelled the build | None; submit again if needed |
 
 ## Runtime network controls (MD09)
 

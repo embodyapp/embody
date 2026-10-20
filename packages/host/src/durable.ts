@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   DependencyError,
   ForbiddenError,
@@ -18,6 +17,15 @@ import type {
 import type { Kernel } from "@embody/core";
 import { OutboxWorker, type Clock } from "./events.js";
 import { WorkflowWorker } from "./workflows.js";
+import {
+  MemoryTaskQueue,
+  cloudTasksQueue,
+  deterministicTaskName,
+  type CloudTasksQueueOptions,
+  type QueueTask,
+  type TaskQueue,
+} from "./tasks.js";
+export { metadataAccessToken } from "./tasks.js";
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -63,52 +71,14 @@ export const drainRequestSchema = z
 export type DrainRequest = z.output<typeof drainRequestSchema>;
 
 /** One wake-up: a named task that calls this app's drain endpoint at `scheduleAt`. */
-export interface WakeTask {
-  /** Deterministic; the queue rejects a name it has seen, which counts as success. */
-  readonly name: string;
-  readonly scheduleAt: string;
-  readonly body: DrainRequest;
-}
-/** The wake queue port. Production uses Cloud Tasks; tests use {@link MemoryWakeQueue}. */
-export interface WakeQueue {
-  /** Creates the task, or reports that one with this name already exists. Throws on failure. */
-  enqueue(task: WakeTask): Promise<"created" | "duplicate">;
-}
+export type WakeTask = QueueTask<DrainRequest>;
+/** The wake queue port: the shared {@link TaskQueue} carrying drain requests. */
+export type WakeQueue = TaskQueue<DrainRequest>;
 
 /** In-memory queue with Cloud Tasks name semantics, for tests and local development. */
-export class MemoryWakeQueue implements WakeQueue {
-  /** Every task created, in creation order. */
-  public readonly tasks: WakeTask[] = [];
-  /** When true, every enqueue fails, as during a queue outage. */
-  public outage = false;
-  private readonly names = new Set<string>();
-  private readonly delivered = new Set<string>();
-  public enqueue(task: WakeTask): Promise<"created" | "duplicate"> {
-    if (this.outage) return Promise.reject(new Error("Wake queue unavailable"));
-    if (this.names.has(task.name)) return Promise.resolve("duplicate");
-    this.names.add(task.name);
-    this.tasks.push(task);
-    return Promise.resolve("created");
-  }
-  /** Tasks due at `now` that have not been delivered yet, oldest first. */
-  public due(now: Date = new Date()): readonly WakeTask[] {
-    return this.tasks
-      .filter((task) => !this.delivered.has(task.name) && Date.parse(task.scheduleAt) <= +now)
-      .sort((a, b) => Date.parse(a.scheduleAt) - Date.parse(b.scheduleAt));
-  }
-  /** Marks a task delivered, as the queue does after a 2xx response. */
-  public acknowledge(name: string): void {
-    this.delivered.add(name);
-  }
-}
+export class MemoryWakeQueue extends MemoryTaskQueue<DrainRequest> {}
 
-function taskName(kind: string, ...parts: readonly (string | number | undefined)[]): string {
-  const digest = createHash("sha256")
-    .update(parts.map((part) => String(part ?? "")).join("\u0000"))
-    .digest("hex")
-    .slice(0, 40);
-  return `${kind}-${digest}`;
-}
+const taskName = deterministicTaskName;
 
 export interface WakingStorageOptions {
   readonly appId: string;
@@ -674,89 +644,13 @@ type WorkState =
   | { readonly status: "leased"; readonly claimedAt: string; readonly attempt: number }
   | { readonly status: "scheduled"; readonly scheduledAt: string; readonly claimable: boolean };
 
-export interface CloudTasksWakeQueueOptions {
-  /** `projects/<project>/locations/<location>/queues/<queue>`. */
-  readonly queue: string;
-  /** This app's drain URL (HTTPS). */
-  readonly url: string;
-  /** The platform invoker identity Cloud Tasks signs the OIDC token as. */
-  readonly invokerEmail: string;
-  /** The OIDC token audience the app verifies. */
-  readonly audience: string;
-  /** OAuth access token for the Cloud Tasks API. Defaults to the workload metadata server. */
-  readonly accessToken?: () => Promise<string>;
-  readonly fetch?: typeof fetch;
-}
-
-const QUEUE_PATH =
-  /^projects\/[a-z][a-z0-9-]{4,28}[a-z0-9]\/locations\/[a-z0-9-]+\/queues\/[A-Za-z0-9-]{1,100}$/;
-
-/** Workload access token from the local metadata server, cached until a minute before expiry. */
-export function metadataAccessToken(fetcher: typeof fetch = fetch): () => Promise<string> {
-  let cached: { readonly token: string; readonly until: number } | undefined;
-  return async () => {
-    if (cached !== undefined && cached.until > Date.now()) return cached.token;
-    const response = await fetcher(
-      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-      {
-        headers: { "metadata-flavor": "Google" },
-        redirect: "error",
-        signal: AbortSignal.timeout(5_000),
-      },
-    );
-    if (!response.ok || response.headers.get("metadata-flavor") !== "Google")
-      throw new Error("Workload access token is unavailable");
-    const body = (await response.json()) as { access_token?: unknown; expires_in?: unknown };
-    if (typeof body.access_token !== "string" || typeof body.expires_in !== "number")
-      throw new Error("Workload access token is invalid");
-    cached = { token: body.access_token, until: Date.now() + (body.expires_in - 60) * 1000 };
-    return cached.token;
-  };
-}
+export type CloudTasksWakeQueueOptions = CloudTasksQueueOptions;
 
 /**
- * Cloud Tasks adapter. Tasks carry an OIDC token for the platform invoker identity and the app's
- * drain audience. Live qualification (deduplication window, schedule limit, IAM) is M09.
+ * Cloud Tasks adapter for app wake-ups: the shared {@link cloudTasksQueue} with the app's drain
+ * URL, audience and platform invoker. Live qualification (deduplication window, schedule limit,
+ * IAM) is M09.
  */
 export function cloudTasksWakeQueue(options: CloudTasksWakeQueueOptions): WakeQueue {
-  if (!QUEUE_PATH.test(options.queue)) throw new TypeError("Invalid Cloud Tasks queue path");
-  if (!options.url.startsWith("https:") || !options.audience.startsWith("https:"))
-    throw new TypeError("Cloud Tasks drain URL and audience must be HTTPS");
-  const fetcher = options.fetch ?? fetch;
-  const accessToken = options.accessToken ?? metadataAccessToken(fetcher);
-  return {
-    async enqueue(task: WakeTask): Promise<"created" | "duplicate"> {
-      const response = await fetcher(
-        `https://cloudtasks.googleapis.com/v2/${options.queue}/tasks`,
-        {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${await accessToken()}`,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            task: {
-              name: `${options.queue}/tasks/${task.name}`,
-              scheduleTime: task.scheduleAt,
-              httpRequest: {
-                httpMethod: "POST",
-                url: options.url,
-                headers: { "content-type": "application/json" },
-                body: Buffer.from(JSON.stringify(task.body)).toString("base64"),
-                oidcToken: {
-                  serviceAccountEmail: options.invokerEmail,
-                  audience: options.audience,
-                },
-              },
-            },
-          }),
-          redirect: "error",
-          signal: AbortSignal.timeout(5_000),
-        },
-      );
-      if (response.ok) return "created";
-      if (response.status === 409) return "duplicate";
-      throw new Error(`Wake queue rejected the task (${response.status})`);
-    },
-  };
+  return cloudTasksQueue<DrainRequest>(options);
 }

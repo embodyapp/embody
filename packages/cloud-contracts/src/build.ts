@@ -136,6 +136,7 @@ export const BuildErrorCodeSchema = z.enum([
   "IMAGE_INVALID",
   "PROVENANCE_INVALID",
   "DEPENDENCY_UNAVAILABLE",
+  "CANCELLED",
 ]);
 export type BuildErrorCode = z.infer<typeof BuildErrorCodeSchema>;
 const buildMessages: Record<BuildErrorCode, string> = {
@@ -154,6 +155,7 @@ const buildMessages: Record<BuildErrorCode, string> = {
   IMAGE_INVALID: "Build did not produce the expected image.",
   PROVENANCE_INVALID: "Build record does not match the platform build recipe.",
   DEPENDENCY_UNAVAILABLE: "Build dependency unavailable; retry the deployment.",
+  CANCELLED: "Build cancelled with its deployment.",
 };
 /** Transient: the deployment controller (M12) may retry the build stage. */
 export const RETRYABLE_BUILD_ERRORS: ReadonlySet<BuildErrorCode> = new Set([

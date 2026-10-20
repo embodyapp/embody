@@ -27,7 +27,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "test": "vitest run --exclude test/postgres-store.test.ts",
+    "test": "vitest run --exclude test/postgres-store.test.ts --exclude test/deployment.postgres.test.ts",
     "test:postgres": "node ../../scripts/platform-prerequisites.mjs && vitest run test/postgres-store.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -39,10 +39,10 @@
     "@embody/host": "workspace:*",
     "@embody/mcp": "workspace:*",
     "fastify": "^5.12.5",
-    "jose": "^6.2.10"
+    "jose": "^6.2.10",
+    "@embody/auth": "workspace:*"
   },
   "devDependencies": {
-    "@embody/auth": "workspace:*",
     "@embody/storage": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@types/node": "^22.20.1",

@@ -190,6 +190,9 @@ importers:
 
   packages/gateway:
     dependencies:
+      '@embody/auth':
+        specifier: workspace:*
+        version: link:../auth
       '@embody/cloud-contracts':
         specifier: workspace:*
         version: link:../cloud-contracts
@@ -215,9 +218,6 @@ importers:
         specifier: ^8.23.0
         version: 8.23.0
     devDependencies:
-      '@embody/auth':
-        specifier: workspace:*
-        version: link:../auth
       '@embody/storage':
         specifier: workspace:*
         version: link:../storage

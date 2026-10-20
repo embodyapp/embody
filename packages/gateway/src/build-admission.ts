@@ -350,6 +350,12 @@ export interface ProviderBuild {
   readonly stepOutputs: readonly string[];
   readonly startTime?: string;
   readonly finishTime?: string;
+  /**
+   * Security-relevant request fields present in the provider's record that the platform never
+   * sets (secrets, volumes, a source, a private pool, step failure tolerance, step ordering).
+   * Any entry rejects the build as `PROVENANCE_INVALID`.
+   */
+  readonly unplanned?: readonly string[];
 }
 export interface BuildProvider {
   submit(config: BuildConfig): Promise<{ buildId: string }>;
@@ -473,7 +479,28 @@ export interface ArtifactCursor {
  */
 export function artifactTransitionAllowed(prior: ArtifactRecord, next: ArtifactRecord): boolean {
   if (!sameArtifactIdentity(prior, next)) return false;
-  if (prior.state === "building") return true;
+  if (
+    next.recipe !== prior.recipe ||
+    next.outputPrefix !== prior.outputPrefix ||
+    next.logsBucket !== prior.logsBucket ||
+    next.createdAt !== prior.createdAt
+  )
+    return false;
+  if (prior.state === "building")
+    // Review N3: while building only the build ID (once) and retention fields may change; the
+    // decision fields appear only with the decision itself.
+    return (
+      next.state !== "building" ||
+      (next.error === undefined &&
+        next.imageDigest === undefined &&
+        next.imageReference === undefined &&
+        next.manifest === undefined &&
+        next.manifestDigest === undefined &&
+        next.sbomDigest === undefined &&
+        next.audit === undefined &&
+        next.provenance === undefined &&
+        next.finishedAt === undefined)
+    );
   return (
     next.state === prior.state &&
     next.error === prior.error &&
@@ -605,7 +632,10 @@ export async function decideAdmission(input: {
     code,
     ...(pushedDigest ? { imageDigest: pushedDigest } : {}),
   });
-  if (buildConfigDigest(build.config, "executed") !== plan.configDigest)
+  if (
+    buildConfigDigest(build.config, "executed") !== plan.configDigest ||
+    (build.unplanned?.length ?? 0) > 0
+  )
     return reject("PROVENANCE_INVALID");
   const prepared = prepareOutput(build.stepOutputs[0]);
   if (build.status === "TIMEOUT") return reject("BUILD_TIMEOUT");
@@ -975,6 +1005,20 @@ export class BuildAdmission {
     // Best effort: anything left is removed by purgeArtifacts / cleanupOrphanedImages.
     await removeBuildOutputs(this.options.provider, rejected).catch(() => undefined);
     return rejected;
+  }
+
+  /**
+   * Cancels the build of an attempt whose deployment was cancelled or failed and rejects its
+   * record `CANCELLED` (CAS: if `settle` decided first, that decision stands). The build is found
+   * by its recorded ID or, after a crash between submit and record, by its artifact tag.
+   */
+  public async abandon(record: ArtifactRecord): Promise<ArtifactRecord> {
+    if (record.state !== "building") return record;
+    const buildId =
+      record.buildId ??
+      (await this.options.provider.find(`embody-${record.artifactId.replace("_", "-")}`));
+    if (buildId) await this.options.provider.cancel(buildId);
+    return this.reject(record, "CANCELLED");
   }
 
   /** Bounded, redacted build log for an authorized reader (M15 serves it). */

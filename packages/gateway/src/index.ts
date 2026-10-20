@@ -76,6 +76,53 @@ export {
   type CloudBuildProviderOptions,
 } from "./cloud-build.js";
 export { MemoryBuildProvider, type SimulatedBuildResult } from "./memory-build.js";
+export {
+  DEPLOYMENT_LIMITS,
+  DEPLOYMENT_TASK_REASONS,
+  DeploymentError,
+  MAX_DEPLOYMENT_TASK_BYTES,
+  StaleDeploymentError,
+  appControl,
+  decideCancel,
+  decideClaim,
+  decideCleanup,
+  decideComplete,
+  decideSubmit,
+  deploymentStatus,
+  deploymentTaskName,
+  deploymentTaskSchema,
+  followUpTaskName,
+  isOverdue,
+  releaseManifest,
+  wakeFor,
+  type AppControl,
+  type ClaimDecision,
+  type CompleteDecision,
+  type CompletionFence,
+  type DeploymentRecord,
+  type DeploymentStore,
+  type DeploymentTaskBody,
+  type DeploymentWake,
+  type DeploymentWakeHook,
+  type PublicErrorCode,
+  type ReleaseRecord,
+  type StageOutcome,
+  type SubmitInput,
+} from "./deployment.js";
+export {
+  DeploymentController,
+  createDeploymentWorker,
+  deploymentWakeHook,
+  reconcileDeployments,
+  type DeploymentControllerOptions,
+  type DeploymentLogRecord,
+  type DeploymentStageContext,
+  type DeploymentStages,
+  type DeploymentWorkerOptions,
+  type StageResult,
+  type TaskResult,
+} from "./deployment-controller.js";
+export { registerDeploymentRoutes, type DeploymentRouteOptions } from "./deployment-routes.js";
 export { hostedSigningIdentity } from "./identity.js";
 export { cloudRunInvocationToken, type CloudRunInvocationOptions } from "./cloud-run.js";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";

@@ -269,7 +269,7 @@ export function toProviderBuild(build: Record<string, unknown>): ProviderBuild {
     images?: { name?: unknown; digest?: unknown }[];
     buildStepOutputs?: unknown[];
   };
-  const options = (build["options"] ?? {}) as { logging?: unknown };
+  const options = (build["options"] ?? {}) as Record<string, unknown> & { logging?: unknown };
   return {
     id: str(build["id"]),
     status,
@@ -298,5 +298,47 @@ export function toProviderBuild(build: Record<string, unknown>): ProviderBuild {
     ),
     ...(typeof build["startTime"] === "string" ? { startTime: build["startTime"] } : {}),
     ...(typeof build["finishTime"] === "string" ? { finishTime: build["finishTime"] } : {}),
+    unplanned: unplannedFields(build, steps, options),
   };
+}
+
+/** Request fields that change what a build can read, write or skip; the platform sets none. */
+const UNPLANNED_BUILD = ["availableSecrets", "secrets", "source"] as const;
+const UNPLANNED_OPTIONS = [
+  "pool",
+  "workerPool",
+  "env",
+  "secretEnv",
+  "volumes",
+  "automapSubstitutions",
+] as const;
+const UNPLANNED_STEP = [
+  "secretEnv",
+  "volumes",
+  "allowFailure",
+  "allowExitCodes",
+  "waitFor",
+  "script",
+  "dir",
+  "automapSubstitutions",
+] as const;
+const present = (value: unknown) =>
+  value !== undefined &&
+  value !== null &&
+  value !== false &&
+  !(Array.isArray(value) && value.length === 0) &&
+  !(typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0) &&
+  value !== "";
+function unplannedFields(
+  build: Record<string, unknown>,
+  steps: readonly Record<string, unknown>[],
+  options: Record<string, unknown>,
+): string[] {
+  return [
+    ...UNPLANNED_BUILD.filter((field) => present(build[field])),
+    ...UNPLANNED_OPTIONS.filter((field) => present(options[field])).map((f) => `options.${f}`),
+    ...steps.flatMap((step, index) =>
+      UNPLANNED_STEP.filter((field) => present(step[field])).map((f) => `steps[${index}].${f}`),
+    ),
+  ];
 }
