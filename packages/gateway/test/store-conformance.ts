@@ -11,9 +11,13 @@ import {
   newCredential,
   type GatewayStore,
   type CatalogWrite,
+  type Registration,
 } from "../src/index.js";
 
-export function appRecord(workspaceId: string, endpoint = "https://one.example.com"): CatalogWrite {
+export function appRecord(
+  workspaceId: string,
+  endpoint = "https://one.example.com",
+): CatalogWrite & { registration: Registration } {
   return {
     workspaceId,
     appId: "app_kanban0001",
@@ -397,9 +401,9 @@ export function storeConformance(
         {
           ...app,
           registration: {
-            ...app.registration,
+            ...app.registration!,
             manifest: {
-              ...app.registration.manifest,
+              ...app.registration!.manifest,
               actions: {
                 "kanban.ping": {
                   generated: false,
@@ -455,7 +459,7 @@ export function storeConformance(
         injected: { generated: false, inputSchema: {} },
       });
       expect(
-        (await store.snapshot(workspace))?.apps[0]?.registration.manifest.actions,
+        (await store.snapshot(workspace))?.apps[0]?.registration?.manifest.actions,
       ).not.toHaveProperty("injected");
       const promoted = await store.putApp(
         { ...created, activeRelease: "rel_release0002", state: "ready" },
@@ -688,7 +692,7 @@ export function storeConformance(
         {
           ...other,
           appId: "app_other0001",
-          registration: { ...other.registration, appId: "other" },
+          registration: { ...other.registration!, appId: "other" },
         },
         null,
       );
@@ -909,7 +913,7 @@ export function storeConformance(
         {
           ...issued.app,
           registration: {
-            ...issued.app.registration,
+            ...issued.app.registration!,
             endpoint: "https://new.example.com",
             healthCheckUrl: "https://new.example.com/health",
           },
@@ -1021,7 +1025,7 @@ export function storeConformance(
           ...hidden,
           appId: "app_hidden0001",
           registration: {
-            ...hidden.registration,
+            ...hidden.registration!,
             appId: "hidden",
           },
         },

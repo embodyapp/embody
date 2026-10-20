@@ -402,8 +402,39 @@ export interface GatewayDeliveryInput {
 export interface SchemaMigration {
   readonly version: number;
   readonly description: string;
+  /**
+   * M13 deployment policy. `expand` adds structure or backfills without changing what code
+   * built for an older schema reads or writes, so a release serving the previous schema keeps
+   * working after it is applied (hosted boot accepts a newer applied schema, see
+   * `hostedSchemaCompatible`). `contract` removes or rewrites data an older release depends on:
+   * the deployment migration runner refuses it before executing anything.
+   */
+  readonly compatibility: "expand" | "contract";
+  /**
+   * Oldest schema version whose code can still read the data after this migration. Only set by
+   * an operator-run platform upgrade; a rollback to a release built for an older schema is then
+   * refused (M13.d). Absent means every earlier reader stays compatible.
+   */
+  readonly readerFloor?: number;
   readonly sqlite: string;
   readonly postgres: string;
+}
+
+/**
+ * Hosted boot check (M08, relaxed by M13): every migration the code was built for is applied,
+ * in order. Later versions may also be applied, by a newer release's deployment; they are
+ * expand-only by policy, so this code still reads and writes correctly. A missing or reordered
+ * version fails, so code never boots against a schema older than it needs.
+ */
+export function hostedSchemaCompatible(
+  applied: readonly number[],
+  expected: readonly number[],
+): boolean {
+  return (
+    applied.length >= expected.length &&
+    expected.every((version, index) => applied[index] === version) &&
+    applied.every((version, index) => index === 0 || version > applied[index - 1]!)
+  );
 }
 
 /**
@@ -414,6 +445,7 @@ export const STORAGE_MIGRATIONS: readonly SchemaMigration[] = [
   {
     version: 1,
     description: "initial storage and delivery tables",
+    compatibility: "expand",
     sqlite: `
       CREATE TABLE embody_entities (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, entity_type TEXT NOT NULL,
         data TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -473,6 +505,7 @@ export const STORAGE_MIGRATIONS: readonly SchemaMigration[] = [
   {
     version: 2,
     description: "durable direct event destinations",
+    compatibility: "expand",
     sqlite: `
       CREATE TABLE embody_event_deliveries (id TEXT PRIMARY KEY, event_id TEXT NOT NULL,
         org_id TEXT NOT NULL, destination_app_id TEXT NOT NULL, destination_endpoint TEXT NOT NULL,
@@ -498,6 +531,7 @@ export const STORAGE_MIGRATIONS: readonly SchemaMigration[] = [
   {
     version: 3,
     description: "event envelope metadata",
+    compatibility: "expand",
     sqlite: `
       ALTER TABLE embody_outbox ADD COLUMN correlation_id TEXT;
       ALTER TABLE embody_outbox ADD COLUMN causation_id TEXT;
@@ -514,6 +548,7 @@ export const STORAGE_MIGRATIONS: readonly SchemaMigration[] = [
   {
     version: 4,
     description: "durable workflow instances and steps",
+    compatibility: "expand",
     sqlite: `
       CREATE TABLE embody_workflow_instances (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, definition TEXT NOT NULL,
         definition_version TEXT NOT NULL, idempotency_key TEXT NOT NULL, input_hash TEXT NOT NULL, input TEXT NOT NULL,
@@ -548,6 +583,7 @@ export const STORAGE_MIGRATIONS: readonly SchemaMigration[] = [
   {
     version: 5,
     description: "Runtime-role workflow claims and active version listing without RLS bypass",
+    compatibility: "expand",
     sqlite: "SELECT 1;",
     postgres: `
       CREATE FUNCTION embody_claim_workflow_steps(p_now TIMESTAMPTZ, p_expired TIMESTAMPTZ, p_limit INTEGER, p_worker TEXT)
@@ -625,6 +661,7 @@ export const STORAGE_MIGRATIONS: readonly SchemaMigration[] = [
   {
     version: 6,
     description: "Outbox completion time for 30-day retention cleanup",
+    compatibility: "expand",
     sqlite: `
       ALTER TABLE embody_outbox ADD COLUMN completed_at TEXT;
       UPDATE embody_outbox SET completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE status = 'completed';

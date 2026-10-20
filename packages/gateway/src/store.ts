@@ -13,6 +13,7 @@ import {
   AppIdSchema,
   ReleaseIdSchema,
   DeploymentSubmissionSchema,
+  HOSTED_PROFILE,
   type ScopedGrant,
 } from "@embody/cloud-contracts";
 import { validateRegistration, type Registration, type GatewayRegistryOptions } from "./index.js";
@@ -41,11 +42,19 @@ import {
   decideCleanup,
   decideClaim,
   decideComplete,
+  decideRollback,
   decideSubmit,
   isOverdue,
   newDeploymentId,
-  releaseManifest,
+  promotableArtifact,
+  promotedCatalog,
+  promotedRelease,
+  recipeSchemaVersion,
+  registrationRefusal,
+  releasedPin,
   releaseSourceUsable,
+  replacedRelease,
+  rollbackKey,
   wakeFor,
   type AppControl,
   type ClaimDecision,
@@ -54,6 +63,7 @@ import {
   type DeploymentStore,
   type DeploymentWakeHook,
   type ReleaseRecord,
+  type RollbackInput,
   type StageOutcome,
   type SubmitInput,
 } from "./deployment.js";
@@ -65,7 +75,16 @@ export interface Workspace {
 export interface CatalogApp {
   readonly workspaceId: string;
   readonly appId: string;
-  readonly registration: Registration;
+  /**
+   * Route and manifest of the active release. Null for an app reserved before its first release
+   * (M13): it is not discoverable or dispatchable, and the first promotion registers it.
+   */
+  readonly registration: Registration | null;
+  /**
+   * The app's command/MCP namespace. Required while `registration` is null; otherwise it equals
+   * `registration.appId`. Promotions keep it: a build's own app name is a claim, not identity.
+   */
+  readonly name?: string;
   readonly activeRelease: string | null;
   readonly state: "idle" | "ready" | "unavailable" | "disabled" | "deleted";
   readonly revision: number;
@@ -134,20 +153,30 @@ function cas(prior: { revision: number } | undefined, expected: number | null): 
     throw new BadRequestError("Invalid revision");
   if ((prior?.revision ?? null) !== expected) throw new ConflictError("Revision conflict");
 }
+const APP_NAME = /^[a-z][a-z0-9-]{0,62}$/;
 function validateApp(value: CatalogWrite, policy: GatewayRegistryOptions): CatalogWrite {
   id(value.workspaceId);
+  const name = value.name ?? value.registration?.appId;
   if (
     !AppIdSchema.safeParse(value.appId).success ||
     !["idle", "ready", "unavailable", "disabled", "deleted"].includes(value.state) ||
     ((value.state === "ready" || value.state === "idle") && value.activeRelease === null) ||
-    (value.activeRelease !== null && !ReleaseIdSchema.safeParse(value.activeRelease).success)
+    (value.activeRelease !== null && !ReleaseIdSchema.safeParse(value.activeRelease).success) ||
+    // A reserved app has a namespace and nothing to route to yet.
+    (value.registration === null && (value.activeRelease !== null || value.name === undefined)) ||
+    name === undefined ||
+    !APP_NAME.test(name) ||
+    (value.registration !== null &&
+      value.name !== undefined &&
+      value.name !== value.registration.appId)
   )
     throw new BadRequestError("Invalid catalog record");
-  validateRegistration(value.registration, policy);
+  if (value.registration !== null) validateRegistration(value.registration, policy);
   return clone({
     workspaceId: value.workspaceId,
     appId: value.appId,
     registration: value.registration,
+    ...(value.name !== undefined ? { name: value.name } : {}),
     activeRelease: value.activeRelease,
     state: value.state,
   });
@@ -212,6 +241,19 @@ function validateSubmission(input: SubmitInput): void {
     !Number.isFinite(input.now.getTime())
   )
     throw new BadRequestError("Invalid deployment submission");
+}
+function validateRollback(input: RollbackInput): void {
+  id(input.workspaceId);
+  if (
+    !AppIdSchema.safeParse(input.appId).success ||
+    !ReleaseIdSchema.safeParse(input.releaseId).success ||
+    !Number.isSafeInteger(input.expectedGeneration) ||
+    input.expectedGeneration < 0 ||
+    typeof input.actorId !== "string" ||
+    !input.actorId ||
+    !Number.isFinite(input.now.getTime())
+  )
+    throw new BadRequestError("Invalid rollback request");
 }
 const newLeaseToken = () => randomBytes(16).toString("hex");
 function validateSourceInput(input: SourceAdmitInput): void {
@@ -301,7 +343,7 @@ export class MemoryGatewayStore
         (app) =>
           app.workspaceId === value.workspaceId &&
           app.appId !== value.appId &&
-          app.registration.appId === value.registration.appId,
+          (app.name ?? app.registration?.appId) === (value.name ?? value.registration?.appId),
       )
     )
       throw new ConflictError("App name exists");
@@ -562,6 +604,82 @@ export class MemoryGatewayStore
       return { record: clone(record), replay: false };
     });
   }
+  public async submitRollback(
+    input: RollbackInput,
+    wake: DeploymentWakeHook,
+  ): Promise<{ record: DeploymentRecord; replay: boolean }> {
+    validateRollback(input);
+    return this.transaction(async (txid) => {
+      const ws = input.workspaceId;
+      if (!this.workspaces.has(ws)) throw new DeploymentError("NOT_FOUND");
+      const target = this.releases.get(`${ws}/${input.releaseId}`) ?? null;
+      const origin = target
+        ? (this.deployments.get(this.deploymentKey(ws, target.deploymentId)) ?? null)
+        : null;
+      const key = rollbackKey(input.releaseId, input.expectedGeneration);
+      const existing =
+        [...this.deployments.values()].find(
+          (d) => d.workspaceId === ws && d.appId === input.appId && d.idempotencyKey === key,
+        ) ?? null;
+      const active = [...this.deployments.values()].filter(
+        (d) => d.workspaceId === ws && !TERMINAL.has(d.state),
+      );
+      const upload = target?.sourceUploadId;
+      const decision = decideRollback({
+        existing: existing ? clone(existing) : null,
+        request: input,
+        app: appControl(this.catalogApp(ws, input.appId)),
+        target: target ? clone(target) : null,
+        origin: origin ? clone(origin) : null,
+        artifact: target ? clone(this.artifacts.get(`${ws}/${target.artifactId}`) ?? null) : null,
+        source: upload ? clone(this.sources.get(`${ws}/${upload}`) ?? null) : null,
+        usage: {
+          activeForApp: active.filter((d) => d.appId === input.appId).length,
+          activeForWorkspace: active.length,
+        },
+        deploymentId: newDeploymentId(),
+      });
+      if (decision.replay) return { record: clone(decision.record), replay: true };
+      const record: DeploymentRecord = { ...decision.record, revision: 1 };
+      await wake([wakeFor(record, "submit")!], txid);
+      const sourceKey = `${ws}/${decision.source.uploadId}`;
+      const artifactKey = `${ws}/${decision.artifact.artifactId}`;
+      this.sources.set(sourceKey, {
+        ...clone(decision.source),
+        revision: this.sources.get(sourceKey)!.revision + 1,
+      });
+      this.artifacts.set(artifactKey, {
+        ...clone(decision.artifact),
+        revision: this.artifacts.get(artifactKey)!.revision + 1,
+      });
+      this.deployments.set(this.deploymentKey(ws, record.deploymentId), record);
+      return { record: clone(record), replay: false };
+    });
+  }
+  public async releaseForDeployment(
+    workspaceId: string,
+    appId: string,
+    deploymentId: string,
+  ): Promise<ReleaseRecord | null> {
+    return clone(
+      [...this.releases.values()].find(
+        (r) => r.workspaceId === workspaceId && r.appId === appId && r.deploymentId === deploymentId,
+      ) ?? null,
+    );
+  }
+  public markCandidateRemoved(
+    workspaceId: string,
+    appId: string,
+    releaseId: string,
+    now: Date,
+  ): Promise<void> {
+    return this.transaction(async () => {
+      const key = `${workspaceId}/${releaseId}`;
+      const release = this.releases.get(key);
+      if (release && release.appId === appId && !release.candidateRemovedAt)
+        this.releases.set(key, { ...release, candidateRemovedAt: now.toISOString() });
+    });
+  }
   public async deployment(
     workspaceId: string,
     appId: string,
@@ -598,23 +716,24 @@ export class MemoryGatewayStore
       if (!record) throw new StaleDeploymentError();
       const app = this.catalogApp(fence.workspaceId, fence.appId);
       let applied = outcome;
-      let artifact: ArtifactRecord | undefined;
       const sourceKey = `${record.workspaceId}/${record.submission.source.uploadId}`;
-      const source = this.sources.get(sourceKey);
       if (outcome.kind === "promote") {
-        artifact = record.artifactId
+        const artifact = record.artifactId
           ? this.artifacts.get(`${record.workspaceId}/${record.artifactId}`)
           : undefined;
-        if (
-          !artifact ||
-          artifact.state !== "admitted" ||
-          artifact.purging ||
-          artifact.deploymentId !== record.deploymentId ||
-          artifact.appId !== record.appId
-        )
-          applied = { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: "ARTIFACT_MISSING" };
-        else if (!releaseSourceUsable(record, source))
-          applied = { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: "SOURCE_MISSING" };
+        const refusal = !promotableArtifact(record, artifact)
+          ? "ARTIFACT_MISSING"
+          : !releaseSourceUsable(record, this.sources.get(sourceKey))
+            ? "SOURCE_MISSING"
+            : null;
+        const invalid =
+          !refusal && app
+            ? registrationRefusal(record, app, outcome.registration, (registration) =>
+                validateRegistration(registration, this.policy),
+              )
+            : null;
+        if (refusal) applied = { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: refusal };
+        else if (invalid) applied = { kind: "fail", code: "CHECK_FAILED", reason: invalid };
       }
       const decision = decideComplete({
         record: clone(record),
@@ -625,35 +744,56 @@ export class MemoryGatewayStore
       });
       if (decision.wake) await wake([decision.wake], txid);
       if (decision.promote) {
-        const manifest = releaseManifest(record, artifact!, decision.promote.releaseId);
-        const release: ReleaseRecord = {
-          workspaceId: record.workspaceId,
-          appId: record.appId,
-          releaseId: decision.promote.releaseId,
-          deploymentId: record.deploymentId,
-          artifactId: artifact!.artifactId,
-          imageReference: artifact!.imageReference!,
-          generation: decision.promote.generation,
-          manifest,
-          createdAt: now.toISOString(),
-        };
-        this.releases.set(`${record.workspaceId}/${release.releaseId}`, release);
-        this.apps.set(`${record.workspaceId}/${record.appId}`, {
-          ...app!,
-          activeRelease: release.releaseId,
-          generation: decision.promote.generation,
-          revision: app!.revision + 1,
-        });
-        this.bump(record.workspaceId);
-        this.artifacts.set(`${record.workspaceId}/${artifact!.artifactId}`, {
-          ...artifact!,
+        // Re-read after the hook (M12 re-review N2): nothing else may interleave from here on.
+        const ws = record.workspaceId;
+        const current = this.catalogApp(ws, record.appId)!;
+        const artifact = this.artifacts.get(`${ws}/${record.artifactId}`)!;
+        const release = promotedRelease(
+          record,
+          artifact,
+          decision.promote,
+          recipeSchemaVersion(artifact.recipe),
+          now,
+        );
+        // The release it replaces drains, then stays a rollback target for 30 days; what it
+        // pinned is released to the ordinary retention sweeps (M13 step 4, M12 re-review N1).
+        const priorId = current.activeRelease;
+        const prior = priorId ? this.releases.get(`${ws}/${priorId}`) : undefined;
+        if (prior && prior.releaseId !== release.releaseId) {
+          this.releases.set(`${ws}/${prior.releaseId}`, replacedRelease(prior, now));
+          const priorArtifact = this.artifacts.get(`${ws}/${prior.artifactId}`);
+          const freed = priorArtifact && releasedPin(priorArtifact, prior.releaseId, now);
+          if (freed)
+            this.artifacts.set(`${ws}/${prior.artifactId}`, {
+              ...freed,
+              revision: priorArtifact.revision + 1,
+            });
+          const upload =
+            prior.sourceUploadId ??
+            this.deployments.get(this.deploymentKey(ws, prior.deploymentId))?.submission.source
+              .uploadId;
+          const priorSource = upload ? this.sources.get(`${ws}/${upload}`) : undefined;
+          const kept = priorSource && releasedPin(priorSource, prior.releaseId, now);
+          if (kept)
+            this.sources.set(`${ws}/${upload}`, { ...kept, revision: priorSource.revision + 1 });
+        }
+        this.releases.set(`${ws}/${release.releaseId}`, release);
+        this.apps.set(
+          `${ws}/${record.appId}`,
+          promotedCatalog(current, release, decision.promote.generation),
+        );
+        this.bump(ws);
+        const pinnedArtifact = this.artifacts.get(`${ws}/${artifact.artifactId}`)!;
+        this.artifacts.set(`${ws}/${artifact.artifactId}`, {
+          ...pinnedArtifact,
           pinnedBy: release.releaseId,
-          revision: artifact!.revision + 1,
+          revision: pinnedArtifact.revision + 1,
         });
+        const source = this.sources.get(sourceKey)!;
         this.sources.set(sourceKey, {
-          ...source!,
+          ...source,
           pinnedBy: release.releaseId,
-          revision: source!.revision + 1,
+          revision: source.revision + 1,
         });
       }
       this.deployments.set(key, decision.next);
@@ -779,6 +919,26 @@ export class PostgresGatewayStore
         CREATE TABLE IF NOT EXISTS embody_platform_deployments (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), deployment_id text NOT NULL, app_id text NOT NULL, idempotency_key text NOT NULL, state text NOT NULL CHECK (state IN ('accepted','validating','building','provisioning','checking','promoting','active','failed','cancelled')), due_at timestamptz NOT NULL, lease_until timestamptz, cleanup boolean NOT NULL DEFAULT false, retain_until timestamptz NOT NULL, revision bigint NOT NULL CHECK (revision > 0), document jsonb NOT NULL, PRIMARY KEY(workspace_id,deployment_id), UNIQUE(workspace_id,app_id,idempotency_key));
         CREATE INDEX IF NOT EXISTS embody_platform_deployments_due ON embody_platform_deployments(due_at) WHERE state NOT IN ('active','failed','cancelled') OR cleanup;
         CREATE TABLE IF NOT EXISTS embody_platform_releases (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), release_id text NOT NULL, app_id text NOT NULL, deployment_id text NOT NULL, artifact_id text NOT NULL, created_at timestamptz NOT NULL, document jsonb NOT NULL, PRIMARY KEY(workspace_id,release_id), UNIQUE(workspace_id,deployment_id));`);
+      // M13: releases replaced before M13 have no lifecycle and may still pin their artifact
+      // and source (M12 re-review N1/N3). Mark them inactive now, with the inactive-release
+      // retention starting now, and release what any inactive release still pins. An inactive
+      // release never becomes active again (a rollback promotes a new release), so this is
+      // safe while promotions run.
+      await client.query(`UPDATE embody_platform_releases r SET document = r.document || jsonb_build_object(
+          'inactiveSince', to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+          'drainUntil', to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+          'retainUntil', to_char((now() + interval '${HOSTED_PROFILE.inactiveReleaseRetentionDays} days') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+        WHERE NOT (r.document ? 'inactiveSince') AND NOT EXISTS (SELECT 1 FROM embody_platform_apps a
+          WHERE a.workspace_id=r.workspace_id AND a.document->>'activeRelease'=r.release_id)`);
+      for (const table of ["artifacts", "sources"] as const)
+        await client.query(`UPDATE embody_platform_${table} t SET pinned=false,
+            retain_until=greatest(t.retain_until, now() + interval '${HOSTED_PROFILE.inactiveReleaseRetentionDays} days'),
+            revision=t.revision+1,
+            document=(t.document - 'pinnedBy') || jsonb_build_object(
+              'retainUntil', to_char(greatest(t.retain_until, now() + interval '${HOSTED_PROFILE.inactiveReleaseRetentionDays} days') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+              'revision', t.revision+1)
+          WHERE t.pinned AND NOT t.purging AND EXISTS (SELECT 1 FROM embody_platform_releases r
+            WHERE r.workspace_id=t.workspace_id AND r.release_id=t.document->>'pinnedBy' AND r.document ? 'inactiveSince')`);
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -841,7 +1001,12 @@ export class PostgresGatewayStore
       else
         await client.query(
           `INSERT INTO embody_platform_apps(workspace_id,id,name,document) VALUES($1,$2,$3,$4) ON CONFLICT(workspace_id,id) DO UPDATE SET name=EXCLUDED.name,document=EXCLUDED.document`,
-          [value.workspaceId, key, (next as CatalogApp).registration.appId, next],
+          [
+            value.workspaceId,
+            key,
+            (next as CatalogApp).name ?? (next as CatalogApp).registration!.appId,
+            next,
+          ],
         );
       await client.query("UPDATE embody_platform_workspaces SET revision=revision+1 WHERE id=$1", [
         value.workspaceId,
@@ -1375,6 +1540,126 @@ export class PostgresGatewayStore
       throw error;
     }
   }
+  public async submitRollback(
+    input: RollbackInput,
+    wake: DeploymentWakeHook,
+  ): Promise<{ record: DeploymentRecord; replay: boolean }> {
+    validateRollback(input);
+    try {
+      return await this.deploymentTransaction(async (client, txid) => {
+        const ws = input.workspaceId;
+        // Lock order as for submissions and promotions: workspace, then source, then artifact.
+        const workspace = await client.query(
+          "SELECT id FROM embody_platform_workspaces WHERE id=$1 FOR UPDATE",
+          [ws],
+        );
+        if (!workspace.rowCount) throw new DeploymentError("NOT_FOUND");
+        const target =
+          (
+            await client.query<{ document: ReleaseRecord }>(
+              "SELECT document FROM embody_platform_releases WHERE workspace_id=$1 AND app_id=$2 AND release_id=$3",
+              [ws, input.appId, input.releaseId],
+            )
+          ).rows[0]?.document ?? null;
+        const origin = target
+          ? ((
+              await client.query<{ document: DeploymentRecord }>(
+                "SELECT document FROM embody_platform_deployments WHERE workspace_id=$1 AND deployment_id=$2",
+                [ws, target.deploymentId],
+              )
+            ).rows[0]?.document ?? null)
+          : null;
+        const existing =
+          (
+            await client.query<{ document: DeploymentRecord }>(
+              "SELECT document FROM embody_platform_deployments WHERE workspace_id=$1 AND app_id=$2 AND idempotency_key=$3",
+              [ws, input.appId, rollbackKey(input.releaseId, input.expectedGeneration)],
+            )
+          ).rows[0]?.document ?? null;
+        const source = target?.sourceUploadId
+          ? await this.lockSource(client, ws, target.sourceUploadId)
+          : undefined;
+        const artifact = target ? await this.lockArtifact(client, ws, target.artifactId) : undefined;
+        const usage = (
+          await client.query<{ app: number; workspace: number }>(
+            `SELECT count(*) FILTER (WHERE app_id=$2)::int AS app, count(*)::int AS workspace
+            FROM embody_platform_deployments WHERE workspace_id=$1 AND state NOT IN ('active','failed','cancelled')`,
+            [ws, input.appId],
+          )
+        ).rows[0]!;
+        const decision = decideRollback({
+          existing,
+          request: input,
+          app: appControl(await this.catalogDocument(client, ws, input.appId)),
+          target,
+          origin,
+          artifact: artifact ?? null,
+          source: source ?? null,
+          usage: { activeForApp: usage.app, activeForWorkspace: usage.workspace },
+          deploymentId: newDeploymentId(),
+        });
+        if (decision.replay) return { record: decision.record, replay: true };
+        const record: DeploymentRecord = { ...decision.record, revision: 1 };
+        await this.writeSourcePin(
+          client,
+          { ...decision.source, revision: source!.revision + 1 },
+          source!.revision,
+        );
+        await this.writeArtifactPin(
+          client,
+          { ...decision.artifact, revision: artifact!.revision + 1 },
+          artifact!.revision,
+        );
+        await client.query(
+          `INSERT INTO embody_platform_deployments(workspace_id,deployment_id,app_id,idempotency_key,state,due_at,lease_until,cleanup,retain_until,revision,document)
+          VALUES($1,$2,$3,$4,$5,$6,NULL,false,$7,1,$8)`,
+          [
+            record.workspaceId,
+            record.deploymentId,
+            record.appId,
+            record.idempotencyKey,
+            record.state,
+            record.dueAt,
+            record.retainUntil,
+            record,
+          ],
+        );
+        await wake([wakeFor(record, "submit")!], await txid());
+        return { record, replay: false };
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === "23505")
+        throw new ConflictError("Deployment identity exists");
+      if (error instanceof ConflictError) throw new DeploymentError("ROLLBACK_INCOMPATIBLE");
+      throw error;
+    }
+  }
+  public async releaseForDeployment(
+    workspaceId: string,
+    appId: string,
+    deploymentId: string,
+  ): Promise<ReleaseRecord | null> {
+    return (
+      (
+        await this.pool.query<{ document: ReleaseRecord }>(
+          "SELECT document FROM embody_platform_releases WHERE workspace_id=$1 AND app_id=$2 AND deployment_id=$3",
+          [workspaceId, appId, deploymentId],
+        )
+      ).rows[0]?.document ?? null
+    );
+  }
+  public async markCandidateRemoved(
+    workspaceId: string,
+    appId: string,
+    releaseId: string,
+    now: Date,
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE embody_platform_releases SET document=document || jsonb_build_object('candidateRemovedAt',$4::text)
+      WHERE workspace_id=$1 AND app_id=$2 AND release_id=$3 AND NOT (document ? 'candidateRemovedAt')`,
+      [workspaceId, appId, releaseId, now.toISOString()],
+    );
+  }
   public async deployment(
     workspaceId: string,
     appId: string,
@@ -1405,6 +1690,78 @@ export class PostgresGatewayStore
       return { decision };
     });
   }
+  private async lockArtifact(
+    client: PoolClient,
+    workspaceId: string,
+    artifactId: string,
+  ): Promise<ArtifactRecord | undefined> {
+    const row = (
+      await client.query<{ document: ArtifactRecord; purging: boolean; revision: string }>(
+        "SELECT document,purging,revision FROM embody_platform_artifacts WHERE workspace_id=$1 AND artifact_id=$2 FOR UPDATE",
+        [workspaceId, artifactId],
+      )
+    ).rows[0];
+    return row
+      ? { ...row.document, ...(row.purging ? { purging: true } : {}), revision: Number(row.revision) }
+      : undefined;
+  }
+  private async lockSource(
+    client: PoolClient,
+    workspaceId: string,
+    uploadId: string,
+  ): Promise<SourceRecord | undefined> {
+    const row = (
+      await client.query<{ document: SourceRecord; purging: boolean; revision: string }>(
+        "SELECT document,purging,revision FROM embody_platform_sources WHERE workspace_id=$1 AND upload_id=$2 FOR UPDATE",
+        [workspaceId, uploadId],
+      )
+    ).rows[0];
+    return row
+      ? { ...row.document, ...(row.purging ? { purging: true } : {}), revision: Number(row.revision) }
+      : undefined;
+  }
+  /** CAS write of an artifact's pin and retention; the column mirrors `pinnedBy`. */
+  private async writeArtifactPin(
+    client: PoolClient,
+    next: ArtifactRecord,
+    expected: number,
+  ): Promise<void> {
+    const result = await client.query(
+      `UPDATE embody_platform_artifacts SET pinned=$3,retain_until=$4,revision=$5,document=$6
+      WHERE workspace_id=$1 AND artifact_id=$2 AND revision=$7 AND state='admitted' AND NOT purging`,
+      [
+        next.workspaceId,
+        next.artifactId,
+        next.pinnedBy !== undefined,
+        next.retainUntil,
+        next.revision,
+        next,
+        expected,
+      ],
+    );
+    if (result.rowCount !== 1) throw new ConflictError("Artifact revision conflict");
+  }
+  /** CAS write of a source's pin and retention; the column mirrors `pinnedBy`. */
+  private async writeSourcePin(
+    client: PoolClient,
+    next: SourceRecord,
+    expected: number,
+  ): Promise<void> {
+    const result = await client.query(
+      `UPDATE embody_platform_sources SET pinned=$3,retain_until=$4,revision=$5,document=$6
+      WHERE workspace_id=$1 AND upload_id=$2 AND revision=$7 AND NOT purging`,
+      [
+        next.workspaceId,
+        next.uploadId,
+        next.pinnedBy !== undefined,
+        next.retainUntil,
+        next.revision,
+        next,
+        expected,
+      ],
+    );
+    if (result.rowCount !== 1) throw new ConflictError("Source revision conflict");
+  }
   public completeDeployment(
     fence: CompletionFence,
     outcome: StageOutcome,
@@ -1427,39 +1784,28 @@ export class PostgresGatewayStore
       let artifact: ArtifactRecord | undefined;
       let source: SourceRecord | undefined;
       if (outcome.kind === "promote") {
-        const row = record.artifactId
-          ? (
-              await client.query<{ document: ArtifactRecord; purging: boolean; state: string }>(
-                "SELECT document,purging,state FROM embody_platform_artifacts WHERE workspace_id=$1 AND artifact_id=$2 FOR UPDATE",
-                [record.workspaceId, record.artifactId],
-              )
-            ).rows[0]
+        // Lock order: workspace, deployment, artifact, source, then the replaced release's rows.
+        artifact = record.artifactId
+          ? await this.lockArtifact(client, record.workspaceId, record.artifactId)
           : undefined;
-        artifact = row && !row.purging && row.state === "admitted" ? row.document : undefined;
-        if (
-          !artifact ||
-          artifact.deploymentId !== record.deploymentId ||
-          artifact.appId !== record.appId
-        )
-          applied = { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: "ARTIFACT_MISSING" };
+        let refusal: string | null = null;
+        if (!promotableArtifact(record, artifact)) refusal = "ARTIFACT_MISSING";
         else {
-          // The release pins its source (MD15); lock order: workspace, deployment, artifact, source.
-          const row = (
-            await client.query<{ document: SourceRecord; purging: boolean; revision: string }>(
-              "SELECT document,purging,revision FROM embody_platform_sources WHERE workspace_id=$1 AND upload_id=$2 FOR UPDATE",
-              [record.workspaceId, record.submission.source.uploadId],
-            )
-          ).rows[0];
-          source = row
-            ? {
-                ...row.document,
-                ...(row.purging ? { purging: true } : {}),
-                revision: Number(row.revision),
-              }
-            : undefined;
-          if (!releaseSourceUsable(record, source))
-            applied = { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: "SOURCE_MISSING" };
+          source = await this.lockSource(
+            client,
+            record.workspaceId,
+            record.submission.source.uploadId,
+          );
+          if (!releaseSourceUsable(record, source)) refusal = "SOURCE_MISSING";
         }
+        const invalid =
+          !refusal && app
+            ? registrationRefusal(record, app, outcome.registration, (registration) =>
+                validateRegistration(registration, this.policy),
+              )
+            : null;
+        if (refusal) applied = { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: refusal };
+        else if (invalid) applied = { kind: "fail", code: "CHECK_FAILED", reason: invalid };
       }
       const decision = decideComplete({
         record,
@@ -1469,25 +1815,74 @@ export class PostgresGatewayStore
         now,
       });
       if (decision.promote) {
-        const releaseId = decision.promote.releaseId;
-        const manifest = releaseManifest(record, artifact!, releaseId);
-        const release: ReleaseRecord = {
-          workspaceId: record.workspaceId,
-          appId: record.appId,
-          releaseId,
-          deploymentId: record.deploymentId,
-          artifactId: artifact!.artifactId,
-          imageReference: artifact!.imageReference!,
-          generation: decision.promote.generation,
-          manifest,
-          createdAt: now.toISOString(),
-        };
+        const ws = record.workspaceId;
+        const release = promotedRelease(
+          record,
+          artifact!,
+          decision.promote,
+          recipeSchemaVersion(artifact!.recipe),
+          now,
+        );
+        // The release it replaces drains, then stays a rollback target for 30 days; what it
+        // pinned goes back to the ordinary retention sweeps (M13 step 4, M12 re-review N1).
+        if (app!.activeRelease && app!.activeRelease !== release.releaseId) {
+          const prior = (
+            await client.query<{ document: ReleaseRecord }>(
+              "SELECT document FROM embody_platform_releases WHERE workspace_id=$1 AND release_id=$2 FOR UPDATE",
+              [ws, app!.activeRelease],
+            )
+          ).rows[0]?.document;
+          if (prior) {
+            await client.query(
+              "UPDATE embody_platform_releases SET document=$3 WHERE workspace_id=$1 AND release_id=$2",
+              [ws, prior.releaseId, replacedRelease(prior, now)],
+            );
+            const priorArtifact =
+              prior.artifactId === artifact!.artifactId
+                ? artifact
+                : await this.lockArtifact(client, ws, prior.artifactId);
+            const freed =
+              priorArtifact && !priorArtifact.purging
+                ? releasedPin(priorArtifact, prior.releaseId, now)
+                : null;
+            if (freed && priorArtifact) {
+              const next = { ...freed, revision: priorArtifact.revision + 1 };
+              await this.writeArtifactPin(client, next, priorArtifact.revision);
+              if (next.artifactId === artifact!.artifactId) artifact = next;
+            }
+            // Releases promoted before M13 name their source only through their deployment
+            // (an immutable submission: read without a lock).
+            const upload =
+              prior.sourceUploadId ??
+              (
+                await client.query<{ document: DeploymentRecord }>(
+                  "SELECT document FROM embody_platform_deployments WHERE workspace_id=$1 AND deployment_id=$2",
+                  [ws, prior.deploymentId],
+                )
+              ).rows[0]?.document.submission.source.uploadId;
+            const priorSource =
+              upload === undefined
+                ? undefined
+                : upload === source!.uploadId
+                  ? source
+                  : await this.lockSource(client, ws, upload);
+            const kept =
+              priorSource && !priorSource.purging
+                ? releasedPin(priorSource, prior.releaseId, now)
+                : null;
+            if (kept && priorSource) {
+              const next = { ...kept, revision: priorSource.revision + 1 };
+              await this.writeSourcePin(client, next, priorSource.revision);
+              if (next.uploadId === source!.uploadId) source = next;
+            }
+          }
+        }
         await client.query(
           `INSERT INTO embody_platform_releases(workspace_id,release_id,app_id,deployment_id,artifact_id,created_at,document)
           VALUES($1,$2,$3,$4,$5,$6,$7)`,
           [
-            release.workspaceId,
-            releaseId,
+            ws,
+            release.releaseId,
             release.appId,
             release.deploymentId,
             release.artifactId,
@@ -1495,44 +1890,29 @@ export class PostgresGatewayStore
             release,
           ],
         );
-        const promoted: CatalogApp = {
-          ...app!,
-          activeRelease: releaseId,
-          generation: decision.promote.generation,
-          revision: app!.revision + 1,
-        };
+        // Route, manifest, active release and generation in one row: every gateway's next
+        // snapshot sees the old pair or the new pair, never a mix (M13.a).
+        const promoted = promotedCatalog(app!, release, decision.promote.generation);
         // CAS on the generation read under the workspace lock (canPromote already compared it).
         const pointer = await client.query(
           `UPDATE embody_platform_apps SET document=$3 WHERE workspace_id=$1 AND id=$2 AND (document->>'generation')::bigint=$4`,
-          [record.workspaceId, record.appId, promoted, app!.generation],
+          [ws, record.appId, promoted, app!.generation],
         );
         if (pointer.rowCount !== 1) throw new ConflictError("App generation conflict");
         await client.query(
           "UPDATE embody_platform_workspaces SET revision=revision+1 WHERE id=$1",
-          [record.workspaceId],
+          [ws],
         );
-        const pinned: ArtifactRecord = {
-          ...artifact!,
-          pinnedBy: releaseId,
-          revision: artifact!.revision + 1,
-        };
-        const pin = await client.query(
-          `UPDATE embody_platform_artifacts SET pinned=true,revision=$3,document=$4
-          WHERE workspace_id=$1 AND artifact_id=$2 AND revision=$5 AND state='admitted' AND NOT purging`,
-          [pinned.workspaceId, pinned.artifactId, pinned.revision, pinned, artifact!.revision],
+        await this.writeArtifactPin(
+          client,
+          { ...artifact!, pinnedBy: release.releaseId, revision: artifact!.revision + 1 },
+          artifact!.revision,
         );
-        if (pin.rowCount !== 1) throw new ConflictError("Artifact revision conflict");
-        const kept: SourceRecord = {
-          ...source!,
-          pinnedBy: releaseId,
-          revision: source!.revision + 1,
-        };
-        const keep = await client.query(
-          `UPDATE embody_platform_sources SET pinned=true,revision=$3,document=$4
-          WHERE workspace_id=$1 AND upload_id=$2 AND revision=$5 AND NOT purging`,
-          [kept.workspaceId, kept.uploadId, kept.revision, kept, source!.revision],
+        await this.writeSourcePin(
+          client,
+          { ...source!, pinnedBy: release.releaseId, revision: source!.revision + 1 },
+          source!.revision,
         );
-        if (keep.rowCount !== 1) throw new ConflictError("Source revision conflict");
       }
       await this.writeDeployment(client, decision.next, record.revision);
       if (decision.wake) await wake([decision.wake], await txid());

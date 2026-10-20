@@ -202,6 +202,10 @@ function canonical(value: unknown): string {
 }
 const sha256 = (data: string | Uint8Array) =>
   `sha256:${createHash("sha256").update(data).digest("hex")}`;
+/** The admitted manifest's `catalogDigest` of a catalog (M13 re-reads and re-checks it). */
+export function catalogDigestOf(catalog: unknown): string {
+  return sha256(canonical(catalog));
+}
 const SOURCE_URL_ENV = "EMBODY_SOURCE_URL=";
 /**
  * Cloud Build reports steps as executed: substitutions applied, so `$$` reads back as `$` and

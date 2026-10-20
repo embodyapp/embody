@@ -52,6 +52,7 @@ const STATUS: Record<PublicErrorCode, number> = {
   BUILD_FAILED: 409,
   CHECK_FAILED: 409,
   DEPENDENCY_UNAVAILABLE: 503,
+  ROLLBACK_INCOMPATIBLE: 409,
 };
 const AUDIT_CODE: Partial<Record<PublicErrorCode, EmbodyErrorCode>> = {
   FORBIDDEN: "FORBIDDEN",
@@ -60,6 +61,7 @@ const AUDIT_CODE: Partial<Record<PublicErrorCode, EmbodyErrorCode>> = {
   STALE_GENERATION: "CONFLICT",
   LIMIT_EXCEEDED: "RATE_LIMITED",
   DEPENDENCY_UNAVAILABLE: "DEPENDENCY_ERROR",
+  ROLLBACK_INCOMPATIBLE: "CONFLICT",
 };
 function deadline<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
