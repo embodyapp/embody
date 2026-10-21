@@ -29,6 +29,7 @@ import {
   type StageOutcome,
 } from "./deployment.js";
 import type { Registration } from "./index.js";
+import { registerWakeRoute, type WakeRouteOptions } from "./wake-forwarder.js";
 
 /**
  * M12 deployment controller. It runs in the deployment worker, not in the gateway: every step is
@@ -565,6 +566,8 @@ export interface DeploymentWorkerOptions {
   readonly controller: DeploymentController;
   /** Accepts only the controller queue's invoker identity for the worker's task audience. */
   readonly verifier: PlatformInvokerVerifier;
+  /** M13: the stable per-app wake route of hosted durable apps (see `wake-forwarder.ts`). */
+  readonly wake?: WakeRouteOptions;
 }
 const TASK_ROUTES = new Set(["/_embody/tasks/deployment", "/_embody/tasks/reconcile"]);
 /**
@@ -584,6 +587,7 @@ export function createDeploymentWorker(options: DeploymentWorkerOptions): Fastif
       await reply.status(401).send({ error: "unauthenticated" });
     }
   });
+  if (options.wake) registerWakeRoute(app, options.wake);
   app.post("/_embody/tasks/deployment", async (request, reply) => {
     const result = await options.controller.handle(request.body);
     if (result.retryAfterSeconds !== undefined)

@@ -21,6 +21,7 @@ import {
   type DeploymentStore,
   type ReleaseRecord,
 } from "./deployment.js";
+import { wakeUrl } from "./wake-forwarder.js";
 import type {
   CandidateSweeper,
   DeploymentStageContext,
@@ -123,6 +124,8 @@ export interface CandidateSpec {
   readonly env: readonly CandidateEnv[];
   readonly maxInstances: number;
   readonly cloudSqlConnection?: string;
+  /** Extra OIDC audiences the provider accepts for invocation (the app's stable wake URL). */
+  readonly customAudiences?: readonly string[];
 }
 export interface CandidateState {
   readonly name: string;
@@ -141,7 +144,7 @@ export interface CandidateProvider {
   setInvokers(name: string, members: readonly string[], signal: AbortSignal): Promise<void>;
   /** Callers verify ownership first. Missing is success. */
   remove(name: string, signal: AbortSignal): Promise<void>;
-  /** Candidates carrying this platform's labels (bounded by the provider page size). */
+  /** Every candidate carrying this platform's labels (all provider pages, bounded). */
   list(signal: AbortSignal): Promise<readonly CandidateState[]>;
 }
 export interface AppIdentityProvider {
@@ -172,6 +175,8 @@ export interface AppIdentityProvider {
     runtimeEmail: string,
     signal: AbortSignal,
   ): Promise<{ readonly queue: string; readonly invokerEmail: string } | "pending">;
+  /** Lets the app's wake invoker call the platform wake route (the deployment worker). */
+  ensureWakeRoute(invokerEmail: string, signal: AbortSignal): Promise<void>;
 }
 export interface WorkflowVersionInUse {
   readonly definition: string;
@@ -186,6 +191,8 @@ export interface AppDatabase {
   credentialMarker(names: AppResourceNames): Promise<string | null>;
   /** Sets the runtime password and its marker in one transaction. */
   setCredential(names: AppResourceNames, password: string, marker: string): Promise<void>;
+  /** Runs `work` holding a per-app lock (credential rotation). */
+  withCredentialLock<T>(names: AppResourceNames, work: () => Promise<T>): Promise<T>;
   /** The runtime connection URL the secret holds. */
   runtimeUrl(names: AppResourceNames, password: string): string;
   /** Applied storage migration versions, ascending. */
@@ -331,9 +338,14 @@ export interface ReleasePlatform {
   readonly jwksUrl: string;
   /** `project:region:instance` of the shared Cloud SQL instance (mounted at `/cloudsql`). */
   readonly cloudSqlConnection?: string;
-  /** For Cloud Run's deterministic service URLs (required for durable apps: the drain URL). */
+  /** For Cloud Run's deterministic service URLs. */
   readonly projectNumber?: string;
   readonly region?: string;
+  /**
+   * The deployment worker's origin: durable apps' wake tasks go to its stable per-app wake
+   * route, which forwards them to the active release (required for durable apps).
+   */
+  readonly wakeBaseUrl?: string;
 }
 export interface ReleaseStagesOptions {
   readonly platform: ReleasePlatform;
@@ -350,6 +362,7 @@ export interface ReleaseStagesOptions {
   readonly validate?: (registration: Registration) => void;
 }
 
+const STEP_BUDGET_MS = 25_000;
 /** A permanent stage failure; a rollback's compatibility failures are explicit refusals. */
 const fail = (reason: string, code?: "CHECK_FAILED" | "ROLLBACK_INCOMPATIBLE"): StageResult => ({
   ok: false,
@@ -400,6 +413,7 @@ export class ReleaseStages implements DeploymentStages {
     // Customer secret references are served by M15; until then a release cannot use them.
     if (record.submission.secretReferences.length > 0)
       return { ok: false, retryable: false, reason: "SECRETS_UNSUPPORTED", code: "INVALID_INPUT" };
+    const started = Date.now();
     const names = this.names(record);
     const { identities, database } = this.options;
     const account = await identities.ensureAccount(
@@ -412,9 +426,11 @@ export class ReleaseStages implements DeploymentStages {
     await database.ensure(names);
     await identities.ensureSecret(names.databaseSecret, account.email, signal);
     // Converge the runtime credential without the controller ever reading a secret payload:
-    // the role carries the version its password was taken from.
-    const latest = await identities.latestSecretVersion(names.databaseSecret, signal);
-    if (!latest || latest !== (await database.credentialMarker(names))) {
+    // the role carries the version its password was taken from. Serialized per app, so two
+    // deployments of one app never interleave a rotation (review note 3).
+    await database.withCredentialLock(names, async () => {
+      const latest = await identities.latestSecretVersion(names.databaseSecret, signal);
+      if (latest && latest === (await database.credentialMarker(names))) return;
       const password = randomBytes(24).toString("base64url");
       const version = await identities.addSecretVersion(
         names.databaseSecret,
@@ -422,8 +438,13 @@ export class ReleaseStages implements DeploymentStages {
         signal,
       );
       await database.setCredential(names, password, version);
-    }
+    });
     const target = recipeSchemaVersion(artifact.recipe);
+    if (target === undefined)
+      return fail("UNKNOWN_RECIPE", rollback ? "ROLLBACK_INCOMPATIBLE" : "CHECK_FAILED");
+    // One step stays well inside the handler deadline even when calls are slow (review note 7):
+    // past the budget it hands over to the next step, which adopts everything done so far.
+    if (Date.now() - started > STEP_BUDGET_MS) return pending("STEP_BUDGET");
     const refusal = migrationRefusal(
       await database.appliedMigrations(names),
       target,
@@ -434,9 +455,8 @@ export class ReleaseStages implements DeploymentStages {
       return pending("MIGRATING");
     let wake: { readonly queue: string; readonly invokerEmail: string } | undefined;
     if (record.submission.capabilities.profile === "durable-v1") {
-      // The drain URL must be known before the candidate exists (it is the wake audience).
-      if (!this.endpoint(candidateName(this.options.platform.prefix, record)))
-        return fail("DURABLE_UNCONFIGURED");
+      // Wake tasks go to the app's stable wake route, never to one candidate (review B1).
+      if (!this.options.platform.wakeBaseUrl) return fail("DURABLE_UNCONFIGURED");
       const ensured = await identities.ensureWakeQueue(
         names.wakeQueue,
         names.invokerAccount,
@@ -444,8 +464,10 @@ export class ReleaseStages implements DeploymentStages {
         signal,
       );
       if (ensured === "pending") return pending("QUEUE_PENDING");
+      await identities.ensureWakeRoute(ensured.invokerEmail, signal);
       wake = ensured;
     }
+    if (Date.now() - started > STEP_BUDGET_MS) return pending("STEP_BUDGET");
     const name = candidateName(this.options.platform.prefix, record);
     const existing = await this.options.candidates.get(name, signal);
     if (!existing) {
@@ -483,7 +505,9 @@ export class ReleaseStages implements DeploymentStages {
     wake: { readonly queue: string; readonly invokerEmail: string } | undefined,
   ): CandidateSpec {
     const { platform } = this.options;
-    const drain = wake ? `${this.endpoint(name)}/_embody/drain` : undefined;
+    const drain = wake
+      ? wakeUrl(platform.wakeBaseUrl!, record.workspaceId, record.appId)
+      : undefined;
     return {
       name,
       image: artifact.imageReference!,
@@ -516,6 +540,7 @@ export class ReleaseStages implements DeploymentStages {
           : []),
       ],
       maxInstances: HOSTED_PROFILE.maxInstancesPerApp,
+      ...(drain ? { customAudiences: [drain] } : {}),
       ...(platform.cloudSqlConnection ? { cloudSqlConnection: platform.cloudSqlConnection } : {}),
     };
   }
@@ -584,7 +609,9 @@ export class ReleaseStages implements DeploymentStages {
     const endpoint = record.candidate.endpoint;
     let registration: Registration | string;
     if (context.rollback) {
-      // The target's registration was verified when it was promoted; only the route is new.
+      // The target's registration was verified when it was promoted; only the route is new. Its
+      // built name must still be the app's name (review note 5: tokens are issued for the name).
+      if (context.artifact.manifest?.appId !== status.name) return "APP_NAME_MISMATCH";
       const prior = context.rollback.registration;
       registration = prior
         ? { ...prior, appId: status.name, endpoint, healthCheckUrl: `${endpoint}/health` }
@@ -626,6 +653,8 @@ export interface CandidateSweepOptions {
   >;
   /** Removals per pass; the rest wait for the next pass. */
   readonly maxRemovals?: number;
+  /** Wall-clock budget of one pass (default 20 s), so a task's answer is never held for long. */
+  readonly budgetMs?: number;
 }
 export type SweepDecision = "keep" | "remove" | "foreign";
 /**
@@ -674,28 +703,42 @@ export async function decideSweep(
 }
 export class CandidateSweep implements CandidateSweeper {
   public constructor(private readonly options: CandidateSweepOptions) {}
-  public async sweep(now: Date): Promise<{ readonly removed: number; readonly kept: number }> {
-    const signal = AbortSignal.timeout(30_000);
+  /**
+   * One bounded pass over every listed candidate (the provider pages through all of them). A
+   * failing decision or delete is counted and skipped, so it never blocks the rest (review B2 of
+   * `a561eaf`); at most `maxRemovals` removals and `budgetMs` per pass, the rest wait for the next.
+   */
+  public async sweep(
+    now: Date,
+  ): Promise<{ readonly removed: number; readonly kept: number; readonly failed: number }> {
+    const started = Date.now();
+    const budget = this.options.budgetMs ?? 20_000;
+    const signal = AbortSignal.timeout(budget + 15_000);
     let removed = 0;
     let kept = 0;
+    let failed = 0;
     for (const state of await this.options.candidates.list(signal)) {
-      if (removed >= (this.options.maxRemovals ?? 10)) break;
-      const { decision, release } = await decideSweep(state, this.options, now);
-      if (decision !== "remove") {
-        kept += decision === "keep" ? 1 : 0;
-        continue;
+      if (removed >= (this.options.maxRemovals ?? 10) || Date.now() - started > budget) break;
+      try {
+        const { decision, release } = await decideSweep(state, this.options, now);
+        if (decision !== "remove") {
+          kept += decision === "keep" ? 1 : 0;
+          continue;
+        }
+        await this.options.candidates.remove(state.name, signal);
+        if (release)
+          await this.options.store.markCandidateRemoved(
+            release.workspaceId,
+            release.appId,
+            release.releaseId,
+            now,
+          );
+        removed += 1;
+      } catch {
+        failed += 1;
       }
-      await this.options.candidates.remove(state.name, signal);
-      if (release)
-        await this.options.store.markCandidateRemoved(
-          release.workspaceId,
-          release.appId,
-          release.releaseId,
-          now,
-        );
-      removed += 1;
     }
-    return { removed, kept };
+    return { removed, kept, failed };
   }
 }
 export type { CandidateRef };

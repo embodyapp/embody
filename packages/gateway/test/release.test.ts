@@ -1,4 +1,6 @@
+import { SignJWT, generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
+import { platformInvokerVerifier } from "@embody/auth";
 import { BUILD_RECIPE, HOSTED_PROFILE, SOURCE_ADMISSION } from "@embody/cloud-contracts";
 import {
   DEPLOYMENT_LIMITS,
@@ -6,7 +8,9 @@ import {
   StaleDeploymentError,
   candidateName,
   candidateOwner,
+  createDeploymentWorker,
   createWorkspaceGateway,
+  wakeUrl,
   newCredential,
   purgeExpiredSources,
   type DeploymentRecord,
@@ -569,11 +573,15 @@ describe("M13.e workflow versions and subscriptions switch with the active gener
     );
     expect(replaced.state).toBe("active");
     // Durable candidates get the app's own wake queue and invoker, and the drain URL.
+    // Wake tasks address the app's stable wake route, never one candidate (review B1).
     const candidate = h.candidates.services.get(replaced.candidate!.service)!;
-    expect(candidate.spec.env).toContainEqual({
-      name: "EMBODY_DRAIN_URL",
-      value: `${replaced.candidate!.endpoint}/_embody/drain`,
-    });
+    const stable = wakeUrl(platform.wakeBaseUrl!, h.workspaceId, APP);
+    expect(candidate.spec.env).toContainEqual({ name: "EMBODY_DRAIN_URL", value: stable });
+    expect(candidate.spec.env).toContainEqual({ name: "EMBODY_DRAIN_AUDIENCE", value: stable });
+    expect(candidate.spec.customAudiences).toEqual([stable]);
+    expect([...h.identities.wakeRouteInvokers]).toEqual([
+      `${h.names.invokerAccount}@embody-cloud.iam.gserviceaccount.com`,
+    ]);
     expect(candidate.invokers).toContain(
       `serviceAccount:${h.names.invokerAccount}@embody-cloud.iam.gserviceaccount.com`,
     );
@@ -681,5 +689,194 @@ describe("M13 candidate sweep is ownership-checked and bounded", () => {
     expect(h.candidates.services.has("other-c0123")).toBe(true);
     expect(h.candidates.services.has("emb-cforged000000000000000000")).toBe(true);
     expect((await h.catalog()).generation).toBe(generation);
+  });
+});
+
+describe("M13 review B1: durable wakes follow the active release through the stable wake route", () => {
+  it("wakes scheduled by a replaced release reach the active release after its candidate is gone", async () => {
+    const h = await releaseHarness();
+    const caps = { capabilities: durable } as never;
+    const a = await h.deploy(
+      [workflowPlugin({ fulfil: { version: "1.0.0", steps: ["ship"] } })],
+      caps,
+    );
+    const b = await h.deploy(
+      [
+        workflowPlugin({
+          fulfil: { version: "1.0.0", steps: ["ship"] },
+          audit: { version: "1.0.0", steps: ["log"] },
+        }),
+      ],
+      caps,
+    );
+    expect([a.state, b.state]).toEqual(["active", "active"]);
+    // Both releases enqueue to the same stable URL; A's candidate is removed after the drain.
+    const stable = wakeUrl(platform.wakeBaseUrl!, h.workspaceId, APP);
+    for (const record of [a, b])
+      expect(
+        h.candidates.services.get(record.candidate!.service)?.spec.env ?? [],
+      ).not.toContainEqual({
+        name: "EMBODY_DRAIN_URL",
+        value: `${record.candidate!.endpoint}/_embody/drain`,
+      });
+    h.clock.advance(DEPLOYMENT_LIMITS.drainMs + 1000);
+    await h.controller.sweep(true);
+    expect(h.candidates.services.has(a.candidate!.service)).toBe(false);
+
+    const { publicKey, privateKey } = await generateKeyPair("RS256");
+    const invoker = `${h.names.invokerAccount}@embody-cloud.iam.gserviceaccount.com`;
+    const sign = (audience: string, email = invoker) =>
+      new SignJWT({ email, email_verified: true })
+        .setProtectedHeader({ alg: "RS256" })
+        .setIssuer("https://accounts.google.com")
+        .setAudience(audience)
+        .setIssuedAt()
+        .setExpirationTime("10m")
+        .sign(privateKey);
+    const forwarded: { url: string; auth: string | null; body: unknown }[] = [];
+    let drainStatus = 200;
+    const worker = createDeploymentWorker({
+      controller: h.controller,
+      verifier: platformInvokerVerifier({
+        audience: "https://unused",
+        invokerEmail: "x@y",
+        key: publicKey,
+      }),
+      wake: {
+        baseUrl: platform.wakeBaseUrl!,
+        invokerFor: () => invoker,
+        mint: (email, audience) => Promise.resolve(`minted:${email}:${audience}`),
+        store: h.store,
+        verifier: (audience, email) =>
+          platformInvokerVerifier({ audience, invokerEmail: email, key: publicKey }),
+        fetch: ((url: string | URL, init?: RequestInit) => {
+          forwarded.push({
+            url: String(url),
+            auth: new Headers(init?.headers).get("authorization"),
+            body: JSON.parse(String(init?.body)) as unknown,
+          });
+          return Promise.resolve(
+            new Response("{}", {
+              status: drainStatus,
+              headers: drainStatus === 503 ? { "retry-after": "7" } : {},
+            }),
+          );
+        }) as typeof fetch,
+      },
+    });
+    const path = `/_embody/wake/${h.workspaceId}/${APP}`;
+    const task = { v: 1, kind: "step", item: "a-step-scheduled-by-release-a" };
+    const delivered = await worker.inject({
+      method: "POST",
+      url: path,
+      headers: { authorization: `Bearer ${await sign(stable)}` },
+      payload: task,
+    });
+    expect(delivered.statusCode).toBe(200);
+    expect(forwarded).toEqual([
+      {
+        url: `${b.candidate!.endpoint}/_embody/drain`,
+        auth: `Bearer minted:${invoker}:${stable}`,
+        body: task,
+      },
+    ]);
+    // The drain's answer is the queue's answer: 503 with its Retry-After keeps the task.
+    drainStatus = 503;
+    const retried = await worker.inject({
+      method: "POST",
+      url: path,
+      headers: { authorization: `Bearer ${await sign(stable)}` },
+      payload: task,
+    });
+    expect([retried.statusCode, retried.headers["retry-after"]]).toEqual([503, "7"]);
+    // Another identity, another app's audience, or no token: refused before the body is read.
+    for (const authorization of [
+      `Bearer ${await sign(stable, "someone@embody-cloud.iam.gserviceaccount.com")}`,
+      `Bearer ${await sign(wakeUrl(platform.wakeBaseUrl!, h.workspaceId, "app_otherapp01"))}`,
+      undefined,
+    ]) {
+      const refused = await worker.inject({
+        method: "POST",
+        url: path,
+        headers: authorization ? { authorization } : {},
+        payload: "x".repeat(10_000),
+      });
+      expect(refused.statusCode).toBe(401);
+    }
+    expect(forwarded).toHaveLength(2);
+    await worker.close();
+  });
+
+  it("an app with no served release yet answers 503 so the queue keeps the wake", async () => {
+    const h = await releaseHarness();
+    const { publicKey, privateKey } = await generateKeyPair("RS256");
+    const invoker = `${h.names.invokerAccount}@embody-cloud.iam.gserviceaccount.com`;
+    const stable = wakeUrl(platform.wakeBaseUrl!, h.workspaceId, APP);
+    const token = await new SignJWT({ email: invoker, email_verified: true })
+      .setProtectedHeader({ alg: "RS256" })
+      .setIssuer("https://accounts.google.com")
+      .setAudience(stable)
+      .setIssuedAt()
+      .setExpirationTime("10m")
+      .sign(privateKey);
+    const worker = createDeploymentWorker({
+      controller: h.controller,
+      verifier: platformInvokerVerifier({
+        audience: "https://unused",
+        invokerEmail: "x@y",
+        key: publicKey,
+      }),
+      wake: {
+        baseUrl: platform.wakeBaseUrl!,
+        invokerFor: () => invoker,
+        mint: () => Promise.reject(new Error("must not mint")),
+        store: h.store,
+        verifier: (audience, email) =>
+          platformInvokerVerifier({ audience, invokerEmail: email, key: publicKey }),
+      },
+    });
+    const response = await worker.inject({
+      method: "POST",
+      url: `/_embody/wake/${h.workspaceId}/${APP}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    });
+    expect([response.statusCode, response.headers["retry-after"]]).toEqual([503, "60"]);
+    await worker.close();
+  });
+});
+
+describe("M13 review B2: the candidate sweep is not starved by a failing delete", () => {
+  it("a delete that keeps failing is counted and skipped; later removable candidates still go", async () => {
+    const h = await releaseHarness();
+    await h.deploy([plainPlugin()]);
+    const ended: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const record = await h.submit(await h.submission());
+      await h.store.cancelDeployment(record, 0, h.clock.now(), h.wake);
+      const name = candidateName(platform.prefix, record);
+      const base = [...h.candidates.services.values()][0]!.spec;
+      await h.candidates.create({
+        ...base,
+        name,
+        labels: {
+          "embody-platform": "emb",
+          "embody-role": "candidate",
+          "embody-owner": candidateOwner(record),
+        },
+        annotations: {
+          "embody.dev/workspace": h.workspaceId,
+          "embody.dev/app": APP,
+          "embody.dev/deployment": record.deploymentId,
+        },
+      });
+      ended.push(name);
+    }
+    const remove = h.candidates.remove.bind(h.candidates);
+    h.candidates.remove = (name: string) =>
+      name === ended[0] ? Promise.reject(new Error("Release provider returned 409")) : remove(name);
+    const pass = (await h.sweep.sweep(h.clock.now())) as { removed: number; failed: number };
+    expect(pass).toMatchObject({ removed: 2, failed: 1 });
+    expect(ended.map((name) => h.candidates.services.has(name))).toEqual([true, false, false]);
   });
 });

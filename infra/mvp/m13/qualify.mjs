@@ -18,8 +18,8 @@ export const M13_LIMITS = Object.freeze({
   /** Proposed one-off live budget; usable only with the owner's explicit approval. */
   maxBudgetUsd: 6,
   buildMinuteUsd: 0.006,
-  /** v1, v2, the boot-crash release and two racing deployments, each at the full 600 s. */
-  builds: 5,
+  /** v1, v2, the boot-crash release, two racing deployments and two durable releases. */
+  builds: 7,
   sqlHourUsd: 0.0222,
   sqlHours: 4,
   /** Worker, gateway and candidate requests, Cloud Tasks, images, secrets, buckets, logs. */
@@ -39,6 +39,7 @@ export const M13_CASES = Object.freeze([
   "M13.b.destructive-migration",
   "M13.c.promotion-race",
   "M13.d.rollback",
+  "M13.e.durable-wake",
   "cleanup",
 ]);
 
@@ -101,15 +102,24 @@ export const M13_PROVIDER_METHODS = Object.freeze([
 /**
  * Exact grants (RELEASES identity table): the worker adds only the M13 custom role, the
  * role-restricted project IAM admin and `actAs` on runtimes; each runtime holds only the Cloud
- * SQL client role and its secret; candidates are invokable only by the gateway and the worker.
+ * SQL client role and its secret; candidates are invokable only by the gateway, the worker and
+ * the app's own wake invoker; every worker role that touches a resource is prefix-conditioned.
  */
 export function evaluateReleaseBindings(bindings) {
   const worker = bindings.filter((b) => b.startsWith("worker|")).map((b) => b.slice(7));
   const runtimes = bindings.filter((b) => b.startsWith("runtime|")).map((b) => b.slice(8));
   const candidates = bindings.filter((b) => b.startsWith("candidate|")).map((b) => b.slice(10));
   const gateway = bindings.filter((b) => b.startsWith("gateway|")).map((b) => b.slice(8));
+  const prefixed = ["candidates", "wakeRoute", "secrets", "queues", "invokers"];
   const checks = {
-    workerHasM13Role: worker.includes("project:custom/m13-release"),
+    workerBaseRole: worker.includes("project:custom/base"),
+    // Every role that reads, writes, deletes or re-grants a resource is prefix-conditioned (B3).
+    workerConditionedGroups: prefixed.every((group) =>
+      worker.includes(`project:custom/${group}?prefixed`),
+    ),
+    workerNoUnconditionedGroups: !prefixed.some((group) =>
+      worker.includes(`project:custom/${group}`),
+    ),
     workerGrantsOnlySqlClient: worker.includes(
       "project:roles/resourcemanager.projectIamAdmin?onlyGrants=roles/cloudsql.client",
     ),
@@ -126,9 +136,14 @@ export function evaluateReleaseBindings(bindings) {
       ),
     candidatesInvokedByGatewayAndWorkerOnly:
       candidates.length > 0 &&
-      candidates.every((b) => b === "run.invoker:gateway" || b === "run.invoker:worker"),
+      candidates.every(
+        (b) =>
+          b === "run.invoker:gateway" ||
+          b === "run.invoker:worker" ||
+          b === "run.invoker:wake-invoker",
+      ),
     gatewayHasNoReleaseAuthority: !gateway.some((b) =>
-      /run\.admin|custom\/m13|projectIamAdmin/.test(b),
+      /run\.admin|custom\/|projectIamAdmin/.test(b),
     ),
     noOwnerOrEditor: !bindings.some((b) => /roles\/(owner|editor)$/.test(b)),
   };
@@ -247,8 +262,8 @@ export async function runM13Suite(env, provider, deps) {
     store = new deps.gateway.PostgresGatewayStore(db.runtimeUrl);
 
     // Fixtures: v1 (ping), v2 (adds pong) and a release whose container exits at boot.
-    const pack = async (kind, customize) =>
-      deps.createFixture("request-only", join(scratch, kind), {
+    const pack = async (kind, customize, profile = "request-only") =>
+      deps.createFixture(profile, join(scratch, kind), {
         createApp: deps.createApp,
         packSource: deps.contracts.packSource,
         registryUrl: registry.url,
@@ -265,6 +280,12 @@ export async function runM13Suite(env, provider, deps) {
         ),
       );
     };
+    const shortDelay = async (directory) => {
+      const config = join(directory, "embody.config.ts");
+      const text = await readFile(config, "utf8");
+      if (!text.includes("delayMs: 60 * 60_000")) throw new Error("durable scaffold changed");
+      await writeFile(config, text.replace("delayMs: 60 * 60_000", "delayMs: 12 * 60_000"));
+    };
     const crashAtBoot = async (directory) => {
       const entry = join(directory, "src/index.ts");
       await writeFile(entry, `process.exit(1);\n${await readFile(entry, "utf8")}`);
@@ -273,6 +294,17 @@ export async function runM13Suite(env, provider, deps) {
       v1: await pack("v1"),
       v2: await pack("v2", addPong),
       crash: await pack("crash", crashAtBoot),
+      // Durable: the scaffold's delayed workflow step is due 12 minutes after it starts, so the
+      // wake it schedules outlives the drain of the release that scheduled it (review B1).
+      durableA: await pack("durableA", shortDelay, "durable"),
+      durableB: await pack(
+        "durableB",
+        async (directory) => {
+          await shortDelay(directory);
+          await addPong(directory);
+        },
+        "durable",
+      ),
     };
     const summaries = Object.fromEntries(
       await Promise.all(
@@ -285,12 +317,11 @@ export async function runM13Suite(env, provider, deps) {
 
     let seq = 0;
     /** A reserved app (no registration), a deployer/app-caller credential, a workspace. */
-    const seed = async () => {
+    const seed = async (name = "m11-request-only") => {
       const workspaceId = `ws_m13${runId}${String(seq).padStart(2, "0")}`;
       const appId = `app_m13${runId}${String(seq).padStart(2, "0")}`;
       seq += 1;
       // The scaffold's own app name; the platform name must equal it (token audience).
-      const name = "m11-request-only";
       await store.createWorkspace(workspaceId);
       await store.putApp(
         { workspaceId, appId, name, registration: null, activeRelease: null, state: "unavailable" },
@@ -373,7 +404,7 @@ export async function runM13Suite(env, provider, deps) {
         idempotencyKey: key,
         source: await upload(seeded, kind),
         expectedGeneration: await generationOf(seeded),
-        capabilities: deps.requestOnly,
+        capabilities: kind.startsWith("durable") ? deps.durable : deps.requestOnly,
         secretReferences: [],
       });
     const settle = async (seeded, deploymentId) => {
@@ -561,6 +592,34 @@ export async function runM13Suite(env, provider, deps) {
         toActive: toActive.status,
         toActiveCode: toActive.body?.error?.code,
       });
+    });
+
+    await record("M13.e.durable-wake", async () => {
+      const d = await seed("m11-durable");
+      const a = await deploy(d, "durableA");
+      const started = await call(d, "app.followUp.start", {
+        input: { title: "m13" },
+        idempotencyKey: `m13-wake-${runId}`,
+      });
+      const id = started.body?.id;
+      const b = await deploy(d, "durableB");
+      // A's candidate drains and is swept; the step it scheduled is due after that.
+      await provider.wait(M13_LIMITS.drainWaitMs);
+      await provider.reconcile(context);
+      const live = await provider.candidates(context, d.workspaceId);
+      let status;
+      for (const begin = Date.now(); Date.now() - begin < 15 * 60_000;) {
+        status = (await call(d, "app.followUp.status", { id })).body?.status;
+        if (status === "completed" || status === "failed") break;
+        await delay(30_000);
+      }
+      const checks = {
+        bothActive: a.state === "active" && b.state === "active",
+        started: started.status === 200 && typeof id === "string",
+        replacedCandidateRemoved: live.length === 1,
+        stepCompletedOnActiveRelease: status === "completed",
+      };
+      return { pass: Object.values(checks).every(Boolean), checks, status };
     });
   } catch (error) {
     if (!cases.setUp)

@@ -91,6 +91,18 @@ await main("mvp-cloud", async () => {
       startFrameworkRegistry,
       createFixture,
       requestOnly,
+      durable: {
+        profile: "durable-v1",
+        crud: true,
+        boundedActions: true,
+        workflows: true,
+        events: true,
+        subscriptions: true,
+        schedules: false,
+        appToAppRpc: false,
+        persistentLocalState: false,
+        genui: false,
+      },
       cloudBuildersDocker: CLOUD_BUILDERS_DOCKER,
       // A throwaway run-scoped gateway signing key; only its public half leaves this machine
       // unencrypted (the private half goes to the run's Secret Manager secret).

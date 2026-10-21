@@ -29,6 +29,10 @@ export interface GoogleReleaseProviderOptions {
   readonly projectNumber: string;
   /** The platform resource prefix: only candidates labelled with it are listed. */
   readonly prefix: string;
+  /** The shared Cloud SQL instance name: runtimes may use the connector for it only. */
+  readonly sqlInstance?: string;
+  /** The deployment worker service (the wake route): app invokers get `run.invoker` on it. */
+  readonly wakeService?: string;
   /** `INGRESS_TRAFFIC_INTERNAL_ONLY` when the gateway reaches apps over the VPC (M05). */
   readonly ingress?: "INGRESS_TRAFFIC_ALL" | "INGRESS_TRAFFIC_INTERNAL_ONLY";
   readonly accessToken?: () => Promise<string>;
@@ -170,6 +174,7 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
         labels: spec.labels,
         annotations: spec.annotations,
         ingress: this.options.ingress ?? "INGRESS_TRAFFIC_ALL",
+        ...(spec.customAudiences?.length ? { customAudiences: [...spec.customAudiences] } : {}),
         template: {
           serviceAccount: spec.serviceAccount,
           timeout: "60s",
@@ -226,21 +231,31 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
   public async remove(name: string, signal: AbortSignal): Promise<void> {
     await this.ok(`${RUN}/${this.location}/services/${name}`, "DELETE", undefined, signal, [404]);
   }
+  /**
+   * Every candidate of this platform: follows `nextPageToken` (review B2 of `a561eaf`), bounded
+   * at 10 pages of 200, which is more than the regional Cloud Run service quota.
+   */
   public async list(signal: AbortSignal): Promise<readonly CandidateState[]> {
-    const result = await this.ok(
-      `${RUN}/${this.location}/services?pageSize=200`,
-      "GET",
-      undefined,
-      signal,
-    );
-    const services = Array.isArray(result.body["services"]) ? result.body["services"] : [];
-    return services
-      .map((service) => {
+    const states: CandidateState[] = [];
+    let token = "";
+    for (let page = 0; page < 10; page++) {
+      const result = await this.ok(
+        `${RUN}/${this.location}/services?pageSize=200${token ? `&pageToken=${encodeURIComponent(token)}` : ""}`,
+        "GET",
+        undefined,
+        signal,
+      );
+      const services = Array.isArray(result.body["services"]) ? result.body["services"] : [];
+      for (const service of services) {
         const value = record(service);
         const name = text(value["name"]).split("/").at(-1) ?? "";
-        return GoogleReleaseProvider.stateOf(value, this.endpointOf(name));
-      })
-      .filter((state) => state.labels[CANDIDATE_LABELS.platform] === this.options.prefix);
+        const state = GoogleReleaseProvider.stateOf(value, this.endpointOf(name));
+        if (state.labels[CANDIDATE_LABELS.platform] === this.options.prefix) states.push(state);
+      }
+      token = text(result.body["nextPageToken"]);
+      if (!token) break;
+    }
+    return states;
   }
 
   // Identities, secrets, queues -------------------------------------------------------------
@@ -270,14 +285,18 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
     return "pending";
   }
   /**
-   * Adds the runtime to the project's unconditional `roles/cloudsql.client` binding (etag-guarded
-   * read-modify-write; a concurrent change fails this step and the next one retries). The
-   * controller's own project IAM grant is conditioned to modify this role only.
+   * Adds the runtime to the project's `roles/cloudsql.client` binding **conditioned on the one
+   * shared instance** (review note 1), with an etag-guarded read-modify-write at policy version 3;
+   * a concurrent change fails this step and the next one retries. The controller's own project
+   * IAM grant is conditioned to modify this role only. Each app adds one member: a project allow
+   * policy holds at most 1,500 principals, which bounds apps per project (RELEASES).
    */
   public async ensureDatabaseClient(email: string, signal: AbortSignal): Promise<void> {
+    if (!this.options.sqlInstance) throw new ReleaseProviderError("SQL instance not configured");
     const resource = `https://cloudresourcemanager.googleapis.com/v1/projects/${this.options.project}`;
     const member = `serviceAccount:${email}`;
     const role = "roles/cloudsql.client";
+    const expression = `resource.name == "projects/${this.options.project}/instances/${this.options.sqlInstance}"`;
     const { body: policy } = await this.ok(
       `${resource}:getIamPolicy`,
       "POST",
@@ -287,22 +306,67 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
     const bindings = Array.isArray(policy["bindings"])
       ? (policy["bindings"] as Record<string, unknown>[])
       : [];
-    const plain = bindings.find(
-      (binding) => binding["role"] === role && binding["condition"] === undefined,
+    const ours = bindings.find(
+      (binding) =>
+        binding["role"] === role &&
+        (binding["condition"] as { expression?: unknown } | undefined)?.expression === expression,
     );
-    const members = Array.isArray(plain?.["members"]) ? (plain["members"] as string[]) : [];
+    const members = Array.isArray(ours?.["members"]) ? (ours["members"] as string[]) : [];
     if (members.includes(member)) return;
-    const next = plain
+    const next = ours
       ? bindings.map((binding) =>
-          binding === plain ? { ...binding, members: [...members, member] } : binding,
+          binding === ours ? { ...binding, members: [...members, member] } : binding,
         )
-      : [...bindings, { role, members: [member] }];
+      : [
+          ...bindings,
+          {
+            role,
+            members: [member],
+            condition: { title: "embody app runtimes: shared instance only", expression },
+          },
+        ];
     await this.ok(
       `${resource}:setIamPolicy`,
+      "POST",
+      { policy: { ...policy, version: 3, bindings: next } },
+      signal,
+    );
+  }
+  /** Allows an app's wake invoker to call the platform wake route on the worker service. */
+  public async ensureWakeRoute(invokerEmail: string, signal: AbortSignal): Promise<void> {
+    if (!this.options.wakeService) throw new ReleaseProviderError("Wake route not configured");
+    const service = `${RUN}/${this.location}/services/${this.options.wakeService}`;
+    const member = `serviceAccount:${invokerEmail}`;
+    const { body: policy } = await this.ok(`${service}:getIamPolicy`, "GET", undefined, signal);
+    const bindings = Array.isArray(policy["bindings"])
+      ? (policy["bindings"] as Record<string, unknown>[])
+      : [];
+    const invoker = bindings.find((binding) => binding["role"] === "roles/run.invoker");
+    const members = Array.isArray(invoker?.["members"]) ? (invoker["members"] as string[]) : [];
+    if (members.includes(member)) return;
+    const next = invoker
+      ? bindings.map((binding) =>
+          binding === invoker ? { ...binding, members: [...members, member] } : binding,
+        )
+      : [...bindings, { role: "roles/run.invoker", members: [member] }];
+    await this.ok(
+      `${service}:setIamPolicy`,
       "POST",
       { policy: { ...policy, bindings: next } },
       signal,
     );
+  }
+  /** An ID token as `email` for `audience` (the wake forwarder, IAM credentials API). */
+  public async mintIdToken(email: string, audience: string, signal: AbortSignal): Promise<string> {
+    const result = await this.ok(
+      `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${email}:generateIdToken`,
+      "POST",
+      { audience, includeEmail: true },
+      signal,
+    );
+    const token = text(result.body["token"]);
+    if (!token) throw new ReleaseProviderError("Invalid ID token response");
+    return token;
   }
   public async ensureSecret(
     secretId: string,
@@ -416,8 +480,16 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
       "POST",
       {
         policy: {
+          // Exactly: the runtime creates OIDC tasks as the invoker, and Cloud Tasks' own service
+          // agent mints them (as for the M09/M12 invokers). Nobody else acts as it.
           bindings: [
-            { role: "roles/iam.serviceAccountUser", members: [`serviceAccount:${runtimeEmail}`] },
+            {
+              role: "roles/iam.serviceAccountUser",
+              members: [
+                `serviceAccount:${runtimeEmail}`,
+                `serviceAccount:service-${this.options.projectNumber}@gcp-sa-cloudtasks.iam.gserviceaccount.com`,
+              ],
+            },
           ],
         },
       },

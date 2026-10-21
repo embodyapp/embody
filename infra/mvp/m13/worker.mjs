@@ -15,6 +15,7 @@ import {
   PostgresAppDatabase,
   PostgresGatewayStore,
   ReleaseStages,
+  appResourceNames,
   cloudRunHealthProbe,
   createDeploymentWorker,
 } from "../../../packages/gateway/dist/index.js";
@@ -37,6 +38,8 @@ const required = [
   "EMBODY_SQL_CONNECTION",
   "EMBODY_M13_PLATFORM",
   "EMBODY_M13_PROJECT_NUMBER",
+  "EMBODY_M13_SQL_INSTANCE",
+  "EMBODY_M13_WAKE_SERVICE",
 ];
 for (const name of required) if (!env[name]) throw new Error(`Missing ${name}`);
 if (!/^[a-z][a-z0-9-]+:us-central1:embody-test-[a-z0-9-]+$/.test(env.EMBODY_SQL_CONNECTION))
@@ -57,6 +60,8 @@ const google = new GoogleReleaseProvider({
   region: "us-central1",
   projectNumber: env.EMBODY_M13_PROJECT_NUMBER,
   prefix: platform.prefix,
+  sqlInstance: env.EMBODY_M13_SQL_INSTANCE,
+  wakeService: env.EMBODY_M13_WAKE_SERVICE,
 });
 const migrations = STORAGE_MIGRATIONS.map((m) => ({
   version: m.version,
@@ -109,5 +114,13 @@ const app = createDeploymentWorker({
     audience: env.EMBODY_M12_TASK_URL,
     invokerEmail: env.EMBODY_M12_INVOKER,
   }),
+  // Durable apps' stable wake route: forwards to the active release (review B1).
+  wake: {
+    baseUrl: platform.wakeBaseUrl,
+    invokerFor: (workspaceId, appId) =>
+      `${appResourceNames(platform.prefix, workspaceId, appId).invokerAccount}@${project}.iam.gserviceaccount.com`,
+    mint: (email, audience, signal) => google.mintIdToken(email, audience, signal),
+    store,
+  },
 });
 await app.listen({ host: "0.0.0.0", port: Number(env.PORT ?? 8080) });

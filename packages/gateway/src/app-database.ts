@@ -163,6 +163,22 @@ export class PostgresAppDatabase implements AppDatabase {
     });
   }
 
+  /**
+   * A session advisory lock per app database, held on its own connection for the whole of
+   * `work` (which includes a provider call), released on every path.
+   */
+  public async withCredentialLock<T>(names: AppResourceNames, work: () => Promise<T>): Promise<T> {
+    return this.connect(null, async (client) => {
+      await client.query("SELECT pg_advisory_lock(hashtext($1))", [`credential:${names.database}`]);
+      try {
+        return await work();
+      } finally {
+        await client
+          .query("SELECT pg_advisory_unlock(hashtext($1))", [`credential:${names.database}`])
+          .catch(() => undefined);
+      }
+    });
+  }
   public runtimeUrl(names: AppResourceNames, password: string): string {
     const user = encodeURIComponent(names.runtimeRole);
     const secret = encodeURIComponent(password);

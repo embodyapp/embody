@@ -15,7 +15,7 @@ import {
   m13Projection,
   runM13Suite,
 } from "../../infra/mvp/m13/qualify.mjs";
-import { M13_WORKER_PERMISSIONS, m13Names } from "../../infra/mvp/m13/gcp.mjs";
+import { M13_WORKER_ROLES, m13Conditions, m13Names } from "../../infra/mvp/m13/gcp.mjs";
 
 const { URL } = globalThis;
 
@@ -89,14 +89,16 @@ test("M13 cloud gate refuses budgets above $6, a missing SQL proxy and combined 
     budgetUsd: 6,
     proxy: env.EMBODY_CLOUD_SQL_PROXY,
   });
-  // Five builds at their full 600 s timeout, SQL for four hours, $0.60 fixed.
-  assert.equal(m13Projection(), 0.99);
+  // Seven builds at their full 600 s timeout, SQL for four hours, $0.60 fixed.
+  assert.equal(m13Projection(), 1.11);
   assert.ok(m13Projection() <= M13_LIMITS.maxBudgetUsd);
 });
 
-test("release grants must be exact: role-restricted IAM admin, runtimes only, candidates gateway/worker only", () => {
+test("release grants must be exact: every resource-touching worker role is prefix-conditioned (review B3)", () => {
+  const groups = ["candidates", "wakeRoute", "secrets", "queues", "invokers"];
   const good = [
-    "worker|project:custom/m13-release",
+    "worker|project:custom/base",
+    ...groups.map((g) => `worker|project:custom/${g}?prefixed`),
     "worker|project:roles/resourcemanager.projectIamAdmin?onlyGrants=roles/cloudsql.client",
     "worker|project:roles/iam.serviceAccountUser?runtimesOnly",
     "worker|project:roles/cloudsql.client",
@@ -104,24 +106,47 @@ test("release grants must be exact: role-restricted IAM admin, runtimes only, ca
     "runtime|secret:roles/secretmanager.secretAccessor",
     "candidate|run.invoker:gateway",
     "candidate|run.invoker:worker",
+    "candidate|run.invoker:wake-invoker",
     "gateway|project:roles/cloudsql.client",
   ];
   assert.equal(evaluateReleaseBindings(good).pass, true);
   for (const bad of [
+    // The a561eaf posture: one unconditioned custom role.
+    [...good.filter((b) => !b.includes("?prefixed")), "worker|project:custom/secrets"],
+    [...good, "worker|project:custom/secrets"],
+    good.filter((b) => b !== "worker|project:custom/invokers?prefixed"),
     good.map((b) => b.replace("?onlyGrants=roles/cloudsql.client", "")),
     [...good, "runtime|project:roles/storage.admin"],
     [...good, "candidate|roles/run.invoker:other"],
-    [...good, "gateway|project:custom/m13-release"],
+    [...good, "gateway|project:custom/base"],
     [...good, "worker|project:roles/editor"],
     good.filter((b) => !b.startsWith("candidate|")),
   ])
     assert.equal(evaluateReleaseBindings(bad).pass, false, JSON.stringify(bad));
-  // The custom role holds no IAM-policy or data permission beyond the RELEASES table.
-  assert.ok(
-    !M13_WORKER_PERMISSIONS.some((p) => /setIamPolicy$/.test(p) && p.startsWith("resourcemanager")),
+  // Unconditioned permissions are read, list and create only; nothing touches an existing
+  // resource's data or IAM, and no role can read a secret payload.
+  for (const permission of M13_WORKER_ROLES.base)
+    assert.match(permission, /\.(list|get|create)$|operations\.get$/);
+  assert.ok(!Object.values(M13_WORKER_ROLES).flat().includes("secretmanager.versions.access"));
+  assert.ok(!Object.values(M13_WORKER_ROLES).flat().includes("iam.serviceAccounts.actAs"));
+  // Every conditioned group is bound to this run's platform prefix (or the exact worker service).
+  const n = m13Names("embody-test-project", "embody-test-m13", "a1b2c3");
+  const conditions = m13Conditions(
+    "embody-test-project",
+    "123456789012",
+    n,
+    "embody-test-m13-worker-a1b2c3",
   );
-  assert.ok(!M13_WORKER_PERMISSIONS.includes("secretmanager.versions.access"));
-  assert.ok(!M13_WORKER_PERMISSIONS.includes("iam.serviceAccounts.actAs"));
+  for (const group of groups)
+    assert.ok(
+      conditions[group].includes(n.platformPrefix) || conditions[group].includes("worker-a1b2c3"),
+      group,
+    );
+  assert.match(conditions.secrets, /projects\/123456789012\/secrets\/ta1b2c3-a/);
+  assert.match(
+    conditions.wakeRoute,
+    /== "projects\/embody-test-project\/locations\/us-central1\/services\/embody-test-m13-worker-a1b2c3"/,
+  );
 });
 
 test("switch and rollback evaluators fail closed", () => {

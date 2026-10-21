@@ -175,6 +175,13 @@ export {
   type PostgresAppDatabaseOptions,
 } from "./app-database.js";
 export {
+  MAX_WAKE_BYTES,
+  WAKE_ROUTE,
+  registerWakeRoute,
+  wakeUrl,
+  type WakeRouteOptions,
+} from "./wake-forwarder.js";
+export {
   GoogleReleaseProvider,
   ReleaseProviderError,
   cloudRunHealthProbe,

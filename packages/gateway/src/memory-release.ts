@@ -88,6 +88,8 @@ export class MemoryAppIdentityProvider implements AppIdentityProvider {
   public readonly accounts = new Set<string>();
   public readonly secrets = new Map<string, { accessor: string; versions: string[] }>();
   public readonly queues = new Map<string, { invoker: string; enqueuer: string }>();
+  /** Wake invokers allowed to call the platform wake route. */
+  public readonly wakeRouteInvokers = new Set<string>();
   /** Identities holding the project's Cloud SQL client role. */
   public readonly databaseClients = new Set<string>();
   /** Calls that report `pending` before an account exists (IAM propagation). */
@@ -102,6 +104,10 @@ export class MemoryAppIdentityProvider implements AppIdentityProvider {
       }
     }
     return Promise.resolve({ email: `${accountId}@${this.project}.iam.gserviceaccount.com` });
+  }
+  public ensureWakeRoute(invokerEmail: string): Promise<void> {
+    this.wakeRouteInvokers.add(invokerEmail);
+    return Promise.resolve();
   }
   public ensureDatabaseClient(email: string): Promise<void> {
     this.databaseClients.add(email);
@@ -178,6 +184,9 @@ export class MemoryAppDatabase implements AppDatabase {
     db.password = password;
     db.marker = marker;
     return Promise.resolve();
+  }
+  public withCredentialLock<T>(_names: AppResourceNames, work: () => Promise<T>): Promise<T> {
+    return work();
   }
   public runtimeUrl(names: AppResourceNames, password: string): string {
     return `postgresql://${names.runtimeRole}:${password}@/${names.database}?host=/cloudsql/fixture`;

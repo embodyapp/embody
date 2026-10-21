@@ -32,7 +32,7 @@ from [IDENTITY](./IDENTITY.md) and:
 | `EMBODY_DRAIN_AUDIENCE` | OIDC audience of wake tasks (HTTPS); the drain accepts no other. |
 | `EMBODY_DRAIN_INVOKER_EMAIL` | The platform invoker service account; the drain accepts no other. |
 
-Drain settings outside the durable profile are rejected. `createAppHost` accepts a `wakeQueue`
+Drain settings outside the durable profile are rejected. Apps deployed by the hosted platform (M13) get the app's stable wake route on the deployment worker as `EMBODY_DRAIN_URL` and `EMBODY_DRAIN_AUDIENCE`; the worker forwards each wake to the app's active release ([RELEASES](./RELEASES.md#durable-wakes-follow-the-active-release-review-b1-of-a561eaf)), so wakes scheduled by a replaced release still run. `createAppHost` accepts a `wakeQueue`
 override for tests and local development; it never overrides authentication or storage.
 Scaffold with `create-embody-app my-app --durable`.
 

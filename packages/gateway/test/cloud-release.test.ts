@@ -190,17 +190,13 @@ describe("M13 Google Cloud release adapter request shapes", () => {
     expect(calls.some((call) => call.url.includes(":access"))).toBe(false);
   });
 
-  it("grants the runtime Cloud SQL client by an etag-guarded project policy edit, once", async () => {
+  it("grants the runtime Cloud SQL client for the one instance, etag-guarded, once", async () => {
     let policy: Record<string, unknown> = {
       etag: "BwX1",
       version: 3,
       bindings: [
         { role: "roles/viewer", members: ["user:a@example.com"] },
-        {
-          role: "roles/cloudsql.client",
-          members: ["serviceAccount:x@p"],
-          condition: { title: "t" },
-        },
+        { role: "roles/cloudsql.client", members: ["serviceAccount:x@p"] },
       ],
     };
     const { calls, fetcher } = fakeFetch((call) => {
@@ -208,7 +204,7 @@ describe("M13 Google Cloud release adapter request shapes", () => {
       policy = (call.body as { policy: Record<string, unknown> }).policy;
       return { status: 200, body: policy };
     });
-    const provider = new GoogleReleaseProvider(options(fetcher));
+    const provider = new GoogleReleaseProvider({ ...options(fetcher), sqlInstance: "embody" });
     const email = "emb-a1@embody-cloud.iam.gserviceaccount.com";
     await provider.ensureDatabaseClient(email, signal);
     await provider.ensureDatabaseClient(email, signal);
@@ -217,12 +213,85 @@ describe("M13 Google Cloud release adapter request shapes", () => {
     expect(writes[0]!.url).toBe(
       "https://cloudresourcemanager.googleapis.com/v1/projects/embody-cloud:setIamPolicy",
     );
-    expect(policy).toMatchObject({ etag: "BwX1" });
+    expect(policy).toMatchObject({ etag: "BwX1", version: 3 });
     expect(policy["bindings"]).toEqual([
       { role: "roles/viewer", members: ["user:a@example.com"] },
-      { role: "roles/cloudsql.client", members: ["serviceAccount:x@p"], condition: { title: "t" } },
-      { role: "roles/cloudsql.client", members: [`serviceAccount:${email}`] },
+      // An unconditional binding someone else made is never extended.
+      { role: "roles/cloudsql.client", members: ["serviceAccount:x@p"] },
+      {
+        role: "roles/cloudsql.client",
+        members: [`serviceAccount:${email}`],
+        condition: {
+          title: "embody app runtimes: shared instance only",
+          expression: 'resource.name == "projects/embody-cloud/instances/embody"',
+        },
+      },
     ]);
+  });
+
+  it("lists every page of services (review B2) and keeps only this platform's candidates", async () => {
+    let page = 0;
+    const { calls, fetcher } = fakeFetch(() => {
+      page += 1;
+      return page === 1
+        ? {
+            status: 200,
+            body: {
+              services: Array.from({ length: 200 }, (_, i) => ({
+                name: `x/services/other-${i}`,
+                labels: {},
+              })),
+              nextPageToken: "p2",
+            },
+          }
+        : {
+            status: 200,
+            body: {
+              services: [{ name: "x/services/emb-corphan", labels: { "embody-platform": "emb" } }],
+            },
+          };
+    });
+    const states = await new GoogleReleaseProvider(options(fetcher)).list(signal);
+    expect(states.map((state) => state.name)).toEqual(["emb-corphan"]);
+    expect(calls.map((call) => call.url.split("?")[1])).toEqual([
+      "pageSize=200",
+      "pageSize=200&pageToken=p2",
+    ]);
+  });
+
+  it("wake route: adds the app invoker to the worker's run.invoker once; mints ID tokens", async () => {
+    let policy: Record<string, unknown> = {
+      bindings: [{ role: "roles/run.invoker", members: ["serviceAccount:i@p"] }],
+    };
+    const { calls, fetcher } = fakeFetch((call) => {
+      if (call.url.endsWith(":getIamPolicy")) return { status: 200, body: policy };
+      if (call.url.endsWith(":generateIdToken"))
+        return { status: 200, body: { token: "id-token" } };
+      policy = (call.body as { policy: Record<string, unknown> }).policy;
+      return { status: 200, body: policy };
+    });
+    const provider = new GoogleReleaseProvider({ ...options(fetcher), wakeService: "worker" });
+    await provider.ensureWakeRoute("emb-w1@embody-cloud.iam.gserviceaccount.com", signal);
+    await provider.ensureWakeRoute("emb-w1@embody-cloud.iam.gserviceaccount.com", signal);
+    expect(calls.filter((call) => call.url.endsWith("services/worker:setIamPolicy"))).toHaveLength(
+      1,
+    );
+    expect(policy["bindings"]).toEqual([
+      {
+        role: "roles/run.invoker",
+        members: [
+          "serviceAccount:i@p",
+          "serviceAccount:emb-w1@embody-cloud.iam.gserviceaccount.com",
+        ],
+      },
+    ]);
+    expect(
+      await provider.mintIdToken("emb-w1@x", "https://worker/_embody/wake/ws_a/app_b", signal),
+    ).toBe("id-token");
+    expect(calls.at(-1)!.body).toEqual({
+      audience: "https://worker/_embody/wake/ws_a/app_b",
+      includeEmail: true,
+    });
   });
 
   it("health probe: invoker token for the exact origin, ready only on ready:true, bounded", async () => {

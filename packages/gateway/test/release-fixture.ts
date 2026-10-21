@@ -155,6 +155,7 @@ export const platform: ReleasePlatform = {
   cloudSqlConnection: "embody-cloud:us-central1:embody",
   projectNumber: "123456789012",
   region: "us-central1",
+  wakeBaseUrl: "https://embody-worker-123456789012.us-central1.run.app",
 };
 export const storagePolicy: readonly MigrationPolicyEntry[] = STORAGE_MIGRATIONS.map((m) => ({
   version: m.version,

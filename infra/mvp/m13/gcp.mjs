@@ -21,28 +21,60 @@ const IAM = "https://iam.googleapis.com/v1";
 const RUN = "https://run.googleapis.com/v2";
 const SECRETS = "https://secretmanager.googleapis.com/v1";
 const CRM = "https://cloudresourcemanager.googleapis.com/v1";
-/** Controller permissions M13 adds (RELEASES identity table), as one run-scoped custom role. */
-export const M13_WORKER_PERMISSIONS = Object.freeze([
-  "run.services.create",
-  "run.services.get",
-  "run.services.list",
-  "run.services.delete",
-  "run.services.getIamPolicy",
-  "run.services.setIamPolicy",
-  "run.operations.get",
-  "iam.serviceAccounts.create",
-  "iam.serviceAccounts.get",
-  "secretmanager.secrets.create",
-  "secretmanager.secrets.get",
-  "secretmanager.secrets.getIamPolicy",
-  "secretmanager.secrets.setIamPolicy",
-  "secretmanager.versions.add",
-  "secretmanager.versions.get",
-  "cloudtasks.queues.create",
-  "cloudtasks.queues.get",
-  "cloudtasks.queues.getIamPolicy",
-  "cloudtasks.queues.setIamPolicy",
-]);
+/**
+ * Controller permissions M13 adds (RELEASES identity table), as run-scoped custom roles. Only
+ * `base` is unconditioned: listing, operations, and creating identities, secrets and queues
+ * (creation grants no access to anything). Every role that reads, writes, deletes or changes the
+ * IAM of a resource is bound with a condition on this run's platform prefix (review B3).
+ */
+export const M13_WORKER_ROLES = Object.freeze({
+  base: [
+    "run.services.list",
+    "run.operations.get",
+    "iam.serviceAccounts.create",
+    "iam.serviceAccounts.get",
+    "secretmanager.secrets.create",
+    "cloudtasks.queues.create",
+  ],
+  candidates: [
+    "run.services.create",
+    "run.services.get",
+    "run.services.delete",
+    "run.services.getIamPolicy",
+    "run.services.setIamPolicy",
+  ],
+  wakeRoute: ["run.services.getIamPolicy", "run.services.setIamPolicy"],
+  secrets: [
+    "secretmanager.secrets.get",
+    "secretmanager.secrets.getIamPolicy",
+    "secretmanager.secrets.setIamPolicy",
+    "secretmanager.versions.add",
+    "secretmanager.versions.get",
+  ],
+  queues: [
+    "cloudtasks.queues.get",
+    "cloudtasks.queues.getIamPolicy",
+    "cloudtasks.queues.setIamPolicy",
+  ],
+  invokers: [
+    "iam.serviceAccounts.getIamPolicy",
+    "iam.serviceAccounts.setIamPolicy",
+    "iam.serviceAccounts.getOpenIdToken",
+  ],
+});
+/** The condition each conditioned role group is bound with, from the run's names. */
+export function m13Conditions(project, projectNumber, n, workerService) {
+  const sa = (prefix) =>
+    `resource.name.startsWith("projects/-/serviceAccounts/${prefix}") || resource.name.startsWith("projects/${project}/serviceAccounts/${prefix}")`;
+  return {
+    candidates: `resource.name.startsWith("projects/${project}/locations/us-central1/services/${n.platformPrefix}-c")`,
+    wakeRoute: `resource.name == "projects/${project}/locations/us-central1/services/${workerService}"`,
+    secrets: `resource.name.startsWith("projects/${projectNumber}/secrets/${n.platformPrefix}-a")`,
+    queues: `resource.name.startsWith("projects/${project}/locations/us-central1/queues/${n.platformPrefix}-a")`,
+    invokers: sa(`${n.platformPrefix}-w`),
+    runtimes: sa(`${n.platformPrefix}-a`),
+  };
+}
 const ONLY_SQL_CLIENT =
   "api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', []).hasOnly(['roles/cloudsql.client'])";
 
@@ -183,19 +215,26 @@ export function createM13GcpProvider({
         accountId: n.gatewayAccount.id,
         serviceAccount: { displayName: "Embody M13 qualification gateway (disposable)" },
       });
-      await api(`${IAM}/projects/${project}/roles`, "POST", {
-        roleId: n.role,
-        role: {
-          title: "Embody M13 qualification release controller (disposable)",
-          includedPermissions: M13_WORKER_PERMISSIONS,
-          stage: "GA",
-        },
-      });
+      for (const [group, permissions] of Object.entries(M13_WORKER_ROLES))
+        await api(`${IAM}/projects/${project}/roles`, "POST", {
+          roleId: `${n.role}_${group}`,
+          role: {
+            title: `Embody M13 qualification controller ${group} (disposable)`,
+            includedPermissions: permissions,
+            stage: "GA",
+          },
+        });
       const worker = sa(context.worker.email);
+      const conditions = m13Conditions(project, context.projectNumber, n, context.service);
       await projectPolicy((policy) => {
         policy.bindings = [
           ...(policy.bindings ?? []),
-          { role: `projects/${project}/roles/${n.role}`, members: [worker] },
+          { role: `projects/${project}/roles/${n.role}_base`, members: [worker] },
+          ...["candidates", "wakeRoute", "secrets", "queues", "invokers"].map((group) => ({
+            role: `projects/${project}/roles/${n.role}_${group}`,
+            members: [worker],
+            condition: { title: `m13 ${group} only`, expression: conditions[group] },
+          })),
           {
             role: "roles/resourcemanager.projectIamAdmin",
             members: [worker],
@@ -204,10 +243,7 @@ export function createM13GcpProvider({
           {
             role: "roles/iam.serviceAccountUser",
             members: [worker],
-            condition: {
-              title: "m13 runtime identities only",
-              expression: `resource.name.startsWith("projects/-/serviceAccounts/${n.platformPrefix}-a")`,
-            },
+            condition: { title: "m13 runtime identities only", expression: conditions.runtimes },
           },
           { role: "roles/cloudsql.client", members: [sa(n.gatewayAccount.email)] },
         ];
@@ -374,6 +410,7 @@ export function createM13GcpProvider({
         `${RUN}/projects/${project}/locations/${REGION}/services/${context.gatewayService}`,
         "roles/run.invoker",
         "allUsers",
+        { post: false },
       );
       return {
         url: gatewayUrl,
@@ -392,6 +429,8 @@ export function createM13GcpProvider({
         jwksUrl: front.jwksUrl,
         projectNumber: String(context.projectNumber),
         region: REGION,
+        // Durable apps' wake tasks go to the worker's stable per-app wake route (review B1).
+        wakeBaseUrl: workerUrl,
       };
       const env = {
         EMBODY_M12_RECIPE: JSON.stringify(recipe),
@@ -403,6 +442,8 @@ export function createM13GcpProvider({
         EMBODY_SQL_CONNECTION: context.connection,
         EMBODY_M13_PLATFORM: JSON.stringify(platform),
         EMBODY_M13_PROJECT_NUMBER: String(context.projectNumber),
+        EMBODY_M13_SQL_INSTANCE: context.sql,
+        EMBODY_M13_WAKE_SERVICE: context.service,
       };
       await deployService(context.service, {
         labels: { embody: "m13-qualification" },
@@ -441,6 +482,7 @@ export function createM13GcpProvider({
         `${RUN}/projects/${project}/locations/${REGION}/services/${context.service}`,
         "roles/run.invoker",
         sa(context.invoker.email),
+        { post: false },
       );
       return { url: workerUrl };
     },
@@ -454,14 +496,13 @@ export function createM13GcpProvider({
       });
       for (const binding of policy?.bindings ?? [])
         for (const member of binding.members) {
-          const role =
-            binding.role === `projects/${project}/roles/${context.role}`
-              ? "custom/m13-release"
-              : binding.condition?.expression === ONLY_SQL_CLIENT
-                ? `${binding.role}?onlyGrants=roles/cloudsql.client`
-                : binding.condition?.expression?.includes(`${context.platformPrefix}-a`)
-                  ? `${binding.role}?runtimesOnly`
-                  : binding.role;
+          const role = binding.role.startsWith(`projects/${project}/roles/${context.role}_`)
+            ? `custom/${binding.role.slice(`projects/${project}/roles/${context.role}_`.length)}${binding.condition ? "?prefixed" : ""}`
+            : binding.condition?.expression === ONLY_SQL_CLIENT
+              ? `${binding.role}?onlyGrants=roles/cloudsql.client`
+              : binding.condition?.expression?.includes(`${context.platformPrefix}-a`)
+                ? `${binding.role}?runtimesOnly`
+                : binding.role;
           if (member === sa(context.worker.email)) out.push(`worker|project:${role}`);
           if (member === sa(context.gatewayAccount.email)) out.push(`gateway|project:${role}`);
           if (runtimeMember(member)) out.push(`runtime|project:${role}`);
@@ -490,7 +531,9 @@ export function createM13GcpProvider({
                 ? `candidate|run.invoker:gateway`
                 : member === sa(context.worker.email)
                   ? `candidate|run.invoker:worker`
-                  : `candidate|${binding.role}:other`,
+                  : member.startsWith(`serviceAccount:${context.platformPrefix}-w`)
+                    ? `candidate|run.invoker:wake-invoker`
+                    : `candidate|${binding.role}:other`,
             );
       }
       return out.sort();
@@ -546,7 +589,7 @@ export function createM13GcpProvider({
       const worker = m12Names(project, approval.prefix, runId).worker.email;
       await projectPolicy((policy) => {
         policy.bindings = (policy.bindings ?? [])
-          .filter((binding) => binding.role !== `projects/${project}/roles/${n.role}`)
+          .filter((binding) => !binding.role.startsWith(`projects/${project}/roles/${n.role}_`))
           .filter(
             (binding) =>
               !(binding.condition && binding.members.some((member) => member.endsWith(worker))),
@@ -591,10 +634,13 @@ export function createM13GcpProvider({
           await api(`https://cloudtasks.googleapis.com/v2/${item.name}`, "DELETE");
           removed.push(`queue:${item.name.split("/").pop()}`);
         }
-      const role = await api(`${IAM}/projects/${project}/roles/${n.role}`);
-      if (role && !role.deleted) {
-        await api(`${IAM}/projects/${project}/roles/${n.role}`, "DELETE");
-        removed.push(`role:${n.role}`);
+      for (const group of Object.keys(M13_WORKER_ROLES)) {
+        const id = `${n.role}_${group}`;
+        const role = await api(`${IAM}/projects/${project}/roles/${id}`);
+        if (role && !role.deleted) {
+          await api(`${IAM}/projects/${project}/roles/${id}`, "DELETE");
+          removed.push(`role:${id}`);
+        }
       }
       const m12Teardown = await m12.tearDown(approval, runId, context);
       return { pass: m12Teardown.pass === true, removed: [...removed, ...m12Teardown.removed] };
@@ -626,8 +672,10 @@ export function createM13GcpProvider({
         )
           leftovers.push(`secret:${id}`);
       }
-      const role = await api(`${IAM}/projects/${project}/roles/${n.role}`);
-      if (role && !role.deleted) leftovers.push(`role:${n.role}`);
+      for (const group of Object.keys(M13_WORKER_ROLES)) {
+        const role = await api(`${IAM}/projects/${project}/roles/${n.role}_${group}`);
+        if (role && !role.deleted) leftovers.push(`role:${n.role}_${group}`);
+      }
       const policy = await api(`${CRM}/projects/${project}:getIamPolicy`, "POST", {
         options: { requestedPolicyVersion: 3 },
       });

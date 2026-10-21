@@ -953,10 +953,16 @@ export function releaseManifest(
   });
 }
 
-/** Storage schema an artifact's framework needs: the one its pinned recipe bundles. */
-export function recipeSchemaVersion(recipe: string): number {
-  if (recipe !== BUILD_RECIPE.id) throw new TypeError("Unknown build recipe");
-  return BUILD_RECIPE.storageSchemaVersion;
+/**
+ * Storage schema each known recipe's framework needs. A new recipe ID is added here, never
+ * replaced, so releases built with an earlier recipe stay deployable and rollback targets.
+ */
+export const RECIPE_SCHEMA_VERSIONS: Readonly<Record<string, number>> = Object.freeze({
+  [BUILD_RECIPE.id]: BUILD_RECIPE.storageSchemaVersion,
+});
+/** Storage schema an artifact's framework needs, or undefined for an unknown recipe. */
+export function recipeSchemaVersion(recipe: string): number | undefined {
+  return Object.hasOwn(RECIPE_SCHEMA_VERSIONS, recipe) ? RECIPE_SCHEMA_VERSIONS[recipe] : undefined;
 }
 
 /** The artifact a deployment may promote: its own build, or a rollback's target artifact. */
@@ -1014,7 +1020,7 @@ export function promotedRelease(
     readonly generation: number;
     readonly registration?: Registration;
   },
-  schemaVersion: number,
+  schemaVersion: number | undefined,
   now: Date,
 ): ReleaseRecord {
   return {
@@ -1030,7 +1036,7 @@ export function promotedRelease(
     ...(promote.registration ? { registration: promote.registration } : {}),
     ...(record.candidate ? { candidate: record.candidate } : {}),
     sourceUploadId: record.submission.source.uploadId,
-    schemaVersion,
+    ...(schemaVersion !== undefined ? { schemaVersion } : {}),
     ...(record.rollbackOf ? { rollbackOf: record.rollbackOf } : {}),
   };
 }
