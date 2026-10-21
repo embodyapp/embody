@@ -753,7 +753,7 @@ describe("M13 review B1: durable wakes follow the active release through the sta
           forwarded.push({
             url: String(url),
             auth: new Headers(init?.headers).get("authorization"),
-            body: JSON.parse(String(init?.body)) as unknown,
+            body: JSON.parse(typeof init?.body === "string" ? init.body : "null") as unknown,
           });
           return Promise.resolve(
             new Response("{}", {
