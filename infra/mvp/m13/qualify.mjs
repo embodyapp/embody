@@ -509,7 +509,11 @@ export async function runM13Suite(env, provider, deps) {
       // After the drain, the sweep (run on the operator reconcile) removes the old candidate.
       await provider.wait(M13_LIMITS.drainWaitMs);
       await provider.reconcile(context);
-      const live = await provider.candidates(context, a.workspaceId);
+      let live = await provider.candidates(context, a.workspaceId);
+      for (let i = 0; i < 12 && live.some((c) => c.endpoint === before.endpoint); i++) {
+        await provider.wait(10_000);
+        live = await provider.candidates(context, a.workspaceId);
+      }
       const checks = {
         active: final.state === "active",
         switched: switched.pass,
@@ -624,7 +628,13 @@ export async function runM13Suite(env, provider, deps) {
       // A's candidate drains and is swept; the step it scheduled is due after that.
       await provider.wait(M13_LIMITS.drainWaitMs);
       await provider.reconcile(context);
-      const live = await provider.candidates(context, d.workspaceId);
+      // Cloud Run deletes are asynchronous: a service being deleted is still listed for a short
+      // while (run 7 listed A seconds after the sweep's DeleteService). Wait for it to go.
+      let live = await provider.candidates(context, d.workspaceId);
+      for (let i = 0; i < 12 && live.length > 1; i++) {
+        await provider.wait(10_000);
+        live = await provider.candidates(context, d.workspaceId);
+      }
       const sweptBeforeDue = Date.now() < due;
       let status;
       for (const begin = Date.now(); Date.now() < Math.max(due, begin) + 15 * 60_000;) {

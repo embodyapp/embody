@@ -1,0 +1,131 @@
+{
+  "gate": "mvp-cloud-m13",
+  "status": "failed",
+  "timestamp": "2026-10-22T14:04:05.014Z",
+  "commit": "ef4bc73187fc1a7dbbf70d015c7c596afa61ac08",
+  "dirty": false,
+  "node": "v24.21.0",
+  "lockfileSha256": "a49024b0d7e69ea3ff966010cf4a7c8d51a6fb50d1bf148691de8ffc8ddcfaf4",
+  "schemaSourceSha256": "c00e7f163182d5ff5a289e699818dee352286cb05677983f7f428e87c80e55a5",
+  "platformSchemaSourceSha256": "c7155e827a82e0c4ba3a462c10b99c6cf159403e131f3d8a242af1b4258f3f73",
+  "postgresFixtureSha256": "452d210ed819f640cc713a860d189b1be18a690519227605cab9423459c39fb2",
+  "counts": {
+    "passed": 9,
+    "failed": 1,
+    "skipped": 0
+  },
+  "images": [],
+  "suites": ["m13"],
+  "releaseGate": false,
+  "pendingSuites": ["m14", "m15", "m16", "m17", "m20", "m21"],
+  "m13": {
+    "pass": false,
+    "runId": "ed009e",
+    "projectionUsd": 1.11,
+    "estimatedUsd": 0.77,
+    "buildMinutes": 12.779183333333332,
+    "cases": {
+      "setUp": {
+        "pass": true
+      },
+      "M13.a.first-deploy": {
+        "pass": true,
+        "checks": {
+          "hiddenBefore": true,
+          "active": true,
+          "registered": true,
+          "created": true,
+          "listed": true
+        }
+      },
+      "M13.a.update-switch": {
+        "pass": true,
+        "checks": {
+          "active": true,
+          "switched": true,
+          "dataUnchanged": true,
+          "oldCandidateRemoved": true,
+          "newCandidateKept": true
+        },
+        "switch": {
+          "observed": true,
+          "onlyKnownPairs": true,
+          "monotonic": true,
+          "sawOld": true,
+          "sawNew": true,
+          "callsSucceeded": true
+        }
+      },
+      "M13.b.failed-readiness": {
+        "pass": true,
+        "checks": {
+          "failedCheck": true,
+          "routeUnchanged": true,
+          "oldRouteServes": true,
+          "dataUnchanged": true,
+          "failedCandidateRemoved": true
+        }
+      },
+      "M13.b.destructive-migration": {
+        "pass": true,
+        "checks": {
+          "refused": true,
+          "ledgerUnchanged": true,
+          "dataUnchanged": true
+        }
+      },
+      "M13.c.promotion-race": {
+        "pass": true,
+        "checks": {
+          "oneWinner": true,
+          "loserStale": true,
+          "oneGenerationStep": true
+        }
+      },
+      "M13.d.rollback": {
+        "pass": true,
+        "checks": {
+          "active": true,
+          "newRelease": true,
+          "previousManifest": true,
+          "freshCandidate": true,
+          "dataUnchanged": true,
+          "callAfter": true,
+          "activeRefused": true
+        }
+      },
+      "M13.e.durable-wake": {
+        "pass": false,
+        "checks": {
+          "bothActive": true,
+          "started": true,
+          "replacedCandidateRemoved": false,
+          "sweptBeforeDue": true,
+          "stepCompletedOnActiveRelease": true
+        },
+        "status": "completed"
+      },
+      "M13.live.iam": {
+        "pass": true,
+        "checks": {
+          "workerBaseRole": true,
+          "workerSecretsConditioned": true,
+          "workerNoIamAdmin": true,
+          "workerNoProjectActAs": true,
+          "workerActsAsRuntimesOnly": true,
+          "runtimesOnlySqlClientAndOwnSecret": true,
+          "candidatesInvokedByGatewayAndWorkerOnly": true,
+          "gatewayHasNoReleaseAuthority": true,
+          "noOwnerOrEditor": true
+        }
+      },
+      "cleanup": {
+        "pass": true,
+        "leftovers": [],
+        "projectIamUnchanged": true,
+        "servicesEnabled": [],
+        "iamOriginalUnchanged": true
+      }
+    }
+  }
+}
