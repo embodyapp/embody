@@ -1,5 +1,6 @@
 import { SignJWT, generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
+import { z } from "@embody/core";
 import { platformInvokerVerifier } from "@embody/auth";
 import { BUILD_RECIPE, HOSTED_PROFILE, SOURCE_ADMISSION } from "@embody/cloud-contracts";
 import {
@@ -11,6 +12,7 @@ import {
   createDeploymentWorker,
   createWorkspaceGateway,
   MemoryAppIdentityProvider,
+  PostgresAppDatabase,
   appResourceNames,
   provisionAppIdentity,
   errorTag,
@@ -940,5 +942,25 @@ describe("M13 app provisioning is a trusted step at reservation, never the deplo
     const record = await h.deploy([plainPlugin()]);
     failedWith(record, "CHECK_FAILED", "APP_NOT_PROVISIONED");
     expect(h.candidates.created).toBe(0);
+  });
+});
+
+describe("M13 live run 5: the runtime DATABASE_URL is a valid URL in its Cloud SQL socket form", () => {
+  it("names localhost and passes the socket directory as `host` (the hosted app validates URLs)", () => {
+    const database = new PostgresAppDatabase({
+      provisionerUrl: "postgresql://embody_provisioner:x@localhost/postgres",
+      runtimeHost: "/cloudsql/embody-cloud:us-central1:embody-test-m13-sql-abc123",
+      migrations: [],
+      runtimeFunctions: [],
+    });
+    const url = database.runtimeUrl(appResourceNames("emb", WS, APP), "p4ssw0rd-p4ssw0rd-p4ssw0rd");
+    // Run 5's candidates exited at boot: `postgresql://u:p@/db?host=…` is not a valid URL.
+    expect(z.string().url().safeParse(url).success).toBe(true);
+    const parsed = new URL(url);
+    expect(parsed.hostname).toBe("localhost");
+    expect(parsed.searchParams.get("host")).toBe(
+      "/cloudsql/embody-cloud:us-central1:embody-test-m13-sql-abc123",
+    );
+    expect(parsed.pathname).toBe(`/${appResourceNames("emb", WS, APP).database}`);
   });
 });

@@ -184,7 +184,9 @@ export class PostgresAppDatabase implements AppDatabase {
     const secret = encodeURIComponent(password);
     const host = this.options.runtimeHost;
     return host.startsWith("/")
-      ? `postgresql://${user}:${secret}@/${names.database}?host=${encodeURIComponent(host)}`
+      ? // A URL needs a host (the hosted app validates it): `localhost` names the socket directory
+        // given by `host`, which the driver uses instead (as the M12 worker's URL does).
+        `postgresql://${user}:${secret}@localhost/${names.database}?host=${encodeURIComponent(host)}`
       : `postgresql://${user}:${secret}@${host}/${names.database}`;
   }
 

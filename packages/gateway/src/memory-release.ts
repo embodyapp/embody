@@ -210,7 +210,7 @@ export class MemoryAppDatabase implements AppDatabase {
     return work();
   }
   public runtimeUrl(names: AppResourceNames, password: string): string {
-    return `postgresql://${names.runtimeRole}:${password}@/${names.database}?host=/cloudsql/fixture`;
+    return `postgresql://${names.runtimeRole}:${password}@localhost/${names.database}?host=%2Fcloudsql%2Ffixture`;
   }
   public appliedMigrations(names: AppResourceNames): Promise<readonly number[]> {
     return Promise.resolve([...this.db(names).applied]);
