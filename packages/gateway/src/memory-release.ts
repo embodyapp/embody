@@ -1,5 +1,6 @@
 import type {
   AppDatabase,
+  AppIdentityAdmin,
   AppIdentityProvider,
   AppResourceNames,
   CandidateProvider,
@@ -84,8 +85,11 @@ export class MemoryCandidateProvider implements CandidateProvider {
   }
 }
 
-export class MemoryAppIdentityProvider implements AppIdentityProvider {
+/** Both sides: the worker's lookup and secret writes, and app provisioning (admin). */
+export class MemoryAppIdentityProvider implements AppIdentityProvider, AppIdentityAdmin {
   public readonly accounts = new Set<string>();
+  /** Resource-level grants on identities: `<email>|<role>` → members. */
+  public readonly accountGrants = new Map<string, Set<string>>();
   public readonly secrets = new Map<string, { accessor: string; versions: string[] }>();
   public readonly queues = new Map<string, { invoker: string; enqueuer: string }>();
   /** Wake invokers allowed to call the platform wake route. */
@@ -104,6 +108,23 @@ export class MemoryAppIdentityProvider implements AppIdentityProvider {
       }
     }
     return Promise.resolve({ email: `${accountId}@${this.project}.iam.gserviceaccount.com` });
+  }
+  public account(accountId: string): Promise<{ email: string } | null> {
+    return Promise.resolve(
+      this.accounts.has(accountId) ? { email: this.emailOf(accountId) } : null,
+    );
+  }
+  public emailOf(accountId: string): string {
+    return `${accountId}@${this.project}.iam.gserviceaccount.com`;
+  }
+  public queuePath(queueId: string): string {
+    return `projects/${this.project}/locations/us-central1/queues/${queueId}`;
+  }
+  public grantOnAccount(email: string, role: string, member: string): Promise<void> {
+    const key = `${email}|${role}`;
+    if (!this.accountGrants.has(key)) this.accountGrants.set(key, new Set());
+    this.accountGrants.get(key)!.add(member);
+    return Promise.resolve();
   }
   public ensureWakeRoute(invokerEmail: string): Promise<void> {
     this.wakeRouteInvokers.add(invokerEmail);

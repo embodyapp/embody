@@ -1,4 +1,5 @@
 import type {
+  AppIdentityAdmin,
   AppIdentityProvider,
   CandidateProvider,
   CandidateSweep,
@@ -29,11 +30,12 @@ export declare function createTableCandidates(
 export declare function createTableIdentities(
   connectionString: string,
   afterAddVersion?: () => Promise<void>,
-): AppIdentityProvider & {
-  payload(secret: string): Promise<string>;
-  versions(secret: string): Promise<number>;
-  close(): Promise<void>;
-};
+): AppIdentityProvider &
+  AppIdentityAdmin & {
+    payload(secret: string): Promise<string>;
+    versions(secret: string): Promise<number>;
+    close(): Promise<void>;
+  };
 export declare function appDatabase(
   provisionerUrl: string,
   afterMigration?: () => Promise<void>,

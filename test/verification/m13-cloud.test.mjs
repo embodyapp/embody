@@ -94,14 +94,13 @@ test("M13 cloud gate refuses budgets above $6, a missing SQL proxy and combined 
   assert.ok(m13Projection() <= M13_LIMITS.maxBudgetUsd);
 });
 
-test("release grants must be exact: every resource-touching worker role is prefix-conditioned (review B3)", () => {
-  const groups = ["candidates", "wakeRoute", "secrets", "queues", "invokers"];
+test("release grants: no IAM admin, resource-level actAs on runtimes, conditioned secrets (review B3)", () => {
   const good = [
     "worker|project:custom/base",
-    ...groups.map((g) => `worker|project:custom/${g}?prefixed`),
-    "worker|project:roles/resourcemanager.projectIamAdmin?onlyGrants=roles/cloudsql.client",
-    "worker|project:roles/iam.serviceAccountUser?runtimesOnly",
+    "worker|project:custom/secrets?prefixed",
     "worker|project:roles/cloudsql.client",
+    "worker|runtimeSa:roles/iam.serviceAccountUser",
+    "worker|invokerSa:roles/iam.serviceAccountTokenCreator",
     "runtime|project:roles/cloudsql.client",
     "runtime|secret:roles/secretmanager.secretAccessor",
     "candidate|run.invoker:gateway",
@@ -111,11 +110,16 @@ test("release grants must be exact: every resource-touching worker role is prefi
   ];
   assert.equal(evaluateReleaseBindings(good).pass, true);
   for (const bad of [
-    // The a561eaf posture: one unconditioned custom role.
-    [...good.filter((b) => !b.includes("?prefixed")), "worker|project:custom/secrets"],
-    [...good, "worker|project:custom/secrets"],
-    good.filter((b) => b !== "worker|project:custom/invokers?prefixed"),
-    good.map((b) => b.replace("?onlyGrants=roles/cloudsql.client", "")),
+    // The a561eaf posture: one unconditioned role with secret setIamPolicy.
+    [...good.filter((b) => !b.includes("custom/secrets")), "worker|project:custom/secrets"],
+    [
+      ...good,
+      "worker|project:roles/resourcemanager.projectIamAdmin?onlyGrants=roles/cloudsql.client",
+    ],
+    [...good, "worker|project:roles/iam.serviceAccountUser"],
+    [...good, "worker|project:roles/iam.serviceAccountUser?runtimesOnly"],
+    good.filter((b) => b !== "worker|runtimeSa:roles/iam.serviceAccountUser"),
+    [...good, "worker|invokerSa:roles/iam.serviceAccountAdmin"],
     [...good, "runtime|project:roles/storage.admin"],
     [...good, "candidate|roles/run.invoker:other"],
     [...good, "gateway|project:custom/base"],
@@ -123,34 +127,23 @@ test("release grants must be exact: every resource-touching worker role is prefi
     good.filter((b) => !b.startsWith("candidate|")),
   ])
     assert.equal(evaluateReleaseBindings(bad).pass, false, JSON.stringify(bad));
-  // Unconditioned permissions are read, list and create only; nothing touches an existing
-  // resource's data or IAM, and no role can read a secret payload.
-  for (const permission of M13_WORKER_ROLES.base)
-    assert.match(permission, /\.(list|get|create)$|operations\.get$/);
-  assert.ok(!Object.values(M13_WORKER_ROLES).flat().includes("secretmanager.versions.access"));
-  assert.ok(!Object.values(M13_WORKER_ROLES).flat().includes("iam.serviceAccounts.actAs"));
-  // Every conditioned group is bound to this run's platform prefix (or the exact worker service).
+  // The project-wide role manages services and reads identities only: no update, no actAs, no
+  // IAM administration, no secret payloads anywhere.
+  const all = Object.values(M13_WORKER_ROLES).flat();
+  for (const permission of [
+    "run.services.update",
+    "iam.serviceAccounts.actAs",
+    "secretmanager.versions.access",
+    "resourcemanager.projects.setIamPolicy",
+    "iam.serviceAccounts.setIamPolicy",
+    "iam.serviceAccounts.create",
+  ])
+    assert.ok(!all.includes(permission), permission);
+  assert.deepEqual(Object.keys(M13_WORKER_ROLES), ["base", "secrets"]);
   const n = m13Names("embody-test-project", "embody-test-m13", "a1b2c3");
-  const conditions = m13Conditions(
-    "embody-test-project",
-    "123456789012",
-    n,
-    "embody-test-m13-worker-a1b2c3",
-  );
-  for (const group of groups)
-    assert.ok(
-      conditions[group].includes(n.platformPrefix) || conditions[group].includes("worker-a1b2c3"),
-      group,
-    );
+  const conditions = m13Conditions("embody-test-project", "123456789012", n);
   assert.match(conditions.secrets, /projects\/123456789012\/secrets\/ta1b2c3-a/);
-  assert.match(
-    conditions.candidates,
-    /projects\/123456789012\/locations\/us-central1\/services\/ta1b2c3-c/,
-  );
-  assert.match(
-    conditions.wakeRoute,
-    /== "projects\/embody-test-project\/locations\/us-central1\/services\/embody-test-m13-worker-a1b2c3"/,
-  );
+  assert.match(conditions.secrets, /projects\/embody-test-project\/secrets\/ta1b2c3-a/);
 });
 
 test("switch and rollback evaluators fail closed", () => {

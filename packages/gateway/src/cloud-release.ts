@@ -2,6 +2,7 @@ import { cloudRunInvocationToken } from "./cloud-run.js";
 import { metadataAccessToken } from "./source-storage.js";
 import {
   CANDIDATE_LABELS,
+  type AppIdentityAdmin,
   type AppIdentityProvider,
   type CandidateProvider,
   type CandidateSpec,
@@ -53,7 +54,14 @@ const strings = (value: unknown): Record<string, string> =>
     ),
   );
 
-export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProvider {
+/**
+ * One HTTP client for both sides; authority comes from the credentials it runs with. The
+ * deployment worker uses the candidate methods and `account`/secret versions/`mintIdToken`; app
+ * provisioning (`AppIdentityAdmin`) runs with an identity-admin credential at reservation.
+ */
+export class GoogleReleaseProvider
+  implements CandidateProvider, AppIdentityProvider, AppIdentityAdmin
+{
   private readonly fetcher: typeof fetch;
   private readonly token: () => Promise<string>;
   private readonly timeoutMs: number;
@@ -260,6 +268,51 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
 
   // Identities, secrets, queues -------------------------------------------------------------
 
+  public emailOf(accountId: string): string {
+    return this.email(accountId);
+  }
+  public queuePath(queueId: string): string {
+    return `${this.location}/queues/${queueId}`;
+  }
+  /** The provisioned identity, or null (needs only `iam.serviceAccounts.get`). */
+  public async account(accountId: string, signal: AbortSignal): Promise<{ email: string } | null> {
+    const email = this.email(accountId);
+    const found = await this.ok(
+      `${IAM}/projects/${this.options.project}/serviceAccounts/${email}`,
+      "GET",
+      undefined,
+      signal,
+      [404, 403],
+    );
+    return found.status === 200 ? { email } : null;
+  }
+  /** Adds `member` to `role` on one service account (etag-guarded read-modify-write). */
+  public async grantOnAccount(
+    email: string,
+    role: string,
+    member: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const resource = `${IAM}/projects/-/serviceAccounts/${email}`;
+    const { body: policy } = await this.ok(`${resource}:getIamPolicy`, "POST", {}, signal);
+    const bindings = Array.isArray(policy["bindings"])
+      ? (policy["bindings"] as Record<string, unknown>[])
+      : [];
+    const current = bindings.find((binding) => binding["role"] === role && !binding["condition"]);
+    const members = Array.isArray(current?.["members"]) ? (current["members"] as string[]) : [];
+    if (members.includes(member)) return;
+    const next = current
+      ? bindings.map((binding) =>
+          binding === current ? { ...binding, members: [...members, member] } : binding,
+        )
+      : [...bindings, { role, members: [member] }];
+    await this.ok(
+      `${resource}:setIamPolicy`,
+      "POST",
+      { policy: { ...policy, bindings: next } },
+      signal,
+    );
+  }
   public async ensureAccount(
     accountId: string,
     displayName: string,
@@ -475,26 +528,13 @@ export class GoogleReleaseProvider implements CandidateProvider, AppIdentityProv
       },
       signal,
     );
-    await this.ok(
-      `${IAM}/projects/${this.options.project}/serviceAccounts/${invoker.email}:setIamPolicy`,
-      "POST",
-      {
-        policy: {
-          // Exactly: the runtime creates OIDC tasks as the invoker, and Cloud Tasks' own service
-          // agent mints them (as for the M09/M12 invokers). Nobody else acts as it.
-          bindings: [
-            {
-              role: "roles/iam.serviceAccountUser",
-              members: [
-                `serviceAccount:${runtimeEmail}`,
-                `serviceAccount:service-${this.options.projectNumber}@gcp-sa-cloudtasks.iam.gserviceaccount.com`,
-              ],
-            },
-          ],
-        },
-      },
-      signal,
-    );
+    // The runtime creates OIDC tasks as the invoker, and Cloud Tasks' own service agent mints
+    // them (as for the M09/M12 invokers). Added, never overwriting other grants.
+    for (const member of [
+      `serviceAccount:${runtimeEmail}`,
+      `serviceAccount:service-${this.options.projectNumber}@gcp-sa-cloudtasks.iam.gserviceaccount.com`,
+    ])
+      await this.grantOnAccount(invoker.email, "roles/iam.serviceAccountUser", member, signal);
     return { queue, invokerEmail: invoker.email };
   }
 }

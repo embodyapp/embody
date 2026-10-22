@@ -22,66 +22,36 @@ const RUN = "https://run.googleapis.com/v2";
 const SECRETS = "https://secretmanager.googleapis.com/v1";
 const CRM = "https://cloudresourcemanager.googleapis.com/v1";
 /**
- * Controller permissions M13 adds (RELEASES identity table), as run-scoped custom roles. Only
- * `base` is unconditioned: listing, operations, and creating identities, secrets and queues
- * (creation grants no access to anything). Every role that reads, writes, deletes or changes the
- * IAM of a resource is bound with a condition on this run's platform prefix (review B3).
+ * Controller permissions M13 adds (RELEASES identity table), as run-scoped custom roles.
+ * `base` (Cloud Run service management and identity lookup) is project-wide: live runs 3–4 showed
+ * Cloud Run and service-account IAM ignore resource-name conditions, so it is bounded by what it
+ * excludes (no `run.services.update`, no `actAs` beyond the app runtimes it is granted on
+ * individually at app provisioning). `secrets` is prefix-conditioned (Secret Manager honours it).
+ * The worker creates no identities, queues or secrets and holds no IAM-admin role.
  */
 export const M13_WORKER_ROLES = Object.freeze({
   base: [
-    // Creating a service grants nothing by itself: it can run only as an identity the worker may
-    // act as (this run's runtimes), and its IAM stays prefix-conditioned. Cloud Run evaluates
-    // create against the parent location, so a name condition cannot hold it.
     "run.services.create",
     "run.services.list",
-    "run.operations.get",
-    "iam.serviceAccounts.create",
-    "iam.serviceAccounts.get",
-    "secretmanager.secrets.create",
-    "cloudtasks.queues.create",
-  ],
-  candidates: [
     "run.services.get",
     "run.services.delete",
     "run.services.getIamPolicy",
     "run.services.setIamPolicy",
+    "run.operations.get",
+    "iam.serviceAccounts.get",
   ],
-  wakeRoute: ["run.services.getIamPolicy", "run.services.setIamPolicy"],
   secrets: [
     "secretmanager.secrets.get",
-    "secretmanager.secrets.getIamPolicy",
-    "secretmanager.secrets.setIamPolicy",
     "secretmanager.versions.add",
     "secretmanager.versions.get",
   ],
-  queues: [
-    "cloudtasks.queues.get",
-    "cloudtasks.queues.getIamPolicy",
-    "cloudtasks.queues.setIamPolicy",
-  ],
-  invokers: [
-    "iam.serviceAccounts.getIamPolicy",
-    "iam.serviceAccounts.setIamPolicy",
-    "iam.serviceAccounts.getOpenIdToken",
-  ],
 });
 /** The condition each conditioned role group is bound with, from the run's names. */
-export function m13Conditions(project, projectNumber, n, workerService) {
-  // Services name resources by project ID or number; accept exactly these two forms.
+export function m13Conditions(project, projectNumber, n) {
+  // Secret Manager names resources by project number; accept the ID form as well.
   const either = (path) =>
     `resource.name.startsWith("projects/${project}/${path}") || resource.name.startsWith("projects/${projectNumber}/${path}")`;
-  const exact = (path) =>
-    `resource.name == "projects/${project}/${path}" || resource.name == "projects/${projectNumber}/${path}"`;
-  const sa = (prefix) =>
-    `resource.name.startsWith("projects/-/serviceAccounts/${prefix}") || resource.name.startsWith("projects/${project}/serviceAccounts/${prefix}")`;
-  return {
-    candidates: either(`locations/us-central1/services/${n.platformPrefix}-c`),
-    wakeRoute: exact(`locations/us-central1/services/${workerService}`),
-    secrets: either(`secrets/${n.platformPrefix}-a`),
-    queues: either(`locations/us-central1/queues/${n.platformPrefix}-a`),
-    invokers: sa(`${n.platformPrefix}-w`),
-    runtimes: sa(`${n.platformPrefix}-a`),
-  };
+  return { secrets: either(`secrets/${n.platformPrefix}-a`) };
 }
 const ONLY_SQL_CLIENT =
   "api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', []).hasOnly(['roles/cloudsql.client'])";
@@ -233,25 +203,15 @@ export function createM13GcpProvider({
           },
         });
       const worker = sa(context.worker.email);
-      const conditions = m13Conditions(project, context.projectNumber, n, context.service);
+      const conditions = m13Conditions(project, context.projectNumber, n);
       await projectPolicy((policy) => {
         policy.bindings = [
           ...(policy.bindings ?? []),
           { role: `projects/${project}/roles/${n.role}_base`, members: [worker] },
-          ...["candidates", "wakeRoute", "secrets", "queues", "invokers"].map((group) => ({
-            role: `projects/${project}/roles/${n.role}_${group}`,
-            members: [worker],
-            condition: { title: `m13 ${group} only`, expression: conditions[group] },
-          })),
           {
-            role: "roles/resourcemanager.projectIamAdmin",
+            role: `projects/${project}/roles/${n.role}_secrets`,
             members: [worker],
-            condition: { title: "m13 cloudsql client grants only", expression: ONLY_SQL_CLIENT },
-          },
-          {
-            role: "roles/iam.serviceAccountUser",
-            members: [worker],
-            condition: { title: "m13 runtime identities only", expression: conditions.runtimes },
+            condition: { title: "m13 app secrets only", expression: conditions.secrets },
           },
           { role: "roles/cloudsql.client", members: [sa(n.gatewayAccount.email)] },
         ];
@@ -494,6 +454,39 @@ export function createM13GcpProvider({
       );
       return { url: workerUrl };
     },
+    /**
+     * App provisioning at reservation, as the operator (the trusted identity admin): runtime and
+     * invoker identities, Cloud SQL client, database secret, wake queue and route, and the
+     * worker's resource-level grants on exactly those identities.
+     */
+    async provisionApp(context, workspaceId, appId, durable) {
+      const lib = await import("../../../packages/gateway/dist/index.js");
+      const admin = new lib.GoogleReleaseProvider({
+        project,
+        region: REGION,
+        projectNumber: String(context.projectNumber),
+        prefix: context.platformPrefix,
+        sqlInstance: context.sql,
+        wakeService: context.service,
+        accessToken,
+      });
+      for (let attempt = 0; attempt < 24; attempt++) {
+        const outcome = await lib.provisionAppIdentity(
+          admin,
+          lib.appResourceNames(context.platformPrefix, workspaceId, appId),
+          {
+            workspaceId,
+            appId,
+            durable,
+            controllerEmail: context.worker.email,
+            signal: AbortSignal.timeout(60_000),
+          },
+        );
+        if (outcome === "ready") return;
+        await delay(10_000);
+      }
+      throw new Error("App provisioning did not complete");
+    },
     /** Grants as `who|where:role` facts (conditions summarised) for the IAM evaluator. */
     async releaseBindings(context) {
       const out = [];
@@ -515,6 +508,24 @@ export function createM13GcpProvider({
           if (member === sa(context.gatewayAccount.email)) out.push(`gateway|project:${role}`);
           if (runtimeMember(member)) out.push(`runtime|project:${role}`);
         }
+      const accounts =
+        (await api(`${IAM}/projects/${project}/serviceAccounts?pageSize=100`))?.accounts ?? [];
+      for (const account of accounts) {
+        const kind = account.email.startsWith(`${context.platformPrefix}-a`)
+          ? "runtimeSa"
+          : account.email.startsWith(`${context.platformPrefix}-w`)
+            ? "invokerSa"
+            : null;
+        if (!kind) continue;
+        const iam = await api(
+          `${IAM}/projects/-/serviceAccounts/${account.email}:getIamPolicy`,
+          "POST",
+          {},
+        );
+        for (const binding of iam?.bindings ?? [])
+          for (const member of binding.members)
+            if (member === sa(context.worker.email)) out.push(`worker|${kind}:${binding.role}`);
+      }
       const secrets =
         (await api(`${SECRETS}/projects/${project}/secrets?pageSize=200`))?.secrets ?? [];
       for (const item of secrets) {

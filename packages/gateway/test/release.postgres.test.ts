@@ -22,6 +22,7 @@ import {
   PostgresGatewayStore,
   appResourceNames,
   candidateName,
+  provisionAppIdentity,
   deploymentWakeHook,
   purgeExpiredSources,
   workflowRefusal,
@@ -680,6 +681,14 @@ describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", { timeout: 60_000
         },
         null,
       );
+      // App provisioning at reservation (trusted admin step), not the worker.
+      await provisionAppIdentity(identities, appResourceNames(platform.prefix, ws, APP), {
+        workspaceId: ws,
+        appId: APP,
+        durable: false,
+        controllerEmail: platform.controllerServiceAccount,
+        signal: new AbortController().signal,
+      });
       let n = 0;
       return async (): Promise<DeploymentSubmission> => {
         n += 1;

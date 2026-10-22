@@ -19,6 +19,7 @@ import {
   MemorySourceObjectStore,
   ReleaseStages,
   appResourceNames,
+  provisionAppIdentity,
   deploymentWakeHook,
   type BuildConfig,
   type DeploymentRecord,
@@ -244,6 +245,14 @@ export async function releaseHarness(
     },
     null,
   );
+  // App provisioning (a trusted admin step at reservation): identities, secret, queue, grants.
+  await provisionAppIdentity(identities, appResourceNames(platform.prefix, ws, APP), {
+    workspaceId: ws,
+    appId: APP,
+    durable: true,
+    controllerEmail: platform.controllerServiceAccount,
+    signal: new AbortController().signal,
+  });
   const wake = deploymentWakeHook(queue);
   let sources = 0;
   /** A fresh verified source of `bytes`, then a submission at the app's current generation. */

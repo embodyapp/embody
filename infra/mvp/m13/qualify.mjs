@@ -89,6 +89,7 @@ export const M13_PROVIDER_METHODS = Object.freeze([
   "prepareDatabase",
   "deployM13Worker",
   "deployGateway",
+  "provisionApp",
   "putSource",
   "releaseBindings",
   "candidates",
@@ -110,23 +111,26 @@ export function evaluateReleaseBindings(bindings) {
   const runtimes = bindings.filter((b) => b.startsWith("runtime|")).map((b) => b.slice(8));
   const candidates = bindings.filter((b) => b.startsWith("candidate|")).map((b) => b.slice(10));
   const gateway = bindings.filter((b) => b.startsWith("gateway|")).map((b) => b.slice(8));
-  const prefixed = ["candidates", "wakeRoute", "secrets", "queues", "invokers"];
   const checks = {
     workerBaseRole: worker.includes("project:custom/base"),
-    // Every role that reads, writes, deletes or re-grants a resource is prefix-conditioned (B3).
-    workerConditionedGroups: prefixed.every((group) =>
-      worker.includes(`project:custom/${group}?prefixed`),
+    // Secret Manager honours prefix conditions: the app-secret role must carry one (review B3).
+    workerSecretsConditioned:
+      worker.includes("project:custom/secrets?prefixed") &&
+      !worker.includes("project:custom/secrets"),
+    // No IAM-admin or project-wide actAs: identity grants are resource-level, from provisioning.
+    workerNoIamAdmin: !worker.some((b) =>
+      /projectIamAdmin|serviceAccountAdmin|securityAdmin/.test(b),
     ),
-    workerNoUnconditionedGroups: !prefixed.some((group) =>
-      worker.includes(`project:custom/${group}`),
-    ),
-    workerGrantsOnlySqlClient: worker.includes(
-      "project:roles/resourcemanager.projectIamAdmin?onlyGrants=roles/cloudsql.client",
-    ),
-    workerActsOnlyAsRuntimes: worker.includes("project:roles/iam.serviceAccountUser?runtimesOnly"),
-    workerNoUnconditionedIamAdmin: !worker.includes(
-      "project:roles/resourcemanager.projectIamAdmin",
-    ),
+    workerNoProjectActAs: !worker.some((b) => b.startsWith("project:roles/iam.serviceAccount")),
+    workerActsAsRuntimesOnly:
+      worker.includes("runtimeSa:roles/iam.serviceAccountUser") &&
+      worker
+        .filter((b) => !b.startsWith("project:"))
+        .every(
+          (b) =>
+            b === "runtimeSa:roles/iam.serviceAccountUser" ||
+            b === "invokerSa:roles/iam.serviceAccountTokenCreator",
+        ),
     runtimesOnlySqlClientAndOwnSecret:
       runtimes.length > 0 &&
       runtimes.every(
@@ -343,6 +347,8 @@ export async function runM13Suite(env, provider, deps) {
         expiresAt: new Date(Date.now() + 6 * 3600_000).toISOString(),
       });
       await store.putCredential(issued.credential, null);
+      // App provisioning: a trusted admin step at reservation (the operator here), never the worker.
+      await provider.provisionApp(context, workspaceId, appId, name === "m11-durable");
       return { workspaceId, appId, name, token: issued.token, uploads: 0 };
     };
     /** Uploads `kind` as a verified source of the seeded app. */

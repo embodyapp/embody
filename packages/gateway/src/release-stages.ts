@@ -147,27 +147,42 @@ export interface CandidateProvider {
   /** Every candidate carrying this platform's labels (all provider pages, bounded). */
   list(signal: AbortSignal): Promise<readonly CandidateState[]>;
 }
+/**
+ * What the deployment worker may do with an app's identities: look up the runtime identity the
+ * app was provisioned with, and write (never read) its database secret's versions. Creating
+ * identities, secrets, queues and their IAM is app provisioning (`provisionAppIdentity`), a
+ * trusted admin step at reservation, so the worker holds no IAM-admin or identity-creation
+ * authority (review B3 of `a561eaf`, and live runs 3–4: Cloud Run and service-account IAM do not
+ * honour resource-name conditions, so those grants are resource-level instead).
+ */
 export interface AppIdentityProvider {
-  /** Creates or adopts the runtime identity; `pending` while the provider propagates it. */
+  /** The provisioned identity, or null when the app was not provisioned. */
+  account(accountId: string, signal: AbortSignal): Promise<{ readonly email: string } | null>;
+  /** Name of the newest enabled version (metadata only: the controller never reads payloads). */
+  latestSecretVersion(secretId: string, signal: AbortSignal): Promise<string | null>;
+  addSecretVersion(secretId: string, payload: string, signal: AbortSignal): Promise<string>;
+  /** Deterministic names of provisioned resources. */
+  emailOf(accountId: string): string;
+  queuePath(queueId: string): string;
+}
+/** App provisioning (privileged, at reservation; never the deployment worker). */
+export interface AppIdentityAdmin {
+  /** Creates or adopts an identity; `pending` while the provider propagates it. */
   ensureAccount(
     accountId: string,
     displayName: string,
     signal: AbortSignal,
   ): Promise<{ readonly email: string } | "pending">;
   /**
-   * The Cloud SQL connector authorizes by identity: the runtime needs `roles/cloudsql.client`
-   * on the project. Database access itself stays per app (its own role, password and database).
-   * The controller may grant this one role and no other (conditional project IAM admin).
+   * The Cloud SQL connector authorizes by identity: the runtime gets `roles/cloudsql.client`,
+   * conditioned on the shared instance. Database access itself stays per app.
    */
   ensureDatabaseClient(email: string, signal: AbortSignal): Promise<void>;
   /** Creates or adopts the secret; its only accessor is `accessorEmail`. */
   ensureSecret(secretId: string, accessorEmail: string, signal: AbortSignal): Promise<void>;
-  /** Name of the newest enabled version (metadata only: the controller never reads payloads). */
-  latestSecretVersion(secretId: string, signal: AbortSignal): Promise<string | null>;
-  addSecretVersion(secretId: string, payload: string, signal: AbortSignal): Promise<string>;
   /**
-   * Durable profile: the app's own wake queue and invoker. The runtime may enqueue only on its
-   * queue and act only as its invoker; the invoker may invoke only this app's candidates.
+   * Durable profile: the app's own wake queue (the runtime may enqueue only there) and its
+   * invoker (the runtime and Cloud Tasks' agent may act as it). `pending` while creating.
    */
   ensureWakeQueue(
     queueId: string,
@@ -177,6 +192,54 @@ export interface AppIdentityProvider {
   ): Promise<{ readonly queue: string; readonly invokerEmail: string } | "pending">;
   /** Lets the app's wake invoker call the platform wake route (the deployment worker). */
   ensureWakeRoute(invokerEmail: string, signal: AbortSignal): Promise<void>;
+  /** Adds `member` to `role` on one service account (resource-level, read-modify-write). */
+  grantOnAccount(email: string, role: string, member: string, signal: AbortSignal): Promise<void>;
+}
+/**
+ * Provisions an app's identities once, at reservation: the runtime identity with the Cloud SQL
+ * client role and its database secret, and for durable apps the wake queue, the wake invoker and
+ * the wake route. Grants the deployment worker exactly `actAs` on the runtime (to deploy
+ * candidates as it) and, durable, token creation on the invoker (to forward wakes). Idempotent;
+ * `pending` while IAM propagates. These resources live as long as the app (M15 app delete).
+ */
+export async function provisionAppIdentity(
+  admin: AppIdentityAdmin,
+  names: AppResourceNames,
+  options: {
+    readonly workspaceId: string;
+    readonly appId: string;
+    readonly durable: boolean;
+    readonly controllerEmail: string;
+    readonly signal: AbortSignal;
+  },
+): Promise<"ready" | "pending"> {
+  const { signal } = options;
+  const runtime = await admin.ensureAccount(
+    names.runtimeAccount,
+    `embody runtime ${options.workspaceId}/${options.appId}`,
+    signal,
+  );
+  if (runtime === "pending") return "pending";
+  await admin.ensureDatabaseClient(runtime.email, signal);
+  await admin.ensureSecret(names.databaseSecret, runtime.email, signal);
+  const controller = `serviceAccount:${options.controllerEmail}`;
+  await admin.grantOnAccount(runtime.email, "roles/iam.serviceAccountUser", controller, signal);
+  if (!options.durable) return "ready";
+  const wake = await admin.ensureWakeQueue(
+    names.wakeQueue,
+    names.invokerAccount,
+    runtime.email,
+    signal,
+  );
+  if (wake === "pending") return "pending";
+  await admin.grantOnAccount(
+    wake.invokerEmail,
+    "roles/iam.serviceAccountTokenCreator",
+    controller,
+    signal,
+  );
+  await admin.ensureWakeRoute(wake.invokerEmail, signal);
+  return "ready";
 }
 export interface WorkflowVersionInUse {
   readonly definition: string;
@@ -403,8 +466,8 @@ export class ReleaseStages implements DeploymentStages {
   }
 
   /**
-   * One bounded step: app identity, database and credential, the next migration, the durable
-   * wake queue, then the candidate. Each step returns `pending` after a provider operation it
+   * One bounded step: the app's provisioned identity, database and credential, the next
+   * migration, then the candidate. Each step returns `pending` after a provider operation it
    * started, so no call chain approaches the handler deadline; a re-run adopts what exists.
    */
   public async provision(context: DeploymentStageContext): Promise<StageResult> {
@@ -416,15 +479,10 @@ export class ReleaseStages implements DeploymentStages {
     const started = Date.now();
     const names = this.names(record);
     const { identities, database } = this.options;
-    const account = await identities.ensureAccount(
-      names.runtimeAccount,
-      `embody runtime ${record.workspaceId}/${record.appId}`,
-      signal,
-    );
-    if (account === "pending") return pending("IDENTITY_PENDING");
-    await identities.ensureDatabaseClient(account.email, signal);
+    // Identities are provisioned with the app (reservation), never by this worker.
+    const account = await identities.account(names.runtimeAccount, signal);
+    if (!account) return fail("APP_NOT_PROVISIONED", "CHECK_FAILED");
     await database.ensure(names);
-    await identities.ensureSecret(names.databaseSecret, account.email, signal);
     // Converge the runtime credential without the controller ever reading a secret payload:
     // the role carries the version its password was taken from. Serialized per app, so two
     // deployments of one app never interleave a rotation (review note 3).
@@ -457,15 +515,10 @@ export class ReleaseStages implements DeploymentStages {
     if (record.submission.capabilities.profile === "durable-v1") {
       // Wake tasks go to the app's stable wake route, never to one candidate (review B1).
       if (!this.options.platform.wakeBaseUrl) return fail("DURABLE_UNCONFIGURED");
-      const ensured = await identities.ensureWakeQueue(
-        names.wakeQueue,
-        names.invokerAccount,
-        account.email,
-        signal,
-      );
-      if (ensured === "pending") return pending("QUEUE_PENDING");
-      await identities.ensureWakeRoute(ensured.invokerEmail, signal);
-      wake = ensured;
+      wake = {
+        queue: identities.queuePath(names.wakeQueue),
+        invokerEmail: identities.emailOf(names.invokerAccount),
+      };
     }
     if (Date.now() - started > STEP_BUDGET_MS) return pending("STEP_BUDGET");
     const name = candidateName(this.options.platform.prefix, record);

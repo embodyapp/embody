@@ -112,6 +112,13 @@ export function createTableIdentities(connectionString, afterAddVersion = async 
   const pool = quiet(new Pool({ connectionString, max: 2 }));
   const email = (id) => `${id}@embody-cloud.iam.gserviceaccount.com`;
   return {
+    async account(id) {
+      const found = await pool.query("SELECT 1 FROM m13_fixture_accounts WHERE id = $1", [id]);
+      return found.rowCount ? { email: email(id) } : null;
+    },
+    emailOf: (id) => email(id),
+    queuePath: (queue) => `projects/embody-cloud/locations/us-central1/queues/${queue}`,
+    async grantOnAccount() {},
     async ensureAccount(id) {
       await pool.query("INSERT INTO m13_fixture_accounts (id) VALUES ($1) ON CONFLICT DO NOTHING", [
         id,

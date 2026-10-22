@@ -294,6 +294,50 @@ describe("M13 Google Cloud release adapter request shapes", () => {
     });
   });
 
+  it("worker lookup and account grants: identity get only; grants add without overwriting", async () => {
+    let policy: Record<string, unknown> = {
+      etag: "e1",
+      bindings: [{ role: "roles/iam.serviceAccountUser", members: ["serviceAccount:other@p"] }],
+    };
+    const { calls, fetcher } = fakeFetch((call) => {
+      if (call.url.includes("/serviceAccounts/missing")) return { status: 404 };
+      if (call.method === "GET") return { status: 200, body: {} };
+      if (call.url.endsWith(":getIamPolicy")) return { status: 200, body: policy };
+      policy = (call.body as { policy: Record<string, unknown> }).policy;
+      return { status: 200, body: policy };
+    });
+    const provider = new GoogleReleaseProvider(options(fetcher));
+    expect(await provider.account("emb-a1", signal)).toEqual({
+      email: "emb-a1@embody-cloud.iam.gserviceaccount.com",
+    });
+    expect(await provider.account("missing", signal)).toBeNull();
+    expect(provider.queuePath("emb-a1")).toBe(
+      "projects/embody-cloud/locations/us-central1/queues/emb-a1",
+    );
+    await provider.grantOnAccount(
+      "emb-a1@x",
+      "roles/iam.serviceAccountUser",
+      "serviceAccount:w@p",
+      signal,
+    );
+    await provider.grantOnAccount(
+      "emb-a1@x",
+      "roles/iam.serviceAccountUser",
+      "serviceAccount:w@p",
+      signal,
+    );
+    expect(calls.filter((call) => call.url.endsWith(":setIamPolicy"))).toHaveLength(1);
+    expect(policy).toMatchObject({
+      etag: "e1",
+      bindings: [
+        {
+          role: "roles/iam.serviceAccountUser",
+          members: ["serviceAccount:other@p", "serviceAccount:w@p"],
+        },
+      ],
+    });
+  });
+
   it("health probe: invoker token for the exact origin, ready only on ready:true, bounded", async () => {
     const endpoint = "https://emb-cabc-123456789012.us-central1.run.app";
     const now = Math.floor(Date.now() / 1000);

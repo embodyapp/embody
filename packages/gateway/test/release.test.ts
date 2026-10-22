@@ -10,6 +10,9 @@ import {
   candidateOwner,
   createDeploymentWorker,
   createWorkspaceGateway,
+  MemoryAppIdentityProvider,
+  appResourceNames,
+  provisionAppIdentity,
   errorTag,
   wakeUrl,
   newCredential,
@@ -898,5 +901,44 @@ describe("M13 operability: stage errors leave a bounded diagnostic tag", () => {
     ).toBe("SCHEMA_AHEAD");
     expect(errorTag(new TypeError("postgresql://user:secret@host/db is bad"))).toBe("TypeError");
     expect(errorTag("a string")).toBe("Error");
+  });
+});
+
+describe("M13 app provisioning is a trusted step at reservation, never the deployment worker", () => {
+  it("grants the worker exactly actAs on the runtime and token creation on the wake invoker", async () => {
+    const admin = new MemoryAppIdentityProvider();
+    const names = appResourceNames(platform.prefix, WS, APP);
+    const options = {
+      workspaceId: WS,
+      appId: APP,
+      durable: true,
+      controllerEmail: platform.controllerServiceAccount,
+      signal: new AbortController().signal,
+    };
+    admin.pendingAccountCalls = 1;
+    expect(await provisionAppIdentity(admin, names, options)).toBe("pending");
+    expect(await provisionAppIdentity(admin, names, options)).toBe("ready");
+    expect(await provisionAppIdentity(admin, names, options)).toBe("ready");
+    const runtime = admin.emailOf(names.runtimeAccount);
+    const invoker = admin.emailOf(names.invokerAccount);
+    const controller = `serviceAccount:${platform.controllerServiceAccount}`;
+    expect(
+      Object.fromEntries([...admin.accountGrants].map(([key, members]) => [key, [...members]])),
+    ).toEqual({
+      [`${runtime}|roles/iam.serviceAccountUser`]: [controller],
+      [`${invoker}|roles/iam.serviceAccountTokenCreator`]: [controller],
+    });
+    expect([...admin.databaseClients]).toEqual([runtime]);
+    expect(admin.secrets.get(names.databaseSecret)?.accessor).toBe(runtime);
+    expect([...admin.wakeRouteInvokers]).toEqual([invoker]);
+    expect(admin.queues.get(names.wakeQueue)).toEqual({ invoker, enqueuer: runtime });
+  });
+
+  it("a deployment of an app that was never provisioned fails visibly, creating nothing", async () => {
+    const h = await releaseHarness();
+    h.identities.accounts.clear();
+    const record = await h.deploy([plainPlugin()]);
+    failedWith(record, "CHECK_FAILED", "APP_NOT_PROVISIONED");
+    expect(h.candidates.created).toBe(0);
   });
 });
