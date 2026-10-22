@@ -265,6 +265,17 @@ test("M13 suite tears down and fails every case when setup, the gateway or the d
   }
 });
 
+test("M13 suite re-checks a leftover a lagging list still shows before failing cleanup", async () => {
+  let calls = 0;
+  const { provider } = fakeProvider({
+    setUp: () => Promise.reject(new Error("boom")),
+    inventory: () => (calls++ === 0 ? ["serviceAccount:just-deleted"] : []),
+  });
+  const result = await runM13Suite(env, provider, {});
+  assert.equal(result.cases.cleanup.pass, true);
+  assert.deepEqual(result.cases.cleanup.leftovers, []);
+});
+
 test("M13 suite reports leftovers and project IAM drift as cleanup failures", async () => {
   let iam = 0;
   const { provider } = fakeProvider({

@@ -646,7 +646,13 @@ export async function runM13Suite(env, provider, deps) {
       .catch((error) => ({ pass: false, error: String(error?.message ?? error).slice(0, 200) }));
     await rm(scratch, { recursive: true, force: true });
   }
-  const leftovers = await provider.inventory(approval, runId);
+  // IAM and Cloud Run lists lag deletions by seconds to a minute (runs 2 and 4 saw a just-deleted
+  // account listed): re-check before calling anything a leftover.
+  let leftovers = await provider.inventory(approval, runId);
+  for (let check = 0; check < 3 && leftovers.length > 0; check++) {
+    await provider.wait(60_000);
+    leftovers = await provider.inventory(approval, runId);
+  }
   const iamAfter = await provider.projectIam();
   cases.cleanup = {
     pass:
