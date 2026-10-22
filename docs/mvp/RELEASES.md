@@ -157,10 +157,15 @@ Each case ends with one active deployment, the catalog route on its candidate, o
 | `M13.b.destructive-migration` | a contract migration is refused; ledger and checksum unchanged |
 | `M13.c.promotion-race` | two deployments on two worker instances: one generation step |
 | `M13.d.rollback` | rollback by digest to the previous release: a fresh candidate, previous manifest, checksum unchanged; expired and active targets refused |
-| `M13.e.durable-wake` | a durable app starts a workflow whose step is due 12 minutes later (past the 10-minute drain); a second release is promoted and the first candidate swept; the step completes on the active release through the stable wake route |
+| `M13.e.durable-wake` | a durable app starts a workflow whose step is due 28 minutes later; a second release is promoted and the first candidate drained and swept **before** the step is due; the step then completes, which only the stable wake route to the active release can deliver |
 | `cleanup` | every run resource gone, project IAM unchanged |
 
 M13.e's version guard and continuation are also proven locally with a real engine and PostgreSQL.
+
+## Follow-ups recorded by the live runs
+
+- **Scope namespaces (M14/M15).** The gateway authorizes `<app name>:*`; an app's kernel authorizes its plugin targets (the scaffold's `app:*`). A credential needs both unless the plugin ID equals the app name. The CLI and management API should issue them together or align the namespaces.
+- **Google IAM behaviour** (live runs 3–5): Cloud Run and service-account IAM ignore resource-name conditions; Secret Manager honours them; IAM lists lag deletions by up to a minute; IAM writes are rate-limited (429), which the adapter retries with bounded backoff.
 
 ## Cost
 

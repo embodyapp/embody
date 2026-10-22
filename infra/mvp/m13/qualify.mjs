@@ -30,6 +30,8 @@ export const M13_LIMITS = Object.freeze({
   drainWaitMs: 11 * 60_000,
   propagationMs: 8 * 60_000,
 });
+/** Minutes until the durable case's workflow step is due: past B's promotion, drain and sweep. */
+export const DURABLE_DELAY_MIN = 28;
 export const M13_CASES = Object.freeze([
   "setUp",
   "M13.live.iam",
@@ -285,7 +287,10 @@ export async function runM13Suite(env, provider, deps) {
       const config = join(directory, "embody.config.ts");
       const text = await readFile(config, "utf8");
       if (!text.includes("delayMs: 60 * 60_000")) throw new Error("durable scaffold changed");
-      await writeFile(config, text.replace("delayMs: 60 * 60_000", "delayMs: 12 * 60_000"));
+      await writeFile(
+        config,
+        text.replace("delayMs: 60 * 60_000", `delayMs: ${DURABLE_DELAY_MIN} * 60_000`),
+      );
     };
     const crashAtBoot = async (directory) => {
       const entry = join(directory, "src/index.ts");
@@ -295,14 +300,16 @@ export async function runM13Suite(env, provider, deps) {
       v1: await pack("v1"),
       v2: await pack("v2", addPong),
       crash: await pack("crash", crashAtBoot),
-      // Durable: the scaffold's delayed workflow step is due 12 minutes after it starts, so the
-      // wake it schedules outlives the drain of the release that scheduled it (review B1).
+      // Durable: the scaffold's delayed workflow step is due after release B is promoted and A's
+      // candidate drained and was swept, so only the stable wake route can deliver it (review B1).
       durableA: await pack("durableA", shortDelay, "durable"),
       durableB: await pack(
         "durableB",
         async (directory) => {
           await shortDelay(directory);
-          await addPong(directory);
+          // A real code change, so B is a new build and a new release.
+          const entry = join(directory, "src/index.ts");
+          await writeFile(entry, `${await readFile(entry, "utf8")}\n// release B\n`);
         },
         "durable",
       ),
@@ -335,7 +342,8 @@ export async function runM13Suite(env, provider, deps) {
           actorId: "m13-operator",
           actorType: "human",
           roles: [],
-          scopes: [`${name}:*`],
+          // The gateway authorizes `<app name>:*`; the app's kernel its plugin targets (`app:*`).
+          scopes: [`${name}:*`, "app:*"],
         },
         grants: [
           { workspaceId, appId, role: "deployer" },
@@ -611,13 +619,15 @@ export async function runM13Suite(env, provider, deps) {
         idempotencyKey: `m13-wake-${runId}`,
       });
       const id = started.body?.id;
+      const due = Date.now() + DURABLE_DELAY_MIN * 60_000;
       const b = await deploy(d, "durableB");
       // A's candidate drains and is swept; the step it scheduled is due after that.
       await provider.wait(M13_LIMITS.drainWaitMs);
       await provider.reconcile(context);
       const live = await provider.candidates(context, d.workspaceId);
+      const sweptBeforeDue = Date.now() < due;
       let status;
-      for (const begin = Date.now(); Date.now() - begin < 15 * 60_000;) {
+      for (const begin = Date.now(); Date.now() < Math.max(due, begin) + 15 * 60_000;) {
         status = (await call(d, "app.followUp.status", { id })).body?.status;
         if (status === "completed" || status === "failed") break;
         await delay(30_000);
@@ -626,6 +636,8 @@ export async function runM13Suite(env, provider, deps) {
         bothActive: a.state === "active" && b.state === "active",
         started: started.status === 200 && typeof id === "string",
         replacedCandidateRemoved: live.length === 1,
+        // A was gone before the step came due: only the stable wake route could deliver it.
+        sweptBeforeDue,
         stepCompletedOnActiveRelease: status === "completed",
       };
       return { pass: Object.values(checks).every(Boolean), checks, status };

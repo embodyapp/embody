@@ -471,17 +471,24 @@ export function createM13GcpProvider({
         accessToken,
       });
       for (let attempt = 0; attempt < 24; attempt++) {
-        const outcome = await lib.provisionAppIdentity(
-          admin,
-          lib.appResourceNames(context.platformPrefix, workspaceId, appId),
-          {
-            workspaceId,
-            appId,
-            durable,
-            controllerEmail: context.worker.email,
-            signal: AbortSignal.timeout(60_000),
-          },
-        );
+        let outcome;
+        try {
+          outcome = await lib.provisionAppIdentity(
+            admin,
+            lib.appResourceNames(context.platformPrefix, workspaceId, appId),
+            {
+              workspaceId,
+              appId,
+              durable,
+              controllerEmail: context.worker.email,
+              signal: AbortSignal.timeout(60_000),
+            },
+          );
+        } catch (error) {
+          // Rate limits and concurrent policy edits are retried; anything else fails setup.
+          if (!/returned (429|409)/.test(String(error?.message))) throw error;
+          outcome = "pending";
+        }
         if (outcome === "ready") return;
         await delay(10_000);
       }

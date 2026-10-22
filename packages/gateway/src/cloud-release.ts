@@ -39,6 +39,10 @@ export interface GoogleReleaseProviderOptions {
   readonly accessToken?: () => Promise<string>;
   readonly fetch?: typeof fetch;
   readonly timeoutMs?: number;
+  /** Retries of a 429 answer (backoff 1, 2, 4, 8 s), bounded by the caller's signal. */
+  readonly rateLimitRetries?: number;
+  /** Test seam: the first backoff (default 1 s). */
+  readonly rateLimitBaseMs?: number;
 }
 const RUN = "https://run.googleapis.com/v2";
 const IAM = "https://iam.googleapis.com/v1";
@@ -65,6 +69,8 @@ export class GoogleReleaseProvider
   private readonly fetcher: typeof fetch;
   private readonly token: () => Promise<string>;
   private readonly timeoutMs: number;
+  private readonly rateLimitRetries: number;
+  private readonly rateLimitBaseMs: number;
   public constructor(private readonly options: GoogleReleaseProviderOptions) {
     if (
       !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(options.project) ||
@@ -74,6 +80,8 @@ export class GoogleReleaseProvider
     this.fetcher = options.fetch ?? fetch;
     this.token = options.accessToken ?? metadataAccessToken(this.fetcher);
     this.timeoutMs = options.timeoutMs ?? 15_000;
+    this.rateLimitRetries = options.rateLimitRetries ?? 4;
+    this.rateLimitBaseMs = options.rateLimitBaseMs ?? 1000;
   }
   private get location(): string {
     return `projects/${this.options.project}/locations/${this.options.region}`;
@@ -118,7 +126,15 @@ export class GoogleReleaseProvider
     signal: AbortSignal | undefined,
     allow: readonly number[] = [],
   ): Promise<{ status: number; body: Record<string, unknown> }> {
-    const result = await this.api(url, method, body, signal);
+    // Google APIs rate-limit bursts (live run 6: 429 from IAM during app provisioning). Retry a
+    // few times with backoff, never past the caller's signal; anything else is the caller's.
+    let result = await this.api(url, method, body, signal);
+    for (let attempt = 0; result.status === 429 && attempt < this.rateLimitRetries; attempt++) {
+      const wait = Math.min(2 ** attempt * this.rateLimitBaseMs, 8 * this.rateLimitBaseMs);
+      if (signal?.aborted) break;
+      await new Promise((resolve) => setTimeout(resolve, wait).unref());
+      result = await this.api(url, method, body, signal);
+    }
     if ((result.status < 200 || result.status >= 300) && !allow.includes(result.status))
       throw new ReleaseProviderError(`Release provider returned ${result.status}`);
     return result;

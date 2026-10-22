@@ -338,6 +338,23 @@ describe("M13 Google Cloud release adapter request shapes", () => {
     });
   });
 
+  it("retries a rate-limited (429) call with bounded backoff, then reports it", async () => {
+    let answers = [429, 429, 200];
+    const { calls, fetcher } = fakeFetch(() => ({ status: answers.shift() ?? 429, body: {} }));
+    const provider = new GoogleReleaseProvider({
+      ...options(fetcher),
+      rateLimitRetries: 2,
+      rateLimitBaseMs: 5,
+    });
+    await provider.setInvokers("emb-cabc", ["serviceAccount:a@x"], signal);
+    expect(calls).toHaveLength(3);
+    answers = [];
+    await expect(provider.setInvokers("emb-cabc", ["serviceAccount:a@x"], signal)).rejects.toThrow(
+      "Release provider returned 429",
+    );
+    expect(calls).toHaveLength(6);
+  });
+
   it("health probe: invoker token for the exact origin, ready only on ready:true, bounded", async () => {
     const endpoint = "https://emb-cabc-123456789012.us-central1.run.app";
     const now = Math.floor(Date.now() / 1000);
