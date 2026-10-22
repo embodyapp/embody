@@ -260,9 +260,6 @@ export async function runM13Suite(env, provider, deps) {
     await provider.deployM13Worker(context, { image, recipe, gateway });
     cases.setUp = { pass: true };
     await provider.wait(M13_LIMITS.propagationMs);
-    await record("M13.live.iam", async () =>
-      evaluateReleaseBindings(await provider.releaseBindings(context)),
-    );
     store = new deps.gateway.PostgresGatewayStore(db.runtimeUrl);
 
     // Fixtures: v1 (ping), v2 (adds pong) and a release whose container exits at boot.
@@ -633,6 +630,11 @@ export async function runM13Suite(env, provider, deps) {
       };
       return { pass: Object.values(checks).every(Boolean), checks, status };
     });
+    // Last: the grants are inspected once apps are provisioned and candidates exist (run 5 read
+    // them right after setup, when there were no runtime identities or candidates to inspect).
+    await record("M13.live.iam", async () =>
+      evaluateReleaseBindings(await provider.releaseBindings(context)),
+    );
   } catch (error) {
     if (!cases.setUp)
       cases.setUp = { pass: false, error: String(error?.message ?? error).slice(0, 200) };
