@@ -125,6 +125,8 @@ export interface DeploymentLogRecord {
   readonly state?: string;
   readonly attempt?: number;
   readonly durationMs: number;
+  /** Bounded operator detail (e.g. `HANDLER_ERROR:pg-42501`); never payloads or messages. */
+  readonly detail?: string;
 }
 export interface TaskResult {
   readonly status: 200 | 400 | 503;
@@ -151,6 +153,25 @@ export function deploymentWakeHook(queue: TaskQueue<DeploymentTaskBody>): Deploy
         },
       });
   };
+}
+
+/**
+ * A bounded, payload-free tag for a stage error: a PostgreSQL SQLSTATE, a provider HTTP status,
+ * a migration refusal reason, or the error class name.
+ */
+export function errorTag(error: unknown): string {
+  const value = error as { code?: unknown; name?: unknown; message?: unknown; reason?: unknown };
+  if (typeof value?.code === "string" && /^[0-9A-Z]{5}$/.test(value.code))
+    return `pg-${value.code}`;
+  if (typeof value?.reason === "string" && /^[A-Z_]{1,40}$/.test(value.reason)) return value.reason;
+  const status =
+    typeof value?.message === "string"
+      ? /\b(?:returned |failed \()(\d{3})\b/.exec(value.message)
+      : null;
+  if (status) return `provider-${status[1]}`;
+  const name =
+    typeof value?.name === "string" && /^[A-Za-z]{1,40}$/.test(value.name) ? value.name : "Error";
+  return name;
 }
 
 class DeadlineError extends Error {
@@ -300,10 +321,21 @@ export class DeploymentController {
           .catch(() => undefined);
         return { status: 200, outcome: "timed-out" };
       }
+      // Operator-facing only: a bounded tag (SQLSTATE, provider status or error class), never a
+      // message, URL or payload, so a failing stage is diagnosable from the record and the log.
+      const reason = `HANDLER_ERROR:${errorTag(error)}`;
+      this.log({
+        workspaceId: record.workspaceId,
+        appId: record.appId,
+        deploymentId: record.deploymentId,
+        state: record.state,
+        attempt: record.stageAttempt,
+        outcome: "stage-error",
+        detail: reason,
+        durationMs: 0,
+      });
       outcome =
-        record.state === "building"
-          ? { kind: "poll-error", reason: "HANDLER_ERROR" }
-          : { kind: "retry", reason: "HANDLER_ERROR" };
+        record.state === "building" ? { kind: "poll-error", reason } : { kind: "retry", reason };
     }
     try {
       const next = await this.options.store.completeDeployment(

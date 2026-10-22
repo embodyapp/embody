@@ -124,6 +124,7 @@ export {
   DeploymentController,
   createDeploymentWorker,
   deploymentWakeHook,
+  errorTag,
   reconcileDeployments,
   type DeploymentControllerOptions,
   type DeploymentLogRecord,

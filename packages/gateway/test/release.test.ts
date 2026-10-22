@@ -10,6 +10,7 @@ import {
   candidateOwner,
   createDeploymentWorker,
   createWorkspaceGateway,
+  errorTag,
   wakeUrl,
   newCredential,
   purgeExpiredSources,
@@ -234,7 +235,7 @@ describe("M13.b a failed update leaves the old route usable", () => {
     const apply = h.database.applyNextMigration.bind(h.database);
     h.database.applyNextMigration = () => Promise.reject(new Error("lock timeout"));
     const record = await h.deploy([plainPlugin(["ping", "pong"])]);
-    failedWith(record, "DEPENDENCY_UNAVAILABLE", "HANDLER_ERROR");
+    failedWith(record, "DEPENDENCY_UNAVAILABLE", "HANDLER_ERROR:Error");
     expect(db.applied).toEqual([1, 2, 3, 4, 5]);
     expect(db.rows.get("card-1")).toBe('{"title":"kept"}');
     expect(await h.catalog()).toEqual(before);
@@ -878,5 +879,24 @@ describe("M13 review B2: the candidate sweep is not starved by a failing delete"
     const pass = (await h.sweep.sweep(h.clock.now())) as { removed: number; failed: number };
     expect(pass).toMatchObject({ removed: 2, failed: 1 });
     expect(ended.map((name) => h.candidates.services.has(name))).toEqual([true, false, false]);
+  });
+});
+
+describe("M13 operability: stage errors leave a bounded diagnostic tag", () => {
+  it("tags SQLSTATEs, provider statuses, refusals and classes, never messages", () => {
+    expect(
+      errorTag(Object.assign(new Error("permission denied for database x"), { code: "42501" })),
+    ).toBe("pg-42501");
+    expect(errorTag(new Error("Release provider returned 403"))).toBe("provider-403");
+    expect(
+      errorTag(new Error("Provider POST run.googleapis.com failed (404); body suppressed")),
+    ).toBe("provider-404");
+    expect(
+      errorTag(
+        Object.assign(new Error("x"), { name: "MigrationRefusedError", reason: "SCHEMA_AHEAD" }),
+      ),
+    ).toBe("SCHEMA_AHEAD");
+    expect(errorTag(new TypeError("postgresql://user:secret@host/db is bad"))).toBe("TypeError");
+    expect(errorTag("a string")).toBe("Error");
   });
 });

@@ -83,7 +83,9 @@ async function query<T extends object>(
 }
 
 // `pnpm test:m13` runs this file with zero skips; ordinary workspace runs may skip it.
-describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", () => {
+// Crash cases spawn and kill worker processes and run several stages against real PostgreSQL:
+// they need more than vitest's 5 s default on a loaded CI runner.
+describe.skipIf(!enabled)("M13 on real PostgreSQL (test:m13)", { timeout: 60_000 }, () => {
   beforeAll(async () => {
     const maintenance = new PostgresGatewayStore(migrationUrl!);
     await maintenance.migrate();
