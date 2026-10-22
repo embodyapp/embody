@@ -144,6 +144,10 @@ test("release grants must be exact: every resource-touching worker role is prefi
     );
   assert.match(conditions.secrets, /projects\/123456789012\/secrets\/ta1b2c3-a/);
   assert.match(
+    conditions.candidates,
+    /projects\/123456789012\/locations\/us-central1\/services\/ta1b2c3-c/,
+  );
+  assert.match(
     conditions.wakeRoute,
     /== "projects\/embody-test-project\/locations\/us-central1\/services\/embody-test-m13-worker-a1b2c3"/,
   );

@@ -409,8 +409,14 @@ export async function runM13Suite(env, provider, deps) {
       });
     const settle = async (seeded, deploymentId) => {
       const started = Date.now();
+      // A missing ID (an earlier step failed) or a non-200 answer ends the wait at once: a failing
+      // run must fail fast, not poll a nonexistent deployment for the whole deployment window.
+      if (typeof deploymentId !== "string") return { state: "missing" };
       for (;;) {
-        const status = (await manage(seeded, "GET", `/deployments/${deploymentId}`)).body;
+        const response = await manage(seeded, "GET", `/deployments/${deploymentId}`);
+        if (response.status !== 200 && response.status < 500)
+          return { state: "unavailable", status: response.status };
+        const status = response.body;
         if (["active", "failed", "cancelled"].includes(status.state)) return status;
         if (Date.now() - started > M13_LIMITS.deploymentWaitMs) return status;
         await delay(M13_LIMITS.pollMs);

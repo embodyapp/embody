@@ -29,6 +29,10 @@ const CRM = "https://cloudresourcemanager.googleapis.com/v1";
  */
 export const M13_WORKER_ROLES = Object.freeze({
   base: [
+    // Creating a service grants nothing by itself: it can run only as an identity the worker may
+    // act as (this run's runtimes), and its IAM stays prefix-conditioned. Cloud Run evaluates
+    // create against the parent location, so a name condition cannot hold it.
+    "run.services.create",
     "run.services.list",
     "run.operations.get",
     "iam.serviceAccounts.create",
@@ -37,7 +41,6 @@ export const M13_WORKER_ROLES = Object.freeze({
     "cloudtasks.queues.create",
   ],
   candidates: [
-    "run.services.create",
     "run.services.get",
     "run.services.delete",
     "run.services.getIamPolicy",
@@ -64,13 +67,18 @@ export const M13_WORKER_ROLES = Object.freeze({
 });
 /** The condition each conditioned role group is bound with, from the run's names. */
 export function m13Conditions(project, projectNumber, n, workerService) {
+  // Services name resources by project ID or number; accept exactly these two forms.
+  const either = (path) =>
+    `resource.name.startsWith("projects/${project}/${path}") || resource.name.startsWith("projects/${projectNumber}/${path}")`;
+  const exact = (path) =>
+    `resource.name == "projects/${project}/${path}" || resource.name == "projects/${projectNumber}/${path}"`;
   const sa = (prefix) =>
     `resource.name.startsWith("projects/-/serviceAccounts/${prefix}") || resource.name.startsWith("projects/${project}/serviceAccounts/${prefix}")`;
   return {
-    candidates: `resource.name.startsWith("projects/${project}/locations/us-central1/services/${n.platformPrefix}-c")`,
-    wakeRoute: `resource.name == "projects/${project}/locations/us-central1/services/${workerService}"`,
-    secrets: `resource.name.startsWith("projects/${projectNumber}/secrets/${n.platformPrefix}-a")`,
-    queues: `resource.name.startsWith("projects/${project}/locations/us-central1/queues/${n.platformPrefix}-a")`,
+    candidates: either(`locations/us-central1/services/${n.platformPrefix}-c`),
+    wakeRoute: exact(`locations/us-central1/services/${workerService}`),
+    secrets: either(`secrets/${n.platformPrefix}-a`),
+    queues: either(`locations/us-central1/queues/${n.platformPrefix}-a`),
     invokers: sa(`${n.platformPrefix}-w`),
     runtimes: sa(`${n.platformPrefix}-a`),
   };
