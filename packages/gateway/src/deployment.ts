@@ -1,12 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { z } from "@embody/core";
 import {
+  BUILD_RECIPE,
   DeploymentTransitionSchema,
   HOSTED_PROFILE,
   ReleaseManifestSchema,
   canCancel,
   canPromote,
   publicError,
+  submissionFingerprint,
   type DeploymentState,
   type DeploymentStatus,
   type DeploymentSubmission,
@@ -17,6 +19,7 @@ import { deterministicTaskName } from "@embody/host";
 import type { ArtifactRecord } from "./build-admission.js";
 import type { SourceRecord } from "./source-admission.js";
 import type { CatalogApp } from "./store.js";
+import type { Registration } from "./index.js";
 
 export type PublicErrorCode = z.infer<typeof PublicErrorCodeSchema>;
 
@@ -54,6 +57,14 @@ export const DEPLOYMENT_LIMITS = Object.freeze({
   /** Nonterminal deployments allowed per app and per workspace. */
   maxActivePerApp: 3,
   maxActivePerWorkspace: 10,
+  /** M13: provisioning (identity, database, migrations, candidate) must finish within this. */
+  provisionStageMs: 15 * 60 * SECOND,
+  /** M13: a candidate must become ready and pass its checks within this. */
+  checkStageMs: 10 * 60 * SECOND,
+  /** M13: provider polls while a stage waits on a long-running operation. */
+  stagePollMs: 5 * SECOND,
+  /** M13: a replaced release's candidate keeps serving calls routed before the switch. */
+  drainMs: 10 * 60 * SECOND,
 });
 
 export interface DeploymentRecord {
@@ -74,8 +85,17 @@ export interface DeploymentRecord {
   /** Operator-facing reason (internal code such as a build error), never public. */
   readonly reason?: string;
   readonly releaseId?: string;
-  /** The admitted artifact (set when the build stage completes). */
+  /** The admitted artifact (set when the build stage completes, or at submission for a rollback). */
   readonly artifactId?: string;
+  /**
+   * M13 rollback: the retained release whose artifact this deployment provisions afresh and
+   * promotes as a new release. A rollback skips the build; every other stage runs as for a deploy.
+   */
+  readonly rollbackOf?: string;
+  /** M13: the candidate the provisioning stage created, named and labelled from this record. */
+  readonly candidate?: CandidateRef;
+  /** When the current state was entered; bounds provisioning and readiness (M13). */
+  readonly stageStartedAt?: string;
   /** Fencing token: advances on every claim, completion and cancellation. */
   readonly epoch: number;
   /** When work is next due (nonterminal), or cleanup is due (terminal with `cleanup`). */
@@ -96,6 +116,12 @@ export interface DeploymentRecord {
   readonly revision: number;
 }
 
+/** A deployed candidate: the provider resource name and its HTTPS origin (the app route). */
+export interface CandidateRef {
+  readonly service: string;
+  readonly endpoint: string;
+}
+
 export interface ReleaseRecord {
   readonly workspaceId: string;
   readonly appId: string;
@@ -107,6 +133,28 @@ export interface ReleaseRecord {
   readonly generation: number;
   readonly manifest: ReleaseManifest;
   readonly createdAt: string;
+  /**
+   * M13: the catalog registration (route and manifest) this release serves, switched into the
+   * catalog by the promotion transaction. Absent on releases promoted before M13.
+   */
+  readonly registration?: Registration;
+  readonly candidate?: CandidateRef;
+  /** The source upload this release was built from (pinned while the release is active). */
+  readonly sourceUploadId?: string;
+  /** Storage schema the release's framework needs (`BUILD_RECIPE.storageSchemaVersion`). */
+  readonly schemaVersion?: number;
+  /** Set when this release was promoted by a rollback to `rollbackOf`. */
+  readonly rollbackOf?: string;
+  /**
+   * Lifecycle, set when another release replaces this one: the candidate keeps serving calls
+   * routed before the switch until `drainUntil`, then the candidate sweep removes it; the
+   * release stays a rollback target until `retainUntil` (MD15: inactive releases 30 days).
+   */
+  readonly inactiveSince?: string;
+  readonly drainUntil?: string;
+  readonly retainUntil?: string;
+  /** The candidate was removed (after the drain); the release can still be rolled back to. */
+  readonly candidateRemovedAt?: string;
 }
 
 export class DeploymentError extends Error {
@@ -222,6 +270,8 @@ export function wakeFor(
 // App view used by every decision: the catalog app is authoritative (M04 generation, M12 fence).
 
 export interface AppControl {
+  /** The catalog namespace (M13 registers the first release under it). */
+  readonly name?: string;
   readonly generation: number;
   readonly lifecycleFence: number;
   readonly status: "enabled" | "disabled" | "deleted";
@@ -229,7 +279,9 @@ export interface AppControl {
 }
 export function appControl(app: CatalogApp | null | undefined): AppControl | null {
   if (!app) return null;
+  const name = app.name ?? app.registration?.appId;
   return {
+    ...(name !== undefined ? { name } : {}),
     generation: app.generation,
     lifecycleFence: app.lifecycleFence ?? 0,
     status: app.state === "deleted" ? "deleted" : app.state === "disabled" ? "disabled" : "enabled",
@@ -284,6 +336,9 @@ export function decideSubmit(input: {
     return { replay: true, record: existing };
   }
   const { submission } = request;
+  // Rollback deployments use derived keys (`rollbackKey`); a submission cannot occupy them.
+  if (submission.idempotencyKey.startsWith(ROLLBACK_KEY_PREFIX))
+    throw new DeploymentError("INVALID_INPUT");
   if (!app || app.status === "deleted") throw new DeploymentError("NOT_FOUND");
   if (app.status === "disabled") throw new DeploymentError("FORBIDDEN");
   if (submission.expectedGeneration !== app.generation)
@@ -327,6 +382,7 @@ export function decideSubmit(input: {
     cleanupAttempts: 0,
     createdAt: iso(now),
     updatedAt: iso(now),
+    stageStartedAt: iso(now),
     deadlineAt: iso(now + DEPLOYMENT_LIMITS.deploymentDeadlineMs),
     retainUntil: iso(retainUntil),
   };
@@ -339,6 +395,161 @@ export function decideSubmit(input: {
     retainUntil: iso(Math.max(Date.parse(source.retainUntil), retainUntil)),
   };
   return { replay: false, record, source: retained };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rollback (M13 step 5). A rollback is a deployment of a retained release's admitted artifact: it
+// skips the build, provisions a fresh candidate from the same digest, re-runs every check and
+// promotes a new release through the same CAS, so concurrent deploys, cancellation and stale
+// workers behave exactly as for a deploy (M13.c).
+
+export const ROLLBACK_KEY_PREFIX = "rollback-";
+/** One rollback per target and generation: a retry replays it, a later generation is new. */
+export function rollbackKey(releaseId: string, generation: number): string {
+  return `${ROLLBACK_KEY_PREFIX}${releaseId}-g${generation}`;
+}
+export interface RollbackInput {
+  readonly workspaceId: string;
+  readonly appId: string;
+  readonly releaseId: string;
+  readonly expectedGeneration: number;
+  readonly actorId: string;
+  readonly now: Date;
+}
+export type RollbackDecision =
+  | { readonly replay: true; readonly record: DeploymentRecord }
+  | {
+      readonly replay: false;
+      readonly record: Omit<DeploymentRecord, "revision">;
+      /** The target's source and artifact, retained at least as long as this deployment. */
+      readonly source: SourceRecord;
+      readonly artifact: ArtifactRecord;
+    };
+/** Why a release cannot be rolled back to; the operator-facing reason, never public. */
+export function rollbackRefusal(
+  target: ReleaseRecord,
+  app: AppControl,
+  artifact: ArtifactRecord | null,
+  source: SourceRecord | null,
+  now: number,
+): string | null {
+  if (app.activeReleaseId === target.releaseId) return "ROLLBACK_TO_ACTIVE";
+  if (!target.registration || !target.sourceUploadId) return "RELEASE_PREDATES_M13";
+  if (!target.retainUntil || Date.parse(target.retainUntil) <= now) return "RELEASE_EXPIRED";
+  if (
+    !artifact ||
+    artifact.purging ||
+    artifact.state !== "admitted" ||
+    artifact.appId !== target.appId ||
+    artifact.artifactId !== target.artifactId ||
+    artifact.imageReference !== target.imageReference
+  )
+    return "ARTIFACT_MISSING";
+  if (
+    !source ||
+    source.purging ||
+    source.state !== "verified" ||
+    source.appId !== target.appId ||
+    source.uploadId !== target.sourceUploadId ||
+    (Date.parse(source.retainUntil) <= now && !source.pinnedBy)
+  )
+    return "SOURCE_MISSING";
+  return null;
+}
+/**
+ * Same key (target and generation) replays the rollback; otherwise the app must be enabled at
+ * `expectedGeneration` and the target a retained, inactive release of this app whose artifact
+ * and source are still kept. A target that is not is refused explicitly
+ * (`ROLLBACK_INCOMPATIBLE`); schema and workflow compatibility are checked by the stages against
+ * the app's database, and fail the rollback with the same code.
+ */
+export function decideRollback(input: {
+  readonly existing: DeploymentRecord | null;
+  readonly request: RollbackInput;
+  readonly app: AppControl | null;
+  readonly target: ReleaseRecord | null;
+  /** The deployment that built the target (its submission is reused). */
+  readonly origin: DeploymentRecord | null;
+  readonly artifact: ArtifactRecord | null;
+  readonly source: SourceRecord | null;
+  readonly usage: SubmitUsage;
+  readonly deploymentId: string;
+}): RollbackDecision {
+  const { request, app, target } = input;
+  if (!app || app.status === "deleted") throw new DeploymentError("NOT_FOUND");
+  if (!target || target.appId !== request.appId || target.workspaceId !== request.workspaceId)
+    throw new DeploymentError("NOT_FOUND");
+  const submission: DeploymentSubmission | undefined = input.origin
+    ? {
+        ...input.origin.submission,
+        idempotencyKey: rollbackKey(target.releaseId, request.expectedGeneration),
+        expectedGeneration: request.expectedGeneration,
+      }
+    : undefined;
+  const fingerprint = submission ? submissionFingerprint(submission) : "";
+  if (input.existing) {
+    if (
+      input.existing.rollbackOf !== target.releaseId ||
+      input.existing.fingerprint !== fingerprint
+    )
+      throw new DeploymentError("IDEMPOTENCY_CONFLICT");
+    return { replay: true, record: input.existing };
+  }
+  if (app.status === "disabled") throw new DeploymentError("FORBIDDEN");
+  if (request.expectedGeneration !== app.generation) throw new DeploymentError("STALE_GENERATION");
+  const now = request.now.getTime();
+  if (
+    !submission ||
+    input.origin?.appId !== target.appId ||
+    rollbackRefusal(target, app, input.artifact, input.source, now) !== null
+  )
+    throw new DeploymentError("ROLLBACK_INCOMPATIBLE");
+  if (
+    input.usage.activeForApp >= DEPLOYMENT_LIMITS.maxActivePerApp ||
+    input.usage.activeForWorkspace >= DEPLOYMENT_LIMITS.maxActivePerWorkspace
+  )
+    throw new DeploymentError("LIMIT_EXCEEDED");
+  const retainUntil = now + HOSTED_PROFILE.deploymentRetentionDays * DAY;
+  const record: Omit<DeploymentRecord, "revision"> = {
+    workspaceId: request.workspaceId,
+    appId: request.appId,
+    deploymentId: input.deploymentId,
+    idempotencyKey: submission.idempotencyKey,
+    fingerprint,
+    submission,
+    actorId: request.actorId,
+    state: "accepted",
+    stageAttempt: 1,
+    expectedGeneration: request.expectedGeneration,
+    lifecycleFence: app.lifecycleFence,
+    cancellationFence: 0,
+    artifactId: target.artifactId,
+    rollbackOf: target.releaseId,
+    epoch: 1,
+    dueAt: iso(now),
+    crashes: 0,
+    failures: 0,
+    cleanup: false,
+    cleanupAttempts: 0,
+    createdAt: iso(now),
+    updatedAt: iso(now),
+    stageStartedAt: iso(now),
+    deadlineAt: iso(now + DEPLOYMENT_LIMITS.deploymentDeadlineMs),
+    retainUntil: iso(retainUntil),
+  };
+  // Keep what the rollback needs at least as long as the deployment record (as for a deploy); the
+  // sweeps reclaim both afterwards unless the rollback's release pins them.
+  const source = input.source!;
+  const artifact = input.artifact!;
+  return {
+    replay: false,
+    record,
+    source: { ...source, retainUntil: iso(Math.max(Date.parse(source.retainUntil), retainUntil)) },
+    artifact: {
+      ...artifact,
+      retainUntil: iso(Math.max(Date.parse(artifact.retainUntil), retainUntil)),
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -382,6 +593,9 @@ function settled(
     crashes: 0,
     updatedAt: iso(now),
     ...changes,
+    ...(changes.state !== undefined && changes.state !== prior.state
+      ? { stageStartedAt: iso(now) }
+      : {}),
     revision: prior.revision + 1,
   };
   const { leaseToken: _token, leaseUntil: _until, ...rest } = next;
@@ -490,8 +704,8 @@ export function decideClaim(record: DeploymentRecord, now: Date, token: string):
 
 export type StageOutcome =
   /** The stage finished: move to the next stage. */
-  | { readonly kind: "advance"; readonly artifactId?: string }
-  /** Still running (a build): look again after `delayMs`, same attempt. */
+  | { readonly kind: "advance"; readonly artifactId?: string; readonly candidate?: CandidateRef }
+  /** Still running (a build, a provider operation): look again after `delayMs`, same attempt. */
   | { readonly kind: "poll"; readonly delayMs: number }
   /** A transient error while polling: back off, same attempt, bounded by `maxPollFailures`. */
   | { readonly kind: "poll-error"; readonly reason: string }
@@ -499,8 +713,11 @@ export type StageOutcome =
   | { readonly kind: "retry"; readonly reason: string }
   /** Permanent failure with a public code. */
   | { readonly kind: "fail"; readonly code: PublicErrorCode; readonly reason: string }
-  /** Promotion CAS (promoting stage only). */
-  | { readonly kind: "promote"; readonly releaseId: string };
+  /**
+   * Promotion CAS (promoting stage only). M13 carries the registration (route and manifest) the
+   * transaction switches into the catalog; without one the catalog registration is unchanged.
+   */
+  | { readonly kind: "promote"; readonly releaseId: string; readonly registration?: Registration };
 
 export interface CompletionFence {
   readonly workspaceId: string;
@@ -515,7 +732,11 @@ export type CompleteDecision =
       readonly next: DeploymentRecord;
       readonly wake?: undefined;
       /** Store writes these in the same transaction: release, app pointer/generation, pin. */
-      readonly promote: { readonly releaseId: string; readonly generation: number };
+      readonly promote: {
+        readonly releaseId: string;
+        readonly generation: number;
+        readonly registration?: Registration;
+      };
     };
 
 /**
@@ -566,6 +787,7 @@ export function decideComplete(input: {
             failures: 0,
             dueAt: iso(ms),
             ...(outcome.artifactId ? { artifactId: outcome.artifactId } : {}),
+            ...(outcome.candidate ? { candidate: outcome.candidate } : {}),
           },
           ms,
         ),
@@ -609,7 +831,14 @@ export function decideComplete(input: {
         { state: "active", stageAttempt: 1, releaseId: outcome.releaseId, dueAt: iso(ms) },
         ms,
       );
-      return { next, promote: { releaseId: outcome.releaseId, generation: app.generation + 1 } };
+      return {
+        next,
+        promote: {
+          releaseId: outcome.releaseId,
+          generation: app.generation + 1,
+          ...(outcome.registration ? { registration: outcome.registration } : {}),
+        },
+      };
     }
   }
 }
@@ -724,6 +953,150 @@ export function releaseManifest(
   });
 }
 
+/**
+ * Storage schema each known recipe's framework needs. A new recipe ID is added here, never
+ * replaced, so releases built with an earlier recipe stay deployable and rollback targets.
+ */
+export const RECIPE_SCHEMA_VERSIONS: Readonly<Record<string, number>> = Object.freeze({
+  [BUILD_RECIPE.id]: BUILD_RECIPE.storageSchemaVersion,
+});
+/** Storage schema an artifact's framework needs, or undefined for an unknown recipe. */
+export function recipeSchemaVersion(recipe: string): number | undefined {
+  return Object.hasOwn(RECIPE_SCHEMA_VERSIONS, recipe) ? RECIPE_SCHEMA_VERSIONS[recipe] : undefined;
+}
+
+/** The artifact a deployment may promote: its own build, or a rollback's target artifact. */
+export function promotableArtifact(
+  record: DeploymentRecord,
+  artifact: ArtifactRecord | null | undefined,
+): artifact is ArtifactRecord {
+  return (
+    !!artifact &&
+    !artifact.purging &&
+    artifact.state === "admitted" &&
+    !!artifact.imageReference &&
+    artifact.workspaceId === record.workspaceId &&
+    artifact.appId === record.appId &&
+    artifact.artifactId === record.artifactId &&
+    (record.rollbackOf !== undefined || artifact.deploymentId === record.deploymentId)
+  );
+}
+
+/** The catalog namespace (`registration.appId`) of an app: platform data, never a build claim. */
+export function catalogName(app: CatalogApp): string | undefined {
+  return app.name ?? app.registration?.appId;
+}
+
+/**
+ * What the promotion transaction may switch into the catalog. The registration must name the
+ * app's own namespace and route to this deployment's candidate; a reserved app (no registration
+ * yet) needs one. `validate` is the store's registration policy (M04/M06 checks). Returns the
+ * failure reason, or null.
+ */
+export function registrationRefusal(
+  record: DeploymentRecord,
+  app: CatalogApp,
+  registration: Registration | undefined,
+  validate: (registration: Registration) => void,
+): string | null {
+  if (!registration) return app.registration ? null : "REGISTRATION_MISSING";
+  if (registration.appId !== catalogName(app)) return "REGISTRATION_INVALID";
+  if (!record.candidate || registration.endpoint !== record.candidate.endpoint)
+    return "REGISTRATION_INVALID";
+  try {
+    validate(registration);
+  } catch {
+    return "REGISTRATION_INVALID";
+  }
+  return null;
+}
+
+/** The release record a promotion inserts. */
+export function promotedRelease(
+  record: DeploymentRecord,
+  artifact: ArtifactRecord,
+  promote: {
+    readonly releaseId: string;
+    readonly generation: number;
+    readonly registration?: Registration;
+  },
+  schemaVersion: number | undefined,
+  now: Date,
+): ReleaseRecord {
+  return {
+    workspaceId: record.workspaceId,
+    appId: record.appId,
+    releaseId: promote.releaseId,
+    deploymentId: record.deploymentId,
+    artifactId: artifact.artifactId,
+    imageReference: artifact.imageReference!,
+    generation: promote.generation,
+    manifest: releaseManifest(record, artifact, promote.releaseId),
+    createdAt: now.toISOString(),
+    ...(promote.registration ? { registration: promote.registration } : {}),
+    ...(record.candidate ? { candidate: record.candidate } : {}),
+    sourceUploadId: record.submission.source.uploadId,
+    ...(schemaVersion !== undefined ? { schemaVersion } : {}),
+    ...(record.rollbackOf ? { rollbackOf: record.rollbackOf } : {}),
+  };
+}
+
+/**
+ * The catalog after promotion: the active release, the generation step and, in the same write,
+ * the release's route and manifest (M13.a). A reserved app becomes `idle` (dispatchable, woken
+ * on demand); any other state is kept. Runtime state never moves the generation elsewhere.
+ */
+export function promotedCatalog(
+  app: CatalogApp,
+  release: ReleaseRecord,
+  generation: number,
+): CatalogApp {
+  return {
+    ...app,
+    ...(release.registration ? { registration: release.registration } : {}),
+    activeRelease: release.releaseId,
+    state: app.state === "unavailable" && app.activeRelease === null ? "idle" : app.state,
+    generation,
+    revision: app.revision + 1,
+  };
+}
+
+const INACTIVE_RETENTION_MS = HOSTED_PROFILE.inactiveReleaseRetentionDays * DAY;
+/**
+ * A release another promotion replaced: its candidate drains, then the candidate sweep removes
+ * it; the release stays a rollback target for 30 days (MD15), as do its artifact and source.
+ */
+export function replacedRelease(prior: ReleaseRecord, now: Date): ReleaseRecord {
+  const ms = now.getTime();
+  return {
+    ...prior,
+    inactiveSince: iso(ms),
+    drainUntil: iso(ms + DEPLOYMENT_LIMITS.drainMs),
+    retainUntil: iso(ms + INACTIVE_RETENTION_MS),
+  };
+}
+/**
+ * Unpins an artifact or source the replaced release pinned (M12 re-review N1, M13 step 4): it
+ * stays for the inactive release's 30 days and the ordinary sweeps reclaim it afterwards, so the
+ * workspace source quota stops counting it then. Pins held by another release are untouched, and
+ * the new release re-pins what it shares in the same transaction. Null when nothing changes.
+ */
+export function releasedPin<T extends { readonly pinnedBy?: string; readonly retainUntil: string }>(
+  record: T,
+  releaseId: string,
+  now: Date,
+): T | null {
+  if (record.pinnedBy !== releaseId) return null;
+  const { pinnedBy: _pin, ...rest } = record;
+  void _pin;
+  return {
+    ...rest,
+    retainUntil: iso(
+      Math.max(Date.parse(record.retainUntil), now.getTime() + INACTIVE_RETENTION_MS),
+    ),
+  } as unknown as T;
+}
+
 /** Public status: fixed error messages, no reasons, leases or provider names. */
 export function deploymentStatus(record: DeploymentRecord): DeploymentStatus {
   return {
@@ -767,6 +1140,27 @@ export interface DeploymentStore {
     now: Date,
     wake: DeploymentWakeHook,
   ): Promise<DeploymentRecord>;
+  /**
+   * M13 rollback: atomic like a submission (idempotency by target and generation, app and
+   * target checks, retention of the target's artifact and source, insert, wake before commit).
+   */
+  submitRollback(
+    input: RollbackInput,
+    wake: DeploymentWakeHook,
+  ): Promise<{ readonly record: DeploymentRecord; readonly replay: boolean }>;
+  /** The release a deployment promoted, if any (candidate sweep). */
+  releaseForDeployment(
+    workspaceId: string,
+    appId: string,
+    deploymentId: string,
+  ): Promise<ReleaseRecord | null>;
+  /** Records that a replaced release's candidate was removed after its drain. */
+  markCandidateRemoved(
+    workspaceId: string,
+    appId: string,
+    releaseId: string,
+    now: Date,
+  ): Promise<void>;
   cancelDeployment(
     key: { readonly workspaceId: string; readonly appId: string; readonly deploymentId: string },
     cancellationFence: number,

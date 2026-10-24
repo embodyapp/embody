@@ -52,6 +52,7 @@ const STATUS: Record<PublicErrorCode, number> = {
   BUILD_FAILED: 409,
   CHECK_FAILED: 409,
   DEPENDENCY_UNAVAILABLE: 503,
+  ROLLBACK_INCOMPATIBLE: 409,
 };
 const AUDIT_CODE: Partial<Record<PublicErrorCode, EmbodyErrorCode>> = {
   FORBIDDEN: "FORBIDDEN",
@@ -60,6 +61,7 @@ const AUDIT_CODE: Partial<Record<PublicErrorCode, EmbodyErrorCode>> = {
   STALE_GENERATION: "CONFLICT",
   LIMIT_EXCEEDED: "RATE_LIMITED",
   DEPENDENCY_UNAVAILABLE: "DEPENDENCY_ERROR",
+  ROLLBACK_INCOMPATIBLE: "CONFLICT",
 };
 function deadline<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -260,6 +262,42 @@ export function registerDeploymentRoutes(
         return opaque(error);
       });
     });
+    await recover(scope.workspace);
+    return reply.status(result.replay ? 200 : 202).send(deploymentStatus(result.record));
+  });
+
+  // M13 rollback: a fenced deployment of a retained release's artifact (fresh candidate, fresh
+  // checks, same promotion CAS). A target that cannot be rolled back to is refused explicitly.
+  app.post(`${prefix}/rollback`, routeOptions, async (request, reply) => {
+    const scope = authorize(request, "app:rollback");
+    const parsed = AppManagementSchema.safeParse(request.body);
+    if (
+      !parsed.success ||
+      parsed.data.operation !== "rollback" ||
+      parsed.data.workspaceId !== scope.workspace ||
+      parsed.data.appId !== scope.appId
+    )
+      throw new DeploymentError("INVALID_INPUT");
+    const { releaseId, expectedGeneration } = parsed.data;
+    const result = await audited(request, reply, scope, "app.rollback", () =>
+      deadline(
+        deps.store.submitRollback(
+          {
+            workspaceId: scope.workspace,
+            appId: scope.appId,
+            releaseId,
+            expectedGeneration,
+            actorId: scope.principal.actorId,
+            now: deps.clock.now(),
+          },
+          wake,
+        ),
+        timeout,
+      ).catch((error: unknown) => {
+        if (error instanceof ConflictError) throw new DeploymentError("DEPENDENCY_UNAVAILABLE");
+        return opaque(error);
+      }),
+    );
     await recover(scope.workspace);
     return reply.status(result.replay ? 200 : 202).send(deploymentStatus(result.record));
   });

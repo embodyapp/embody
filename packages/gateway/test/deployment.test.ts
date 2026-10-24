@@ -492,7 +492,7 @@ describe("M12 retries, deadlines and the M11 obligations", () => {
     expect(h.stages.created).toBe(1);
   });
 
-  it("a stage that never finishes is bounded: crashed claims become attempts, then a visible failure", async () => {
+  it("a provisioning stage that never finishes fails at the M13 provisioning bound", async () => {
     const h = await harness();
     h.stages.provision = () => new Promise(() => undefined);
     const controller = new DeploymentController({
@@ -505,6 +505,36 @@ describe("M12 retries, deadlines and the M11 obligations", () => {
         sources: h.objects,
         clock: h.clock,
       }),
+      stages: h.stages,
+      clock: h.clock,
+      handlerDeadlineMs: 20,
+    });
+    const record = await h.submit();
+    const started = h.clock.now().getTime();
+    await drive(controller, h.queue, h.clock, { before: h.completeBuilds });
+    const final = await h.reload(record);
+    expect(final).toMatchObject({
+      state: "failed",
+      error: "DEPENDENCY_UNAVAILABLE",
+      reason: "PROVISION_TIMEOUT",
+    });
+    // The first claim past the 15-minute stage bound fails it (at most one lease later).
+    expect(Date.parse(final!.updatedAt) - started).toBeLessThanOrEqual(
+      DEPLOYMENT_LIMITS.provisionStageMs + DEPLOYMENT_LIMITS.leaseMs + 2000 + 30_000,
+    );
+  });
+
+  it("a stage that never finishes is bounded: crashed claims become attempts, then a visible failure", async () => {
+    const h = await harness();
+    // A build start that never returns (the build stage has no stage-local bound of its own).
+    const controller = new DeploymentController({
+      store: h.store,
+      queue: h.queue,
+      builds: {
+        start: () => new Promise(() => undefined),
+        settle: (artifact) => Promise.resolve(artifact),
+        abandon: (artifact) => Promise.resolve(artifact),
+      },
       stages: h.stages,
       clock: h.clock,
       handlerDeadlineMs: 20,

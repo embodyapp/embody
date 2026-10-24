@@ -116,8 +116,10 @@ export function createWorkspaceGateway(options: WorkspaceGatewayOptions) {
       if (!snapshot) throw new UnauthenticatedError();
       const apps = snapshot.apps
         .filter(
-          (app) =>
+          (app): app is CatalogApp & { registration: NonNullable<CatalogApp["registration"]> } =>
             app.state !== "deleted" &&
+            // Reserved before its first release (M13): nothing to discover or dispatch yet.
+            app.registration !== null &&
             credential.grants.some((grant) => hasPermission(grant, app, "app:call")),
         )
         .map((app) => ({

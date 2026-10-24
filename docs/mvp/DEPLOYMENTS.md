@@ -26,9 +26,9 @@ States, attempts and delays are the [M02 contract](./CONTRACTS.md#durability-ret
 | `accepted` | none | `validating` |
 | `validating` | `verifySubmissionSource` (M10): verified, unexpired, same app, digest and size | `building`, or `failed INVALID_INPUT` |
 | `building` | attempt N: `BuildAdmission.start` once (artifact record per attempt), then `settle` every 15 s | `provisioning` (admitted), next attempt (`DEPENDENCY_UNAVAILABLE`), `failed` (any other rejection) |
-| `provisioning` | `stages.provision` (M13): candidate from the admitted digest, named and labelled from platform records | `checking`, retry, or `failed` |
-| `checking` | `stages.check` (M13): readiness and smoke | `promoting`, retry, or `failed CHECK_FAILED` |
-| `promoting` | promotion CAS (below) | `active`, or `failed STALE_GENERATION` |
+| `provisioning` | `stages.provision` (M13, [RELEASES](./RELEASES.md#provisioning-step-1)): app identity, database and credential, the next migration, then the candidate from the admitted digest, named and labelled from platform records; `pending` steps poll every 5 s, bounded at 15 minutes (`PROVISION_TIMEOUT`) | `checking`, retry, or `failed` |
+| `checking` | `stages.check` (M13): candidate ownership and digest, provider readiness, `/health` ready, registration valid; bounded at 10 minutes (`READINESS_TIMEOUT`) | `promoting`, retry, or `failed CHECK_FAILED` |
+| `promoting` | `stages.promote` (M13: re-read manifest, workflow versions in use), then the promotion CAS (below) | `active`, or `failed STALE_GENERATION`/`CHECK_FAILED` |
 
 Public errors are the fixed M02 messages. The operator-facing `reason` (for example `BUILD_LOCKFILE_REJECTED`, `WORKER_LOST`, `DEADLINE_EXCEEDED`) is stored on the record and never returned by the API. Rejected builds map to `INVALID_INPUT` (source), `UNSUPPORTED_PROFILE` (profile or capability mismatch), `LIMIT_EXCEEDED` (output size), `CANCELLED`, or `BUILD_FAILED`.
 
@@ -98,7 +98,7 @@ The promoting step's completion is one transaction that locks the workspace row 
 - pins the artifact and the deployment's source to the release (`pinnedBy`), so retention never purges them (MD15: an active release keeps its source indefinitely). If the source is gone (a purge tombstone), the deployment fails `DEPENDENCY_UNAVAILABLE` (`SOURCE_MISSING`) instead of promoting;
 - marks the deployment `active`.
 
-Two deployments of one app that both reach promotion: one wins, the other fails `STALE_GENERATION`. A late or cancelled worker fails its fence. **M13 extends this same transaction** with the candidate's route and manifest switch (M13.a); M12 does not change the catalog registration.
+Two deployments of one app that both reach promotion: one wins, the other fails `STALE_GENERATION`. A late or cancelled worker fails its fence. **M13 extends this same transaction** ([RELEASES](./RELEASES.md#promotion-transaction)): the candidate's route and manifest are switched into the catalog in the same row, the replaced release drains and its artifact and source pins are released to their 30-day inactive retention, and a reserved app is registered by its first release. A rollback (`POST …/apps/:app/rollback`) is a deployment of a retained release's artifact through the same stages and CAS.
 
 ## Cancellation and cleanup (step 4)
 
@@ -180,7 +180,7 @@ Faults are rows in a fixture table the qualification worker reads (`m12_fixture_
 
 ## Not yet proven / later tasks
 
-- **M13:** real provisioning/check stages (Cloud Run candidate, migrations, smoke), the route/manifest switch inside the promotion transaction, rollback, unpinning replaced releases (artifact and source; a source shared by several releases is pinned by the newest, so unpinning must check that no retained release still references it).
+- **M13** (in review, [RELEASES](./RELEASES.md)): provisioning and check stages, the route/manifest switch inside the promotion transaction, rollback, unpinning replaced releases (only the active release pins; a shared source is re-pinned by the new release in the same transaction), the candidate sweep (review finding 1's backstop; the controller also runs `abandonIfEnded` when a timed-out stage settles).
 - **M14:** CLI `deploy`/`status`/cancel over these routes.
 - **M16:** schedules retention: deployments and key bindings expire after 90 days (`retainUntil`); deletes deployment and release rows past retention; schedules the source, artifact and orphan sweeps. Deployment-referenced source already leaves the quota and the sweep's skip set when its retention ends (no unpinning needed).
 - **M21:** event relay tasks on the shared queue path.

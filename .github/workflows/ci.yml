@@ -58,6 +58,7 @@ jobs:
       EMBODY_POSTGRES_OTHER_URL: postgresql://embody_other:fixture-only-other@127.0.0.1:5432/embody_other
       EMBODY_PLATFORM_URL: postgresql://embody_platform_runtime:fixture-only-platform-runtime@127.0.0.1:5432/embody_platform
       EMBODY_PLATFORM_MIGRATION_URL: postgresql://embody_platform_migrator:fixture-only-platform-migrator@127.0.0.1:5432/embody_platform
+      EMBODY_PROVISIONER_URL: postgresql://embody_provisioner:fixture-only-provisioner@127.0.0.1:5432/postgres
     services:
       postgres:
         image: postgres:16
@@ -110,6 +111,10 @@ jobs:
           EMBODY_POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
       - name: Mandatory durable deployment controller, real-PostgreSQL crash matrix and task ingress (zero skips)
         run: pnpm test:m12
+        env:
+          EMBODY_POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
+      - name: Mandatory provision/migrate/promote/rollback, per-app database and real-PostgreSQL crash matrix (zero skips)
+        run: pnpm test:m13
         env:
           EMBODY_POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
       - name: Mandatory isolated build recipe, sandbox adversaries and artifact admission on Docker (zero skips)

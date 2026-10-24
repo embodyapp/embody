@@ -84,7 +84,7 @@ Tags in the builds repository are unique artifact IDs and are **never deployed**
 ## Obligations for later tasks
 
 - **M12** (done, [DEPLOYMENTS](./DEPLOYMENTS.md)) serializes each stage attempt under a deployment lease before calling `start`, settles every 15 s, treats a `DEPENDENCY_UNAVAILABLE` rejection (including an overdue `settle`'s, review N2) as the next attempt, and cancels the builds of cancelled or failed deployments with `BuildAdmission.abandon` (rejection code `CANCELLED`). While a record is `building` only its build ID and retention fields may change (review N3).
-- **M13** must not treat `manifest.appId`/`appVersion` as identity (they are customer claims); the platform app ID is the record's `appId`. The artifact keeps only `catalogDigest`: M13 re-reads the retained `manifest.json` and checks it against `manifestDigest` to obtain the catalog for promotion.
+- **M13** (done in [RELEASES](./RELEASES.md)) does not treat `manifest.appId`/`appVersion` as identity: the namespace is the catalog's name, and a build whose `appId` differs is refused (`APP_NAME_MISMATCH`, the host verifies tokens against its own name). It re-reads the retained `manifest.json`, checks it against `manifestDigest` and `catalogDigest`, and switches that catalog in at promotion. Binary Authorization stays a hardening option, not enabled.
 - **M15** serves `BuildAdmission.log` (bounded and redacted; an oversized log is truncated, never refused).
 
 ## Logs

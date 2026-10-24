@@ -25,7 +25,7 @@ import type {
   DurableRepository,
   TransactionStatus,
 } from "./index.js";
-import { normalizeTimestamp, STORAGE_MIGRATIONS } from "./index.js";
+import { hostedSchemaCompatible, normalizeTimestamp, STORAGE_MIGRATIONS } from "./index.js";
 
 type Row = Record<string, unknown>;
 type Client = Pool | PoolClient;
@@ -846,8 +846,10 @@ export class PostgresStorage implements StorageConnection {
       );
       const expected = STORAGE_MIGRATIONS.map((migration) => migration.version);
       if (
-        result.rows.length !== expected.length ||
-        result.rows.some((row, index) => row.version !== expected[index])
+        !hostedSchemaCompatible(
+          result.rows.map((row) => row.version),
+          expected,
+        )
       )
         throw new Error(
           "PostgreSQL storage migrations must be applied by maintenance identity before hosted startup",

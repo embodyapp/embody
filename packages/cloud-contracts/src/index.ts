@@ -134,6 +134,7 @@ export const PublicErrorCodeSchema = z.enum([
   "BUILD_FAILED",
   "CHECK_FAILED",
   "DEPENDENCY_UNAVAILABLE",
+  "ROLLBACK_INCOMPATIBLE",
 ]);
 const publicMessages: Record<z.infer<typeof PublicErrorCodeSchema>, string> = {
   INVALID_INPUT: "Invalid deployment request.",
@@ -147,6 +148,8 @@ const publicMessages: Record<z.infer<typeof PublicErrorCodeSchema>, string> = {
   BUILD_FAILED: "Build failed; inspect authorized deployment logs.",
   CHECK_FAILED: "Release readiness check failed.",
   DEPENDENCY_UNAVAILABLE: "Deployment dependency unavailable; retry status lookup.",
+  ROLLBACK_INCOMPATIBLE:
+    "Rollback target is no longer retained or is incompatible with current data or workflows.",
 };
 export const PublicErrorSchema = z
   .strictObject({

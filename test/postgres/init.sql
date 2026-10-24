@@ -5,6 +5,8 @@ CREATE ROLE embody_runtime LOGIN PASSWORD 'fixture-only-runtime' NOSUPERUSER NOC
 CREATE ROLE embody_other LOGIN PASSWORD 'fixture-only-other' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
 CREATE ROLE embody_platform_migrator LOGIN PASSWORD 'fixture-only-platform-migrator' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
 CREATE ROLE embody_platform_runtime LOGIN PASSWORD 'fixture-only-platform-runtime' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+-- M13 app provisioner: creates per-app databases and roles; no superuser, no BYPASSRLS, no data access of its own.
+CREATE ROLE embody_provisioner LOGIN PASSWORD 'fixture-only-provisioner' NOSUPERUSER CREATEDB CREATEROLE NOINHERIT NOBYPASSRLS;
 CREATE DATABASE embody_platform OWNER embody_platform_migrator;
 REVOKE ALL ON DATABASE embody_platform FROM PUBLIC;
 GRANT CONNECT ON DATABASE embody_platform TO embody_platform_runtime;

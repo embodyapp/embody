@@ -43,6 +43,12 @@ export const BUILD_RECIPE = Object.freeze({
     cpus: 2,
     openFiles: 4_096,
   }),
+  /**
+   * Storage schema (highest `@embody/storage` migration) of the framework this recipe bundles.
+   * Every artifact built with the recipe needs exactly this schema applied before it boots
+   * (M13 migration runner); a newer recipe is a new ID.
+   */
+  storageSchemaVersion: 6,
   /** Framework scope served only from the recipe's bundled packages, never a public registry. */
   frameworkScope: "@embody",
   publicRegistry: "https://registry.npmjs.org/",

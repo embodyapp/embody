@@ -18,13 +18,18 @@ import {
   deploymentTaskSchema,
   followUpTaskName,
   newReleaseId,
+  promotableArtifact,
+  type CandidateRef,
   type DeploymentRecord,
   type DeploymentStore,
   type DeploymentTaskBody,
   type DeploymentWakeHook,
   type PublicErrorCode,
+  type ReleaseRecord,
   type StageOutcome,
 } from "./deployment.js";
+import type { Registration } from "./index.js";
+import { registerWakeRoute, type WakeRouteOptions } from "./wake-forwarder.js";
 
 /**
  * M12 deployment controller. It runs in the deployment worker, not in the gateway: every step is
@@ -34,15 +39,40 @@ import {
  * and commits the outcome under the claim's fence together with the next wake.
  */
 
-/** What a provisioning or check stage reports. M13 implements these against Cloud Run. */
+/**
+ * What a provisioning or check stage reports. M13 implements these against Cloud Run. `pending`
+ * means a provider operation is still running: the controller looks again after
+ * `DEPLOYMENT_LIMITS.stagePollMs` in the same attempt, bounded by the stage's own limit.
+ */
 export type StageResult =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly retryable: boolean; readonly reason: string };
+  | { readonly ok: true; readonly candidate?: CandidateRef }
+  | { readonly ok: false; readonly pending: true; readonly reason: string }
+  | {
+      readonly ok: false;
+      readonly pending?: false;
+      readonly retryable: boolean;
+      readonly reason: string;
+      /** Public code of a permanent failure; the stage's default otherwise. */
+      readonly code?: PublicErrorCode;
+    };
+/** What the promoting step reports before the promotion transaction (M13). */
+export type PromoteResult =
+  | { readonly ok: true; readonly registration?: Registration }
+  | {
+      readonly ok: false;
+      readonly retryable: boolean;
+      readonly reason: string;
+      readonly code?: PublicErrorCode;
+    };
 export interface DeploymentStageContext {
   readonly deployment: DeploymentRecord;
   /** The admitted artifact: deploy only `imageReference` (digest form). */
   readonly artifact: ArtifactRecord;
   readonly signal: AbortSignal;
+  /** M13 rollback: the retained release being rolled back to. */
+  readonly rollback?: ReleaseRecord;
+  /** M13: the app's active release before this promotion, if any. */
+  readonly active?: ReleaseRecord;
 }
 /**
  * Provisioning and readiness checks. Implementations must be idempotent: resources are named and
@@ -52,8 +82,18 @@ export interface DeploymentStageContext {
 export interface DeploymentStages {
   provision(context: DeploymentStageContext): Promise<StageResult>;
   check(context: DeploymentStageContext): Promise<StageResult>;
+  /**
+   * M13 promoting step, outside the promotion transaction: re-reads and verifies the release
+   * manifest and checks workflow versions in use. Its registration is switched into the catalog
+   * by the transaction. Absent: the catalog registration is unchanged (M12 behaviour).
+   */
+  promote?(context: DeploymentStageContext): Promise<PromoteResult>;
   /** Removes resources this deployment created after it failed or was cancelled. Verifies ownership. */
   abandon?(deployment: DeploymentRecord): Promise<void>;
+}
+/** M13: removes drained and orphaned candidates (ownership-checked); bounded per pass. */
+export interface CandidateSweeper {
+  sweep(now: Date): Promise<unknown>;
 }
 
 export interface DeploymentControllerOptions {
@@ -63,6 +103,12 @@ export interface DeploymentControllerOptions {
   readonly queue: TaskQueue<DeploymentTaskBody>;
   readonly builds: Pick<BuildAdmission, "start" | "settle" | "abandon">;
   readonly stages: DeploymentStages;
+  /**
+   * Runs after delivered tasks (at most once per `sweepIntervalMs` per process) and on the
+   * operator reconcile: no periodic timer, so an idle platform stays at zero.
+   */
+  readonly sweeper?: CandidateSweeper;
+  readonly sweepIntervalMs?: number;
   readonly clock?: { now(): Date };
   /** Test seam; production uses `DEPLOYMENT_LIMITS.handlerDeadlineMs`. Must stay below the lease. */
   readonly handlerDeadlineMs?: number;
@@ -79,6 +125,8 @@ export interface DeploymentLogRecord {
   readonly state?: string;
   readonly attempt?: number;
   readonly durationMs: number;
+  /** Bounded operator detail (e.g. `HANDLER_ERROR:pg-42501`); never payloads or messages. */
+  readonly detail?: string;
 }
 export interface TaskResult {
   readonly status: 200 | 400 | 503;
@@ -107,16 +155,40 @@ export function deploymentWakeHook(queue: TaskQueue<DeploymentTaskBody>): Deploy
   };
 }
 
-class DeadlineError extends Error {}
+/**
+ * A bounded, payload-free tag for a stage error: a PostgreSQL SQLSTATE, a provider HTTP status,
+ * a migration refusal reason, or the error class name.
+ */
+export function errorTag(error: unknown): string {
+  const value = error as { code?: unknown; name?: unknown; message?: unknown; reason?: unknown };
+  if (typeof value?.code === "string" && /^[0-9A-Z]{5}$/.test(value.code))
+    return `pg-${value.code}`;
+  if (typeof value?.reason === "string" && /^[A-Z_]{1,40}$/.test(value.reason)) return value.reason;
+  const status =
+    typeof value?.message === "string"
+      ? /\b(?:returned |failed \()(\d{3})\b/.exec(value.message)
+      : null;
+  if (status) return `provider-${status[1]}`;
+  const name =
+    typeof value?.name === "string" && /^[A-Za-z]{1,40}$/.test(value.name) ? value.name : "Error";
+  return name;
+}
+
+class DeadlineError extends Error {
+  public constructor(public readonly work: Promise<unknown>) {
+    super("Handler deadline exceeded");
+  }
+}
 function withDeadline<T>(work: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
+  const running = work(controller.signal);
   return Promise.race([
-    work(controller.signal),
+    running,
     new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
         controller.abort();
-        reject(new DeadlineError());
+        reject(new DeadlineError(running));
       }, ms);
       timer.unref();
     }),
@@ -136,6 +208,7 @@ function buildFailure(code: BuildErrorCode): PublicErrorCode {
 export class DeploymentController {
   private readonly clock: { now(): Date };
   private readonly wake: DeploymentWakeHook;
+  private lastSweep = Number.NEGATIVE_INFINITY;
   public constructor(private readonly options: DeploymentControllerOptions) {
     this.clock = options.clock ?? { now: () => new Date() };
     this.wake = deploymentWakeHook(options.queue);
@@ -157,6 +230,8 @@ export class DeploymentController {
     }));
     // MD12 recovery: any delivered task also re-wakes overdue deployments (bounded, best effort).
     await this.reconcile(DEPLOYMENT_LIMITS.recoveryBatch).catch(() => undefined);
+    // M13: drained and orphaned candidates go with ordinary work, never on a timer.
+    await this.sweep(false).catch(() => undefined);
     this.log({
       workspaceId: task.workspaceId,
       appId: task.appId,
@@ -236,11 +311,31 @@ export class DeploymentController {
       // Over the handler deadline the stage may still be running: do not complete. The lease
       // (longer than the deadline plus the longest provider call chain) keeps every other
       // worker out until it expires, and the claim's lease wake then reclaims the deployment.
-      if (error instanceof DeadlineError) return { status: 200, outcome: "timed-out" };
+      if (error instanceof DeadlineError) {
+        // M12 review finding 1: if the deployment was cancelled meanwhile, a resource this stage
+        // creates late is removed once it settles. The candidate sweep is the backstop when the
+        // instance is throttled or stopped after the response.
+        void error.work
+          .catch(() => undefined)
+          .then(() => this.abandonIfEnded(record))
+          .catch(() => undefined);
+        return { status: 200, outcome: "timed-out" };
+      }
+      // Operator-facing only: a bounded tag (SQLSTATE, provider status or error class), never a
+      // message, URL or payload, so a failing stage is diagnosable from the record and the log.
+      const reason = `HANDLER_ERROR:${errorTag(error)}`;
+      this.log({
+        workspaceId: record.workspaceId,
+        appId: record.appId,
+        deploymentId: record.deploymentId,
+        state: record.state,
+        attempt: record.stageAttempt,
+        outcome: "stage-error",
+        detail: reason,
+        durationMs: 0,
+      });
       outcome =
-        record.state === "building"
-          ? { kind: "poll-error", reason: "HANDLER_ERROR" }
-          : { kind: "retry", reason: "HANDLER_ERROR" };
+        record.state === "building" ? { kind: "poll-error", reason } : { kind: "retry", reason };
     }
     try {
       const next = await this.options.store.completeDeployment(
@@ -273,33 +368,55 @@ export class DeploymentController {
         }
         return { kind: "advance" };
       case "building":
+        // A rollback deploys its target's admitted artifact: nothing to build.
+        if (record.rollbackOf) return { kind: "advance" };
         return this.build(record);
       case "provisioning":
-      case "checking": {
-        const artifact = record.artifactId
-          ? await this.options.store.artifact(record.workspaceId, record.appId, record.artifactId)
-          : null;
-        if (
-          !artifact ||
-          artifact.state !== "admitted" ||
-          artifact.deploymentId !== record.deploymentId
-        )
-          return { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: "ARTIFACT_MISSING" };
-        const context = { deployment: record, artifact, signal };
+      case "checking":
+      case "promoting": {
+        const context = await this.context(record, signal);
+        if (!context)
+          return {
+            kind: "fail",
+            code: record.rollbackOf ? "ROLLBACK_INCOMPATIBLE" : "DEPENDENCY_UNAVAILABLE",
+            reason: "ARTIFACT_MISSING",
+          };
+        if (record.state === "promoting") {
+          const result = (await this.options.stages.promote?.(context)) ?? { ok: true };
+          if (result.ok)
+            return {
+              kind: "promote",
+              releaseId: newReleaseId(),
+              ...(result.registration ? { registration: result.registration } : {}),
+            };
+          if (result.retryable) return { kind: "retry", reason: result.reason };
+          return { kind: "fail", code: result.code ?? "CHECK_FAILED", reason: result.reason };
+        }
+        // M13 stage bounds: a candidate that never becomes ready fails visibly.
+        const limit =
+          record.state === "provisioning"
+            ? DEPLOYMENT_LIMITS.provisionStageMs
+            : DEPLOYMENT_LIMITS.checkStageMs;
+        if (now.getTime() - Date.parse(record.stageStartedAt ?? record.createdAt) > limit)
+          return record.state === "provisioning"
+            ? { kind: "fail", code: "DEPENDENCY_UNAVAILABLE", reason: "PROVISION_TIMEOUT" }
+            : { kind: "fail", code: "CHECK_FAILED", reason: "READINESS_TIMEOUT" };
         const result =
           record.state === "provisioning"
             ? await this.options.stages.provision(context)
             : await this.options.stages.check(context);
-        if (result.ok) return { kind: "advance" };
+        if (result.ok)
+          return { kind: "advance", ...(result.candidate ? { candidate: result.candidate } : {}) };
+        if (result.pending) return { kind: "poll", delayMs: DEPLOYMENT_LIMITS.stagePollMs };
         if (result.retryable) return { kind: "retry", reason: result.reason };
         return {
           kind: "fail",
-          code: record.state === "checking" ? "CHECK_FAILED" : "DEPENDENCY_UNAVAILABLE",
+          code:
+            result.code ??
+            (record.state === "checking" ? "CHECK_FAILED" : "DEPENDENCY_UNAVAILABLE"),
           reason: result.reason,
         };
       }
-      case "promoting":
-        return { kind: "promote", releaseId: newReleaseId() };
       default:
         throw new TypeError(`No stage runs in ${record.state}`);
     }
@@ -343,6 +460,34 @@ export class DeploymentController {
     const code = artifact.error ?? "BUILD_FAILED";
     if (RETRYABLE_BUILD_ERRORS.has(code)) return { kind: "retry", reason: `BUILD_${code}` };
     return { kind: "fail", code: buildFailure(code), reason: `BUILD_${code}` };
+  }
+
+  /** The artifact to deploy (its own build, or a rollback target's) and the releases around it. */
+  private async context(
+    record: DeploymentRecord,
+    signal: AbortSignal,
+  ): Promise<DeploymentStageContext | null> {
+    const { store } = this.options;
+    const artifact = record.artifactId
+      ? await store.artifact(record.workspaceId, record.appId, record.artifactId)
+      : null;
+    if (!promotableArtifact(record, artifact)) return null;
+    const rollback = record.rollbackOf
+      ? await store.release(record.workspaceId, record.appId, record.rollbackOf)
+      : undefined;
+    if (record.rollbackOf && (!rollback || rollback.artifactId !== artifact.artifactId))
+      return null;
+    const status = await store.appStatus(record.workspaceId, record.appId);
+    const active = status?.activeReleaseId
+      ? await store.release(record.workspaceId, record.appId, status.activeReleaseId)
+      : null;
+    return {
+      deployment: record,
+      artifact,
+      signal,
+      ...(rollback ? { rollback } : {}),
+      ...(active ? { active } : {}),
+    };
   }
 
   /** Cancels running builds of every attempt and removes provisioned candidates (ownership-checked). */
@@ -391,6 +536,17 @@ export class DeploymentController {
    * window. Runs after every delivered task and every authenticated deployment request; there is
    * no periodic sweep, so an idle platform stays at zero.
    */
+  /** Runs the candidate sweep, at most once per interval unless forced (operator reconcile). */
+  public async sweep(force: boolean): Promise<void> {
+    const sweeper = this.options.sweeper;
+    if (!sweeper) return;
+    const now = this.clock.now();
+    const interval = this.options.sweepIntervalMs ?? DEPLOYMENT_LIMITS.recoveryGraceMs;
+    if (!force && now.getTime() - this.lastSweep < interval) return;
+    this.lastSweep = now.getTime();
+    await sweeper.sweep(now);
+  }
+
   public async reconcile(limit: number, workspaceId?: string): Promise<{ readonly woken: number }> {
     const now = this.clock.now();
     const overdue = await this.options.store.overdueDeployments(now, limit, workspaceId);
@@ -442,6 +598,8 @@ export interface DeploymentWorkerOptions {
   readonly controller: DeploymentController;
   /** Accepts only the controller queue's invoker identity for the worker's task audience. */
   readonly verifier: PlatformInvokerVerifier;
+  /** M13: the stable per-app wake route of hosted durable apps (see `wake-forwarder.ts`). */
+  readonly wake?: WakeRouteOptions;
 }
 const TASK_ROUTES = new Set(["/_embody/tasks/deployment", "/_embody/tasks/reconcile"]);
 /**
@@ -461,6 +619,7 @@ export function createDeploymentWorker(options: DeploymentWorkerOptions): Fastif
       await reply.status(401).send({ error: "unauthenticated" });
     }
   });
+  if (options.wake) registerWakeRoute(app, options.wake);
   app.post("/_embody/tasks/deployment", async (request, reply) => {
     const result = await options.controller.handle(request.body);
     if (result.retryAfterSeconds !== undefined)
@@ -469,6 +628,7 @@ export function createDeploymentWorker(options: DeploymentWorkerOptions): Fastif
   });
   app.post("/_embody/tasks/reconcile", async () => {
     const { woken } = await options.controller.reconcile(DEPLOYMENT_LIMITS.recoveryBatch * 10);
+    await options.controller.sweep(true).catch(() => undefined);
     return { woken };
   });
   app.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {

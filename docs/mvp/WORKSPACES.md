@@ -57,6 +57,7 @@ Runtime startup: `GATEWAY_PROFILE=hosted`, `GATEWAY_PLATFORM_DATABASE_URL` (plat
 
 ## Atomicity, discovery, freshness and failures
 
+- **M13 reservation:** an app may exist before its first release with a `name` (its namespace), `registration: null`, no active release and state `unavailable`; it is not discoverable or dispatchable, and its first promotion writes the registration ([RELEASES](./RELEASES.md#first-deploy-and-the-catalog-m13a)). Promotion is the only catalog write M13 adds; release lifecycle, pins and provider state never go through a generation-bumping write, so they cannot fail in-flight deployments `STALE_GENERATION`. Later tasks writing runtime state (`idle`/`ready`/`unavailable`) must not bump the generation either.
 - `null` expected revision means create only; a positive expected revision means exact CAS update. Invalid/stale revisions conflict without changing data.
 - App writes atomically update registration/active release/state, app revision, promotion generation and workspace revision. Every app write advances generation (conservative invalidation; never decrement/reset). Credentials have separate revisions; successful credential writes also advance workspace revision.
 - PostgreSQL locks the workspace row per mutation and commits all changes in one transaction. Duplicate identity/name/hash and stale CAS roll back, including the workspace revision. Snapshot reads use a single statement for a consistent workspace revision/catalog pair. Memory operations are atomic and clone input/output values.
