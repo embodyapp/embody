@@ -15,18 +15,9 @@
     "skipped": 0
   },
   "images": [],
-  "suites": [
-    "m13"
-  ],
+  "suites": ["m13"],
   "releaseGate": false,
-  "pendingSuites": [
-    "m14",
-    "m15",
-    "m16",
-    "m17",
-    "m20",
-    "m21"
-  ],
+  "pendingSuites": ["m14", "m15", "m16", "m17", "m20", "m21"],
   "m13": {
     "pass": true,
     "runId": "50ccfd",
