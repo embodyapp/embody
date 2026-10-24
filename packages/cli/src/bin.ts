@@ -25,7 +25,7 @@ if (process.argv[2] === "dev") {
   );
   await waitForAbort();
   await watcher.close();
-} else if (process.argv[2] === "mcp") {
+} else if (process.argv[2] === "mcp" && process.argv[3] !== "setup") {
   const args = process.argv.slice(3);
   if (args.length === 1 && args[0] === "--help") {
     console.error("Usage: embody mcp --url <endpoint> [--token <token>]");

@@ -25,6 +25,7 @@ import {
 import {
   DEPLOYMENT_LIMITS,
   DeploymentError,
+  appControl,
   deploymentStatus,
   type DeploymentStore,
   type DeploymentTaskBody,
@@ -206,6 +207,37 @@ export function registerDeploymentRoutes(
     return id;
   };
 
+  // M14: the apps this credential may read, from the request's authoritative catalog snapshot
+  // (no app is contacted). Apps the caller holds no `app:read` grant for are never listed.
+  app.get("/v1/workspaces/:workspace/apps", routeOptions, async (request, reply) => {
+    const { workspace } = request.params as { workspace: string };
+    const { credential, catalog } = deps.current();
+    if (credential.workspaceId !== workspace) throw new UnauthenticatedError();
+    const apps = catalog
+      .filter(
+        (entry) =>
+          entry.state !== "deleted" &&
+          credential.grants.some(
+            (grant) =>
+              grant.workspaceId === workspace &&
+              hasPermission(grant, { workspaceId: workspace, appId: entry.appId }, "app:read"),
+          ),
+      )
+      .map((entry) => ({ entry, status: appControl(entry)! }))
+      .sort((a, b) => (a.entry.appId < b.entry.appId ? -1 : 1))
+      .map(({ entry, status }) => ({
+        version: 1 as const,
+        workspaceId: workspace,
+        appId: entry.appId,
+        ...(status.name !== undefined ? { name: status.name } : {}),
+        generation: status.generation,
+        lifecycleFence: status.lifecycleFence,
+        status: status.status,
+        activeReleaseId: status.activeReleaseId,
+      }));
+    return reply.status(200).send({ version: 1, workspaceId: workspace, apps });
+  });
+
   app.get(prefix, routeOptions, async (request, reply) => {
     const scope = authorize(request, "app:read");
     const status = await deadline(
@@ -217,6 +249,7 @@ export function registerDeploymentRoutes(
       version: 1,
       workspaceId: scope.workspace,
       appId: scope.appId,
+      ...(status.name !== undefined ? { name: status.name } : {}),
       generation: status.generation,
       lifecycleFence: status.lifecycleFence,
       status: status.status,

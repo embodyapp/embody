@@ -181,7 +181,7 @@ Faults are rows in a fixture table the qualification worker reads (`m12_fixture_
 ## Not yet proven / later tasks
 
 - **M13** (in review, [RELEASES](./RELEASES.md)): provisioning and check stages, the route/manifest switch inside the promotion transaction, rollback, unpinning replaced releases (only the active release pins; a shared source is re-pinned by the new release in the same transaction), the candidate sweep (review finding 1's backstop; the controller also runs `abandonIfEnded` when a timed-out stage settles).
-- **M14:** CLI `deploy`/`status`/cancel over these routes.
+- **M14** (in progress, [CLI](./CLI.md)): CLI `deploy`, `deployments status|cancel` and `rollback` over these routes.
 - **M16:** schedules retention: deployments and key bindings expire after 90 days (`retainUntil`); deletes deployment and release rows past retention; schedules the source, artifact and orphan sweeps. Deployment-referenced source already leaves the quota and the sweep's skip set when its retention ends (no unpinning needed).
 - **M21:** event relay tasks on the shared queue path.
 - **Residual risks:** a worker that dies after starting a build but before recording the artifact's build ID leaves at most one build running to its 600 s provider timeout (adopted on the next claim). The submission transaction holds the workspace lock while it enqueues (≤ 5 s), so submissions in one workspace serialize.

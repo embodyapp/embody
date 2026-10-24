@@ -29,7 +29,17 @@ Usage:
   embody <appId> <entity> delete <id>
   embody <appId> <action> [--flags] [--json]
   embody mcp --url <endpoint> [--token <token>]
+
+Hosted workspaces (deploy and control, M14):
+  embody deploy [dir] --app <name|app_id> [--no-wait] [--wait-timeout <s>] [--retry]
+  embody deployments status <dep_id> --app <name|app_id> [--wait]
+  embody deployments cancel <dep_id> --app <name|app_id>
+  embody rollback <name|app_id> <rel_id> [--no-wait]
+  embody apps status [name|app_id]
+  embody mcp setup [--app <name>] [--write <file>]
 ```
+
+The hosted commands, the `embody.hosted` declaration, workspace URL forms, JSON output and the supported MCP client are documented in the [hosted CLI guide](../mvp/CLI.md).
 
 ---
 
@@ -134,6 +144,8 @@ embody ops bulkComplete --json '{"taskIds": ["id1", "id2"]}'
 | `--profile <name>` | `EMBODY_PROFILE` | `"default"` | Configuration profile to load from `~/.config/embody/config.json`. |
 | `--output <format>` | *None* | `"table"` | Output format: `"table"` or `"json"`. |
 | `--json` | *None* | `false` | Instructs the CLI to read input arguments as raw JSON from stdin or argument. |
+| `--request-timeout <s>` | `EMBODY_REQUEST_TIMEOUT` | `90` | Per-request deadline; a timeout explains cold starts and, for writes, that the outcome is unknown. |
+| `--workspace <ws>` (hosted commands) | `EMBODY_WORKSPACE` | from the URL | Workspace for a root gateway URL; a profile may also carry `workspace`. |
 
 ---
 
@@ -150,6 +162,10 @@ The Embody CLI uses standardized exit codes so scripts and agents can reliably h
 | `4` | `EXIT.forbidden` | Authorization failed (insufficient role or scope). |
 | `5` | `EXIT.notFound` | Requested entity ID or app not found. |
 | `6` | `EXIT.remote` | Error returned by downstream host. |
-| `7` | `EXIT.unavailable` | Gateway or host is unreachable or restarting. |
+| `7` | `EXIT.unavailable` | Gateway or host is unreachable, restarting, timed out or rate limited (retry reads; a write's outcome is unknown). |
+| `8` | `EXIT.deploymentFailed` | A deployment the command followed ended `failed`. |
+| `9` | `EXIT.deploymentCancelled` | A deployment the command followed ended `cancelled`. |
+| `10` | `EXIT.waitTimeout` | `--wait-timeout` elapsed; the deployment continues on the server. |
+| `130` | `EXIT.interrupted` | Ctrl-C: local waiting stopped; nothing was cancelled on the server. |
 
 Next: **[Web Inspector →](./02-dev-inspector.md)**

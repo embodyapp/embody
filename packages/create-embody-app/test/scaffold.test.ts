@@ -61,6 +61,10 @@ it("generates a hosted starter that cannot silently run the reference runtime", 
     "EMBODY_HOST_PROFILE=hosted",
   );
   expect(await readFile(join(app.directory, "README.md"), "utf8")).toContain("zero retention");
+  // M14: the static declaration `embody deploy` submits.
+  expect(JSON.parse(await readFile(join(app.directory, "package.json"), "utf8"))).toMatchObject({
+    embody: { hosted: { profile: "request-only-v1" } },
+  });
 });
 
 it("generates a durable starter with an event, a delayed step and queue settings", async () => {
@@ -88,6 +92,12 @@ it("generates a durable starter with an event, a delayed step and queue settings
   ])
     expect(env).toContain(name);
   expect(await readFile(join(app.directory, "README.md"), "utf8")).toContain("at least once");
+  // Workflows and a subscription (the `app.submitted` handler); no `publishes` declared.
+  expect(JSON.parse(await readFile(join(app.directory, "package.json"), "utf8"))).toMatchObject({
+    embody: {
+      hosted: { profile: "durable-v1", workflows: true, events: false, subscriptions: true },
+    },
+  });
 });
 
 it("rejects traversal and preserves nonempty destinations", async () => {

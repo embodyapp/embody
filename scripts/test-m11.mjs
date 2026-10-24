@@ -10,12 +10,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evidence, main, SuiteFailure } from "./verification.mjs";
+import { DOCKER_CLI, RUNTIME_IMAGE } from "../infra/mvp/builder/local-images.mjs";
 
 const { Buffer, URL } = globalThis;
-const RUNTIME_IMAGE =
-  "docker.io/library/node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5";
-const DOCKER_CLI =
-  "docker.io/library/docker:29-cli@sha256:6fae2214c3121a28d5aa639d09032f61310b7c9c75ffbad1025f261a1b621800";
 
 function docker(args, options = {}) {
   const result = spawnSync("docker", args, {

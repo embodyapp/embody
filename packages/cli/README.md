@@ -43,6 +43,19 @@ npx -y @embody/cli source upload . --workspace ws_… --app app_…
 
 `source upload` packages only supported project files (never `.env*`, dotfiles, credentials, local databases, `.git`, `node_modules` or build outputs), uploads them through short-lived, single-object upload access, and waits for the gateway to verify them. Re-running it resumes safely under the same upload ID. It does not deploy or build anything. Rules, limits and errors: [hosted source admission](https://github.com/embodyapp/embody/blob/main/docs/mvp/SOURCES.md).
 
+## Deploy to a hosted workspace
+
+```sh
+# Profiles in ~/.config/embody/config.json (mode 0600) hold the gateway URL and your keys.
+npx -y @embody/cli deploy --app kanban            # pack, upload, submit, follow to active
+npx -y @embody/cli deploy --app kanban --no-wait --output json   # prints the deployment ID
+npx -y @embody/cli deployments status dep_… --app kanban --wait  # from any machine, by ID
+npx -y @embody/cli deployments cancel dep_… --app kanban         # server-side, fenced
+npx -y @embody/cli mcp setup --app kanban --write ~/.embody-mcp.json
+```
+
+`deploy` reads the static `embody.hosted` declaration from `package.json` (create-embody-app writes it); it never runs project code. The deployment ID is printed as soon as the gateway accepts it, rerunning the same command resumes the same deployment, and Ctrl-C stops only local waiting. Exit codes, JSON output, workspace URL forms and MCP setup: [hosted CLI guide](https://github.com/embodyapp/embody/blob/main/docs/mvp/CLI.md).
+
 ## MCP stdio bridge
 
 ```sh

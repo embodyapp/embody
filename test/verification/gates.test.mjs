@@ -63,6 +63,7 @@ for (const script of [
   "platform-prerequisites.mjs",
   "test-mvp.mjs",
   "test-m12.mjs",
+  "test-m14.mjs",
 ]) {
   test(`M04 ${script} fails when platform configuration is omitted`, async () => {
     const directory = await mkdtemp(join(tmpdir(), "embody-platform-negative-"));

@@ -13,6 +13,7 @@
 - [Durable workflows for hosted apps](./WORKFLOWS.md): at-least-once steps, claim fencing, cancellation/compensation, runtime-role claims, hosted limits and CLI/MCP control (M19).
 - [Hosted dispatch safety](./DISPATCH.md): connection policy, deadlines, no-replay semantics, durable workspace quotas/audit and retention operations (accepted M07; provider qualification remains separate).
 - [Verification commands and prerequisites](./TESTING.md): mandatory DB/runtime-role fixture, MVP/cloud failure gates, clean packed/E2E runs and sanitized evidence.
+- [Hosted CLI: deploy and control (M14)](./CLI.md): quickstart, command reference, JSON output, exit codes and MCP setup.
 - [M02 API/CLI and workload contracts](./CONTRACTS.md): implemented schemas and policy; deployment endpoints/commands still await their implementation tasks.
 
 This is the delivery plan for a **narrow, invite-only hosted MVP**, not a declaration that the broader framework or managed-hosting plans are complete. All commands, endpoints and new directories described below are proposals until their implementation task passes.
