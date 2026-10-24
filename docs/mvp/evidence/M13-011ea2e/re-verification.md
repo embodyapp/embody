@@ -32,3 +32,13 @@ In `docs/mvp/RELEASES.md:114`, restore the worker's actual M13 grant list in the
 ## Verdict
 
 **Verdict: REJECTED** for M13 code and docs on `011ea2e`, only on the identity-table row above. The code, the N1 test, N5, the B4 Residual-risks text, the STATUS acceptance, the IMPLEMENTATION schedule, the live README and CI all pass. Once the row is corrected, acceptance is expected with no further code review. The confirming live run 8 is separate evidence; this verdict does not depend on it.
+
+## Addendum: `dee08d8` (docs only)
+
+**Diff `011ea2e..dee08d8`:** 2 files, +35/−1: `docs/mvp/RELEASES.md` (one line) and this report. Nothing under `packages/` or `infra/` changed, so CI run [40089013243](https://github.com/embodyapp/embody/actions/runs/40089013243) on `011ea2e` (all 9 jobs passed) still covers the code.
+
+- **Fixed.** The identity table's worker row (`docs/mvp/RELEASES.md:114`) again lists every grant: project-wide `base` (the `run.services.*` permissions, `run.operations.get`, `iam.serviceAccounts.get`); prefix-conditioned `secrets` on `<prefix>-a` secrets only; resource-level `actAs` on each runtime and token creation on each wake invoker; `cloudsql.client` and the provisioner credential. It carries the B4 accepted-residual note. These match the role list in `infra/mvp/m13/gcp.mjs`, so "pins these grants exactly" at `:119` is true again.
+- **Fixed.** The "Never" column lists no `secretmanager.versions.access` and "no IAM-admin role", with an explicit caveat pointing to Residual risks that `run.services.setIamPolicy` lets the worker re-grant roles on any Cloud Run service; no `actAs` beyond provisioned runtimes; no gateway signing key. Nothing contradicts Residual risks at `:182`.
+- **Confirmed.** This report matches what the reviewer submitted, only reworded.
+
+**Verdict: ACCEPTED** for M13 code and docs on `dee08d8`. The confirming live run 8 is separate evidence for the author to add.
