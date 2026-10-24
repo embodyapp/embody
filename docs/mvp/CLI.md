@@ -6,7 +6,7 @@ The CLI is a thin client of the central gateway. Every platform call goes to the
 
 ## Quickstart
 
-**Before you start (operator, once per user):** the workspace operator creates the workspace, reserves each app by name (which provisions its runtime identity, database secret and, for durable apps, its wake queue: [RELEASES](./RELEASES.md#app-provisioning-at-reservation-not-the-worker)) and issues credentials: a **deployer** key (source upload, deploy, status, cancel) and an **app-caller** key (discover and call actions, MCP) with scopes for the app's namespace, for example `kanban:*`. After that, everything below is yours; no operator step is needed for deploys or updates.
+**Before you start (operator, once per user):** the workspace operator creates the workspace, reserves each app by name (which provisions its runtime identity, database secret and, for durable apps, its wake queue: [RELEASES](./RELEASES.md#app-provisioning-at-reservation-not-the-worker)) and issues credentials: a **deployer** key (source upload, deploy, status, cancel) and an **app-caller** key (discover and call actions, MCP) with scopes for the app's namespace and its plugins, for example `kanban:*` (gateway catalog) and `app:*` (the scaffold's plugin, checked by the app itself). After that, everything below is yours; no operator step is needed for deploys or updates.
 
 1. Store the keys in protected profiles (`~/.config/embody/config.json`, mode `0600`; the CLI refuses a token-bearing file that others can read):
 

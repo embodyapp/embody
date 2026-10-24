@@ -37,6 +37,8 @@ export const M14_CASES = Object.freeze([
 ]);
 
 const json = (text) => JSON.parse(text.trim().split("\n").at(-1));
+/** Generated CRUD returns entity records: fields live under `data`. */
+const title = (text) => json(text).data?.title;
 
 export async function runM14Journey(t) {
   const cases = {};
@@ -123,9 +125,9 @@ export async function runM14Journey(t) {
     cardId = json(created.out).id;
     expect(cardId, "no record ID");
     const got = await run(["card", "get", cardId]);
-    expect(json(got.out).title === "First card", "get mismatch");
+    expect(title(got.out) === "First card", "get mismatch");
     const updated = await run(["card", "update", cardId, "--title", "Renamed"]);
-    expect(updated.code === 0 && json(updated.out).title === "Renamed", "update failed");
+    expect(updated.code === 0 && title(updated.out) === "Renamed", "update failed");
     const extra = await run(["card", "create", "--title", "Second card"]);
     const extraId = json(extra.out).id;
     const deleted = await run(["card", "delete", extraId]);
@@ -186,7 +188,7 @@ export async function runM14Journey(t) {
     const got = await cli([cards, "card", "get", cardId, "--output", "json"], {
       profile: t.profiles.caller,
     });
-    expect(got.code === 0 && json(got.out).title === "Renamed", "data lost across the update");
+    expect(got.code === 0 && title(got.out) === "Renamed", "data lost across the update");
     return { deploymentId: id, finalState: json(waited.out).state };
   });
 
@@ -233,7 +235,7 @@ export async function runM14Journey(t) {
     const got = await cli([cards, "card", "get", cardId, "--output", "json"], {
       profile: t.profiles.caller,
     });
-    expect(got.code === 0 && json(got.out).title === "Renamed", "data changed by rollback");
+    expect(got.code === 0 && title(got.out) === "Renamed", "data changed by rollback");
     return { rolledBackTo: firstRelease, newRelease: status.releaseId };
   });
 

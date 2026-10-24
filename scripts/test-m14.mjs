@@ -9,6 +9,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { createRequire } from "node:module";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -68,6 +69,7 @@ await main("m14-local", async () => {
   let topology;
   let registry;
   let objectServer;
+  let objectPlainServer;
   let builderTag;
   const cleanup = {};
   try {
@@ -147,9 +149,34 @@ await main("m14-local", async () => {
     const cliBin = join(consumer, "node_modules/@embody/cli/bin/embody.js");
     const createBin = join(consumer, "node_modules/create-embody-app/dist/bin.js");
 
-    // Source objects behind a host HTTP endpoint (signed-URL stand-in) the CLI and builds reach.
+    // Source objects behind host endpoints (the signed-URL stand-in): HTTPS on loopback for the
+    // CLI (build plans accept only https source URLs) with a throwaway self-signed certificate
+    // trusted only by the CLI processes, and plain HTTP for the build containers (as test:m11).
+    const tls = join(scratch, "tls");
+    await mkdir(tls, { recursive: true });
+    exec("openssl", [
+      "req",
+      "-x509",
+      "-newkey",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:prime256v1",
+      "-nodes",
+      "-days",
+      "1",
+      "-subj",
+      "/CN=127.0.0.1",
+      "-addext",
+      "subjectAltName=IP:127.0.0.1",
+      "-addext",
+      "basicConstraints=critical,CA:TRUE",
+      "-keyout",
+      join(tls, "key.pem"),
+      "-out",
+      join(tls, "cert.pem"),
+    ]);
     let objects;
-    objectServer = createServer((request, response) => {
+    const serveObjects = (request, response) => {
       void (async () => {
         let body = Buffer.alloc(0);
         for await (const chunk of request) body = Buffer.concat([body, chunk]);
@@ -160,13 +187,24 @@ await main("m14-local", async () => {
         });
         response.writeHead(reply.status).end(Buffer.from(await reply.arrayBuffer()));
       })();
-    });
+    };
     const linux = process.platform === "linux";
-    await new Promise((resolve) =>
-      objectServer.listen(0, linux ? "0.0.0.0" : "127.0.0.1", resolve),
+    objectServer = createHttpsServer(
+      {
+        key: await readFile(join(tls, "key.pem")),
+        cert: await readFile(join(tls, "cert.pem")),
+      },
+      serveObjects,
     );
-    const objectPort = objectServer.address().port;
-    objects = new gateway.MemorySourceObjectStore({ origin: `http://127.0.0.1:${objectPort}` });
+    await new Promise((resolve) => objectServer.listen(0, "127.0.0.1", resolve));
+    objectPlainServer = createServer(serveObjects);
+    await new Promise((resolve) =>
+      objectPlainServer.listen(0, linux ? "0.0.0.0" : "127.0.0.1", resolve),
+    );
+    const objectPort = objectPlainServer.address().port;
+    objects = new gateway.MemorySourceObjectStore({
+      origin: `https://127.0.0.1:${objectServer.address().port}`,
+    });
     const builds = new LocalBuildProvider({
       scratch: join(scratch, "builds"),
       outputBucket: recipe.outputBucket,
@@ -208,8 +246,10 @@ await main("m14-local", async () => {
     const both = (role) => Object.values(appIds).map((appId) => ({ appId, role }));
     const deployer = await topology.operator.credential(workspace, "m14-user", both("deployer"));
     const caller = await topology.operator.credential(workspace, "m14-user", both("app-caller"), [
+      // Gateway catalog scopes are per namespace; the app's kernel checks plugin scopes (`app`).
       `${names.cards}:*`,
       `${names.flow}:*`,
+      "app:*",
     ]);
     const stale = await topology.operator.credential(workspace, "m14-user", both("deployer"));
     await stale.revoke();
@@ -297,6 +337,8 @@ await main("m14-local", async () => {
               HOME: home,
               EMBODY_CONFIG: configFile,
               EMBODY_CACHE_DIR: cache,
+              // Trusts only the run's throwaway object-store certificate (loopback HTTPS).
+              NODE_EXTRA_CA_CERTS: join(tls, "cert.pem"),
               ...options.env,
             },
             stdio: ["pipe", "pipe", "pipe"],
@@ -420,6 +462,7 @@ await main("m14-local", async () => {
         .dropAppDatabases(cleanup.workspace, cleanup.apps)
         .catch((error) => console.error(`App database cleanup failed: ${error.message}`));
     objectServer?.close();
+    objectPlainServer?.close();
     await registry?.close();
     const leftovers = [
       docker(["ps", "-aq", "--filter", "name=embody-m11-step-"], { allowFailure: true }),

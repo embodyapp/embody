@@ -52,6 +52,13 @@ export async function startLocalTopology(deps) {
   const store = new gw.PostgresGatewayStore(deps.platformUrl, policy);
   const auditLines = [];
   const workerLines = [];
+  if (process.env.EMBODY_M14_DEBUG) {
+    const push = workerLines.push.bind(workerLines);
+    workerLines.push = (...lines) => {
+      for (const line of lines) process.stderr.write(`[m14 worker] ${line}\n`);
+      return push(...lines);
+    };
+  }
   const servers = [];
 
   // Provider errors are swallowed into `poll-error` by design (never surfaced to users); record
@@ -171,15 +178,29 @@ export async function startLocalTopology(deps) {
     migrations,
     validate: (registration) => gw.validateRegistration(registration, policy),
   });
+  const admission = new gw.BuildAdmission({
+    store,
+    provider: deps.builds,
+    recipe: deps.recipe,
+    sources: deps.objects,
+  });
+  for (const method of ["start", "settle"]) {
+    const original = admission[method].bind(admission);
+    admission[method] = async (...args) => {
+      try {
+        return await original(...args);
+      } catch (error) {
+        workerLines.push(
+          JSON.stringify({ admission: method, error: String(error?.code ?? error?.message) }),
+        );
+        throw error;
+      }
+    };
+  }
   const controller = new gw.DeploymentController({
     store,
     queue,
-    builds: new gw.BuildAdmission({
-      store,
-      provider: deps.builds,
-      recipe: deps.recipe,
-      sources: deps.objects,
-    }),
+    builds: admission,
     stages,
     sweeper: new gw.CandidateSweep({ prefix, candidates, store }),
     log: (record) => void workerLines.push(JSON.stringify(record)),
@@ -286,8 +307,10 @@ export async function startLocalTopology(deps) {
               [names.database],
             )
             .catch(() => undefined);
-          await client.query(`GRANT "${names.ownerRole}" TO CURRENT_USER`).catch(() => undefined);
+          // The provisioner may SET ROLE to the app's owner (M13), which owns the database.
+          await client.query(`SET ROLE "${names.ownerRole}"`);
           await client.query(`DROP DATABASE IF EXISTS "${names.database}"`);
+          await client.query("RESET ROLE");
           for (const role of [names.runtimeRole, names.ownerRole])
             await client.query(`DROP ROLE IF EXISTS "${role}"`);
           dropped.push(names.database);
