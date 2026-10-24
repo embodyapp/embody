@@ -1,8 +1,12 @@
 # M13 live evidence (`test:mvp:cloud` suite `m13`)
 
+**Confirming run `50ccfd` (run 8), 2026-10-24: passed 9/9 with zero skips** ([`mvp-cloud-m13-run8.json`](./mvp-cloud-m13-run8.json), `status: passed`). Same project, region and prefixes as below, product code identical to `ef4bc73` (the run started from `290a056`; later commits during the run were docs only; the evidence JSON records the tip at write time, `42b12e7`). Every case passed: first deploy, update switch (calls succeeding on every observed pair), failed readiness (old route serving), destructive migration refused, promotion race (one generation step), rollback (previous code, checksum unchanged, active target refused), **durable wake (A's candidate removed before the step was due; the step completed on the active release)**, exact IAM, and cleanup (inventory empty, project IAM unchanged). Conservative estimate $0.77; cumulative for runs 1–8 ≈ $6.04 of the owner's raised $8 cap.
+
+The rest of this page records run 7 (`ed009e`, 8/9) and the history of the runs.
+
 **Run `ed009e`** on clean `ef4bc73` (`dirty: false`), 2026-10-22, project `embody-cloud`, region `us-central1`, resource prefix `embody-test-m13`, release platform prefix `ted009e`, operator gcloud login, Cloud SQL Auth Proxy v2.26.0. Owner-approved budget: $6 cap (2026-10-21). Sanitized results: [`mvp-cloud-m13.json`](./mvp-cloud-m13.json). Contract and case list: [RELEASES](../../RELEASES.md#live-suite-test-mvp-cloud-suite-m13-owner-approved-budget-only).
 
-**Result: 8 of the 9 suite cases passed (the JSON `counts` also include the gate entry: passed 9, failed 1); `M13.e.durable-wake` failed one sub-check (`replacedCandidateRemoved`) because of an asynchronous-delete race in the check itself, not in M13 (below).** The suite therefore reports `failed`. The check is fixed on the branch; a confirming run needs an owner budget decision (the conservative tally of all runs is about $5.27 of the $6 cap).
+**Result: 8 of the 9 suite cases passed (the JSON `counts` also include the gate entry: passed 9, failed 1); `M13.e.durable-wake` failed one sub-check (`replacedCandidateRemoved`) because of an asynchronous-delete race in the check itself, not in M13 (below).** The suite therefore reports `failed`. The check is fixed on the branch; the confirming run 8 (above) passed 9/9.
 
 Topology, all real and run-scoped: a public hosted gateway on Cloud Run (its own identity, the JWKS candidates verify against), the M13 deployment worker on Cloud Run (controller identity, real release stages), Cloud Tasks controller queue and OIDC invoker, Cloud Build with the M11 recipe, a `db-f1-micro` Cloud SQL instance holding the platform database and every app database (provisioner role `CREATEDB`/`CREATEROLE` only). Each app was provisioned at reservation by the operator (`provisionAppIdentity`): runtime identity, database secret, instance-conditioned Cloud SQL client, and for the durable app its queue, invoker and wake route. The operator then acted only as a client of the public gateway and read data checksums through the provisioner.
 
@@ -45,9 +49,10 @@ The check listed the durable app's candidates immediately after the sweep's `Del
 | 5 | `fd487fd` | candidates exited at boot | the socket-form `DATABASE_URL` had an empty host |
 | 6 | `b663705` | promote/switch/rollback/IAM/cleanup passed | app calls refused (scope namespaces: gateway `<app>:*`, kernel `app:*`); IAM 429s; IAM case moved after provisioning |
 | 7 | `ef4bc73` | 8/9 | the durable sub-check's async-delete race (above) |
+| 8 | `ef4bc73` code (tip `290a056`) | **9/9 passed** | confirming run |
 
 Every run tore down completely: inventory empty and project IAM unchanged each time (a just-deleted account listed by a lagging IAM list made runs 2 and 4 report a leftover; the inventory now re-checks).
 
 ## Cost
 
-Conservative suite estimates (builds at the full timeout, SQL for four hours, $0.60 fixed per run): $0.69, $0.77, $0.80, $0.76, $0.76, $0.72, $0.77 = **≈ $5.27** of the $6 cap. Run 7 measured 12.8 build-minutes (≈ $0.08 at list price); list-price spend per run is roughly $0.20–0.30. The invoice check is open (owner).
+Conservative suite estimates (builds at the full timeout, SQL for four hours, $0.60 fixed per run): $0.69, $0.77, $0.80, $0.76, $0.76, $0.72, $0.77, $0.77 = **≈ $6.04** of the owner-raised $8 cap (the cap was $6 through run 7). Run 7 measured 12.8 build-minutes (≈ $0.08 at list price); list-price spend per run is roughly $0.20–0.30. The invoice check is open (owner).
