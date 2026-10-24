@@ -330,7 +330,7 @@ export function createM13GcpProvider({
       };
     },
     /** The public hosted gateway: its own identity, the platform database, the signing key. */
-    async deployGateway(context, { image, signing }) {
+    async deployGateway(context, { image, signing, env: extra = {} }) {
       await api(`${SECRETS}/projects/${project}/secrets/${context.gatewayKey}:addVersion`, "POST", {
         payload: { data: Buffer.from(signing.privateKeyPem).toString("base64") },
       });
@@ -346,6 +346,8 @@ export function createM13GcpProvider({
         EMBODY_M12_QUEUE: context.queuePath,
         EMBODY_M12_TASK_URL: `${workerUrl}/_embody/tasks/deployment`,
         EMBODY_M12_INVOKER: context.invoker.email,
+        // Later suites' gateway settings (M14: the source routes); never secrets.
+        ...extra,
       };
       await deployService(context.gatewayService, {
         labels: { embody: "m13-qualification" },

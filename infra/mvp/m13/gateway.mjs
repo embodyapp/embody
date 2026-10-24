@@ -1,9 +1,13 @@
 // M13 qualification gateway: the hosted workspace gateway on Cloud Run with its own workload
 // identity. It serves the public JWKS candidates verify against, the deployment and rollback
 // routes (tasks to the controller queue), and app calls to candidates with private Cloud Run
-// invocation tokens. Configuration comes from the run's records and secrets only.
+// invocation tokens. Configuration comes from the run's records and secrets only. The M14 suite
+// also sets EMBODY_SOURCE_BUCKET and EMBODY_SOURCE_SIGNER: the M10 source routes on GCS (signed
+// create-only uploads through the signer's signBlob, verification with the gateway's identity),
+// so the packed CLI uploads through the gateway like a user. M13 runs leave them unset.
 import { URL } from "node:url";
 import {
+  GcsSourceObjectStore,
   PostgresGatewayStore,
   cloudRunInvocationToken,
   createWorkspaceGateway,
@@ -39,6 +43,17 @@ const gateway = createWorkspaceGateway({
   invocationToken: cloudRunInvocationToken({
     serviceAccountEmail: env.GATEWAY_SERVICE_ACCOUNT_EMAIL,
   }),
+  ...(env.EMBODY_SOURCE_BUCKET && env.EMBODY_SOURCE_SIGNER
+    ? {
+        sources: {
+          objects: new GcsSourceObjectStore({
+            bucket: env.EMBODY_SOURCE_BUCKET,
+            signerEmail: env.EMBODY_SOURCE_SIGNER,
+            timeoutMs: 10_000,
+          }),
+        },
+      }
+    : {}),
   deployments: {
     queue: cloudTasksQueue({
       queue: env.EMBODY_M12_QUEUE,

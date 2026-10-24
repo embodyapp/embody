@@ -8,7 +8,7 @@
 //   names: { cards, flow }, appIds: { cards, flow }, workspace, root, edge?,
 //   projects: { cards, flow, variant(base, kind) → dir },   kinds: v2 | v3 | broken | malformed
 //   profiles: { deployer, caller, edge, stale },
-//   pause(appId), resume(appId), tasks() → recorded or listed wake tasks | null,
+//   pause(appId), resume(appId), coldTimeoutSeconds?, tasks() → wake tasks | null,
 //   mcpClient(configFile) → { tools(): names[], call(name, args) → result },
 //   secrets: string[], scan() → text to search for secrets (logs, audit, objects),
 // }
@@ -306,11 +306,15 @@ export async function runM14Journey(t) {
     return { exits: [deploy.code, list.code] };
   });
 
+  // Local: the serving container is frozen and the CLI waits 3 s. Live: Cloud Run cannot be
+  // frozen, so the deadline is set below any round trip to the gateway (`t.coldTimeoutSeconds`);
+  // the CLI's behaviour (exit 7, actionable note, no replay) is the same either way.
+  const coldSeconds = t.coldTimeoutSeconds ?? 3;
   await record("M14.b.cold-timeout", async () => {
     await t.pause(t.appIds.cards);
     let slow;
     try {
-      slow = await cli([cards, "card", "list", "--request-timeout", "3"], {
+      slow = await cli([cards, "card", "list", "--request-timeout", String(coldSeconds)], {
         profile: t.profiles.caller,
       });
     } finally {
@@ -322,7 +326,7 @@ export async function runM14Journey(t) {
     await new Promise((resolve) => setTimeout(resolve, 500));
     const after = await cli([cards, "card", "list"], { profile: t.profiles.caller });
     expect(after.code === 0, "app did not recover");
-    return { exit: slow.code };
+    return { exit: slow.code, deadlineSeconds: coldSeconds };
   });
 
   await record("M14.c.workspace-prefixes", async () => {
