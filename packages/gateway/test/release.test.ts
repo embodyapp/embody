@@ -852,6 +852,66 @@ describe("M13 review B1: durable wakes follow the active release through the sta
   });
 });
 
+describe("M13 re-review N1: the wake route binds each app's own invoker", () => {
+  it("app B's invoker cannot drive app A's route, even with A's audience on A's path", async () => {
+    const h = await releaseHarness();
+    const { publicKey, privateKey } = await generateKeyPair("RS256");
+    const invokerOf = (ws: string, app: string) =>
+      `${appResourceNames(platform.prefix, ws, app).invokerAccount}@embody-cloud.iam.gserviceaccount.com`;
+    const forwarded: string[] = [];
+    const worker = createDeploymentWorker({
+      controller: h.controller,
+      verifier: platformInvokerVerifier({
+        audience: "https://unused",
+        invokerEmail: "x@y",
+        key: publicKey,
+      }),
+      wake: {
+        baseUrl: platform.wakeBaseUrl!,
+        // As in production: the invoker is derived from the path's workspace and app.
+        invokerFor: invokerOf,
+        mint: () => Promise.resolve("minted"),
+        store: h.store,
+        verifier: (audience, email) =>
+          platformInvokerVerifier({ audience, invokerEmail: email, key: publicKey }),
+        fetch: ((url: string | URL) => {
+          forwarded.push(String(url));
+          return Promise.resolve(new Response("{}", { status: 200 }));
+        }) as typeof fetch,
+      },
+    });
+    const sign = (email: string, audience: string) =>
+      new SignJWT({ email, email_verified: true })
+        .setProtectedHeader({ alg: "RS256" })
+        .setIssuer("https://accounts.google.com")
+        .setAudience(audience)
+        .setIssuedAt()
+        .setExpirationTime("10m")
+        .sign(privateKey);
+    const appA = APP;
+    const appB = "app_otherapp01";
+    const routeA = `/_embody/wake/${h.workspaceId}/${appA}`;
+    const audienceA = wakeUrl(platform.wakeBaseUrl!, h.workspaceId, appA);
+    const asB = await worker.inject({
+      method: "POST",
+      url: routeA,
+      headers: { authorization: `Bearer ${await sign(invokerOf(h.workspaceId, appB), audienceA)}` },
+      payload: {},
+    });
+    expect(asB.statusCode).toBe(401);
+    // A's own invoker is accepted on A's route (A has no served release yet: 503 keeps the wake).
+    const asA = await worker.inject({
+      method: "POST",
+      url: routeA,
+      headers: { authorization: `Bearer ${await sign(invokerOf(h.workspaceId, appA), audienceA)}` },
+      payload: {},
+    });
+    expect(asA.statusCode).toBe(503);
+    expect(forwarded).toEqual([]);
+    await worker.close();
+  });
+});
+
 describe("M13 review B2: the candidate sweep is not starved by a failing delete", () => {
   it("a delete that keeps failing is counted and skipped; later removable candidates still go", async () => {
     const h = await releaseHarness();

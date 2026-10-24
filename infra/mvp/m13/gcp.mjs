@@ -1,11 +1,14 @@
 // Real GCP provider for the M13 live suite, composed on the M12 provider (M11 build resources,
 // Cloud SQL platform database, controller queue, worker and invoker identities). M13 adds, all
 // run-scoped and owned: a gateway identity and its public Cloud Run gateway (signing key secret),
-// the database provisioner role and its secret, the worker's M13 grants (a run-scoped custom role,
-// project IAM admin restricted to granting `roles/cloudsql.client`, `actAs` on this run's runtime
-// identities only) and the M13 worker. What the controller creates (candidates, runtime
-// identities, database secrets, their Cloud SQL client bindings) carries this run's platform
-// prefix and is removed on teardown. Tokens, passwords and URLs with credentials are never printed.
+// the database provisioner role and its secret, the worker's M13 grants (a project-wide Cloud Run
+// service-management role and a prefix-conditioned Secret Manager role) and the M13 worker. App
+// identities are provisioned by the operator (`provisionApp`), which grants the worker resource-
+// level `actAs` on runtimes and token creation on invokers. Accepted residual (re-review B4): the
+// project-wide Cloud Run role reaches every service, including the gateway, so a compromised
+// worker could replace the gateway at its deterministic URL; see RELEASES "Residual risks".
+// Everything carries this run's prefixes and is removed on teardown. Tokens, passwords and URLs
+// with credentials are never printed.
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
@@ -24,10 +27,11 @@ const CRM = "https://cloudresourcemanager.googleapis.com/v1";
 /**
  * Controller permissions M13 adds (RELEASES identity table), as run-scoped custom roles.
  * `base` (Cloud Run service management and identity lookup) is project-wide: live runs 3–4 showed
- * Cloud Run and service-account IAM ignore resource-name conditions, so it is bounded by what it
- * excludes (no `run.services.update`, no `actAs` beyond the app runtimes it is granted on
- * individually at app provisioning). `secrets` is prefix-conditioned (Secret Manager honours it).
- * The worker creates no identities, queues or secrets and holds no IAM-admin role.
+ * Cloud Run and service-account IAM ignore resource-name conditions. It is NOT confined to
+ * candidates: delete + create of a same-named service, or `setIamPolicy` granting itself
+ * `run.admin`, reaches platform services including the gateway (re-review B4, accepted until
+ * candidates move to a separate project). `secrets` is prefix-conditioned (Secret Manager honours
+ * it). The worker creates no identities, queues or secrets and holds no IAM-admin role.
  */
 export const M13_WORKER_ROLES = Object.freeze({
   base: [

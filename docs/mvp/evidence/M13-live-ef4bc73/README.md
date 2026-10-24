@@ -2,7 +2,7 @@
 
 **Run `ed009e`** on clean `ef4bc73` (`dirty: false`), 2026-10-22, project `embody-cloud`, region `us-central1`, resource prefix `embody-test-m13`, release platform prefix `ted009e`, operator gcloud login, Cloud SQL Auth Proxy v2.26.0. Owner-approved budget: $6 cap (2026-10-21). Sanitized results: [`mvp-cloud-m13.json`](./mvp-cloud-m13.json). Contract and case list: [RELEASES](../../RELEASES.md#live-suite-test-mvp-cloud-suite-m13-owner-approved-budget-only).
 
-**Result: 9 cases, 8 passed; `M13.e.durable-wake` failed one sub-check (`replacedCandidateRemoved`) because of an asynchronous-delete race in the check itself, not in M13 (below).** The suite therefore reports `failed`. The check is fixed on the branch; a confirming run needs an owner budget decision (the conservative tally of all runs is about $5.27 of the $6 cap).
+**Result: 8 of the 9 suite cases passed (the JSON `counts` also include the gate entry: passed 9, failed 1); `M13.e.durable-wake` failed one sub-check (`replacedCandidateRemoved`) because of an asynchronous-delete race in the check itself, not in M13 (below).** The suite therefore reports `failed`. The check is fixed on the branch; a confirming run needs an owner budget decision (the conservative tally of all runs is about $5.27 of the $6 cap).
 
 Topology, all real and run-scoped: a public hosted gateway on Cloud Run (its own identity, the JWKS candidates verify against), the M13 deployment worker on Cloud Run (controller identity, real release stages), Cloud Tasks controller queue and OIDC invoker, Cloud Build with the M11 recipe, a `db-f1-micro` Cloud SQL instance holding the platform database and every app database (provisioner role `CREATEDB`/`CREATEROLE` only). Each app was provisioned at reservation by the operator (`provisionAppIdentity`): runtime identity, database secret, instance-conditioned Cloud SQL client, and for the durable app its queue, invoker and wake route. The operator then acted only as a client of the public gateway and read data checksums through the provisioner.
 
@@ -28,9 +28,11 @@ The durable app's workflow step was scheduled by release A, 28 minutes ahead. Re
 | ≈13:33 | workflow started on A (step due ≈14:01) |
 | 13:35:15 | `CreateService` `ted009e-c161527ba15021061dd5826aa` (release B's candidate) |
 | 13:48:02 | `DeleteService` `ted009e-c7418ce96b5b969e3da911382`: the sweep removed A, before the step was due |
+| 14:01:37.80 | request log: the worker `embody-test-m13-worker-ed009e` received `POST /_embody/wake/ws_m13ed009e02/app_m13ed009e02` (the app's stable wake route) → 200 |
+| 14:01:38.15 | request log: release B's candidate `ted009e-c1615…` received `POST /_embody/drain` → 200 |
 | after 14:01 | the step's status read `completed` through the gateway |
 
-The check listed the durable app's candidates immediately after the sweep's `DeleteService`, while Cloud Run was still deleting A, and counted two. The removal itself is on record above; the check now waits for an asynchronous delete to finish (`qualify.mjs`). Because A no longer existed when the step came due, only the forwarder to the active release could have delivered it.
+The check listed the durable app's candidates immediately after the sweep's `DeleteService`, while Cloud Run was still deleting A, and counted two. The removal itself is on record above; the check now waits for an asynchronous delete to finish (`qualify.mjs`). Because A no longer existed when the step came due, only the forwarder to the active release could have delivered it, and the request logs show exactly that path (independently confirmed by the [re-review](../M13-ef4bc73/independent-re-review.md)).
 
 ## All live runs
 

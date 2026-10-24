@@ -305,6 +305,8 @@ Acceptance:
 
 Docs: recovery measurements, incident runbooks, customer limitations and approvals. Evidence: restore artifacts, drill logs and accountable sign-off (manual where appropriate).
 
+**Carried from M13 (owner-accepted residual, re-review B4 of `ef4bc73`):** the deployment worker's project-wide Cloud Run rights reach the gateway (a compromised worker could replace it at its deterministic URL and serve its own JWKS). Before G5, move app candidates to a separate GCP project, or protect platform services with a live-verified tag-based IAM deny, and re-run the M13 IAM case against the new boundary. Also from M13 (re-review N5): app delete (M15) must remove the app's wake invoker from the worker service's `run.invoker` policy and the worker's per-account grants.
+
 ## M17 — Real scale-to-zero and centralized-control proof
 
 **Depends on:** M03–M16, M19–M21. **Areas:** `test:mvp:cloud` implementation, cloud metrics and support matrix.

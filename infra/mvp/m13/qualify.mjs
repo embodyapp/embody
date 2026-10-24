@@ -103,10 +103,12 @@ export const M13_PROVIDER_METHODS = Object.freeze([
 ]);
 
 /**
- * Exact grants (RELEASES identity table): the worker adds only the M13 custom role, the
- * role-restricted project IAM admin and `actAs` on runtimes; each runtime holds only the Cloud
- * SQL client role and its secret; candidates are invokable only by the gateway, the worker and
- * the app's own wake invoker; every worker role that touches a resource is prefix-conditioned.
+ * Exact grants (RELEASES identity table): the worker holds the project-wide `base` role, the
+ * prefix-conditioned `secrets` role, no IAM-admin role and no project-wide `actAs`, plus
+ * resource-level `actAs` on runtimes and token creation on invokers; each runtime holds only the
+ * Cloud SQL client role and its secret; candidates are invokable only by the gateway, the worker
+ * and the app's wake invoker. This pins binding names, not what they allow: the `base` role's
+ * reach to every Cloud Run service (re-review B4) is an accepted, documented residual.
  */
 export function evaluateReleaseBindings(bindings) {
   const worker = bindings.filter((b) => b.startsWith("worker|")).map((b) => b.slice(7));
