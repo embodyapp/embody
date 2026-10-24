@@ -138,8 +138,9 @@ function parse(
   }
   return { positionals, values: parsed, flags };
 }
-function seconds(value: string | undefined, name: string, fallback: number): number {
-  if (value === undefined) return fallback;
+/** `--<name> <seconds>` as milliseconds; `fallbackSeconds` when absent. */
+function seconds(value: string | undefined, name: string, fallbackSeconds: number): number {
+  if (value === undefined) return fallbackSeconds * 1000;
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0 || n > 86_400)
     throw new Failure(EXIT.usage, `--${name} must be a number of seconds between 0 and 86400`);
@@ -280,6 +281,11 @@ function rejection(
           EXIT.remote,
           "A different submission already uses this deployment key (the upload changed). Deploy again with --retry to submit a new deployment.",
         );
+      if (code === "ROLLBACK_INCOMPATIBLE")
+        return new Failure(
+          EXIT.remote,
+          `ROLLBACK_INCOMPATIBLE: ${DEPLOYMENT_HINTS["ROLLBACK_INCOMPATIBLE"]}`,
+        );
       if (code === "STALE_GENERATION")
         return new Failure(
           EXIT.remote,
@@ -331,6 +337,7 @@ export async function runManageCommand(
     if (command === "deployments" && (sub === "status" || sub === "cancel"))
       return await deployments(sub, argv.slice(2), context);
     if (command === "apps" && sub === "status") return await appsStatus(argv.slice(2), context);
+    if (command === "rollback") return await rollback(argv.slice(1), context);
     if (command === "mcp" && sub === "setup") return await mcpSetup(argv.slice(2), context);
     throw new Failure(EXIT.usage, USAGE);
   } catch (error) {
@@ -352,6 +359,7 @@ export const USAGE = [
   "  embody deploy [dir] --app <name|app_id> [--workspace <ws>] [--no-wait] [--wait-timeout <s>] [--retry]",
   "  embody deployments status <dep_id> --app <name|app_id> [--wait] [--wait-timeout <s>]",
   "  embody deployments cancel <dep_id> --app <name|app_id>",
+  "  embody rollback <name|app_id> <rel_id> [--no-wait] [--wait-timeout <s>]",
   "  embody apps status [name|app_id]",
   "  embody mcp setup [--app <name>] [--write <file>]",
 ].join("\n");
@@ -600,6 +608,47 @@ async function deploy(args: readonly string[], context: ManageContext): Promise<
   );
   if (options.flags.has("no-wait")) {
     io.stdout.write(
+      context.output === "json"
+        ? `${JSON.stringify(status)}\n`
+        : `${status.deploymentId} ${status.state}\n`,
+    );
+    return 0;
+  }
+  return finish(context, app, await wait(client, app, status, context, waitTimeout));
+}
+
+/**
+ * M13 rollback through the gateway: a new fenced deployment of a retained release's artifact
+ * (fresh candidate and checks), followed like a deploy. A retry at the same generation replays it.
+ */
+async function rollback(args: readonly string[], context: ManageContext): Promise<number> {
+  const options = parse(args, ["workspace", "wait-timeout"], ["no-wait"]);
+  const [appRef, releaseId] = options.positionals;
+  if (options.positionals.length !== 2 || !releaseId || !/^rel_[a-z0-9]{8,64}$/.test(releaseId))
+    throw new Failure(EXIT.usage, `An app and a release ID (rel_…) are required.\n${USAGE}`);
+  const waitTimeout = seconds(options.values["wait-timeout"], "wait-timeout", 1_800);
+  const client = api(context, options.values["workspace"]);
+  const app = await resolveApp(client, appRef);
+  const reply = await client.call("POST", `apps/${app.appId}/rollback`, {
+    version: 1,
+    workspaceId: client.target.workspaceId,
+    appId: app.appId,
+    operation: "rollback",
+    expectedGeneration: app.generation,
+    releaseId,
+  });
+  if (reply.status !== 200 && reply.status !== 202)
+    throw rejection(reply, {
+      permission: "app:rollback",
+      app: label(app),
+      workspace: client.target.workspaceId,
+    });
+  const status = parseStatus(reply.json);
+  context.io.stderr.write(
+    `${reply.status === 200 ? "Resuming existing" : "Submitted"} rollback ${status.deploymentId} of ${label(app)} to ${releaseId}.\n${hints(status.deploymentId, app)}\n`,
+  );
+  if (options.flags.has("no-wait")) {
+    context.io.stdout.write(
       context.output === "json"
         ? `${JSON.stringify(status)}\n`
         : `${status.deploymentId} ${status.state}\n`,

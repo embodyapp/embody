@@ -268,6 +268,7 @@ async function topology() {
       env?: Record<string, string>;
       signal?: AbortSignal;
       sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+      now?: () => number;
     } = {},
   ) => {
     const out = capture();
@@ -290,6 +291,7 @@ async function topology() {
           (async () => {
             for (let i = 0; i < 3; i += 1) await step();
           }),
+        ...(options.now ? { now: options.now } : {}),
       },
     });
     const text = out.text();
@@ -405,6 +407,26 @@ describe("M14.a deploy, reconnect and status", () => {
     expect((await t.store.deployment(t.workspace, APP, last.deploymentId))?.state).toBe("active");
   });
 
+  it("waits 30 minutes by default, then exits 10 with the deployment still running", async () => {
+    const t = await topology();
+    t.holdBuilds(true);
+    let clock = 0;
+    let polls = 0;
+    const result = await t.run(["deploy", await project(), "--app", NAME, "--output", "json"], {
+      now: () => clock,
+      sleep: async (ms) => {
+        polls += 1;
+        clock += ms + 10 * 60_000;
+        await t.step();
+      },
+    });
+    expect(result.code).toBe(EXIT.waitTimeout);
+    expect(polls).toBe(3);
+    expect(clock).toBeGreaterThanOrEqual(30 * 60_000);
+    expect(result.err).toContain("continues on the server");
+    expect((JSON.parse(result.out) as { state: string }).state).not.toBe("active");
+  });
+
   it("explicit cancel is server-side and fenced; repeating it is harmless; active cannot be cancelled", async () => {
     const t = await topology();
     const dir = await project();
@@ -443,6 +465,38 @@ describe("M14.a deploy, reconnect and status", () => {
     const late = await t.run(["deployments", "cancel", activeId, "--app", NAME]);
     expect(late.code).toBe(EXIT.remote);
     expect(late.err).toContain("already ended active");
+  });
+});
+
+describe("M14 rollback", () => {
+  // A successful rollback needs M13 release stages (the journey, `pnpm test:m14`); this harness
+  // promotes M12-style releases, which the gateway refuses to roll back to, explicitly.
+  it("submits through the rollback route and reports an explicit refusal and missing scope", async () => {
+    const t = await topology();
+    const deploy = async (title: string) => {
+      const result = await t.run([
+        "deploy",
+        await project({ profile: "request-only-v1" }, title),
+        "--app",
+        NAME,
+        "--output",
+        "json",
+      ]);
+      expect(result.code).toBe(0);
+      return JSON.parse(result.out) as { releaseId: string };
+    };
+    const v1 = await deploy("v1");
+    await deploy("v2");
+    const refused = await t.run(["rollback", NAME, v1.releaseId]);
+    expect(refused.code).toBe(EXIT.remote);
+    expect(refused.err).toContain(
+      "ROLLBACK_INCOMPATIBLE: The rollback target is no longer retained",
+    );
+    expect(t.requests).toContain(`POST /v1/workspaces/${t.workspace}/apps/${APP}/rollback`);
+    const scope = await t.run(["rollback", NAME, v1.releaseId], { token: t.caller.token });
+    expect(scope.code).toBe(EXIT.forbidden);
+    const usage = await t.run(["rollback", NAME, "v1"]);
+    expect(usage.code).toBe(EXIT.usage);
   });
 });
 

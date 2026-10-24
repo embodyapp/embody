@@ -32,6 +32,7 @@ export interface CliOptions {
   readonly poll?: {
     readonly intervalMs?: number;
     readonly sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+    readonly now?: () => number;
   };
 }
 interface Schema {
@@ -249,6 +250,7 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
   if (
     args[0] === "deploy" ||
     args[0] === "deployments" ||
+    args[0] === "rollback" ||
     (args[0] === "apps" && args[1] === "status") ||
     (args[0] === "mcp" && args[1] === "setup")
   )
@@ -263,6 +265,7 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.poll?.intervalMs !== undefined ? { pollMs: options.poll.intervalMs } : {}),
       ...(options.poll?.sleep ? { sleep: options.poll.sleep } : {}),
+      ...(options.poll?.now ? { now: options.poll.now } : {}),
     });
   let base: string;
   try {

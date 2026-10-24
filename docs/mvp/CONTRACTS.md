@@ -22,19 +22,19 @@ Reading deployment logs requires deployment-read permission and redaction. Secre
 
 ## API and CLI mapping
 
-The following paths are reserved for v1; the M10 source routes and the M12 deployment submit/status/cancel and app status routes are served ([DEPLOYMENTS](./DEPLOYMENTS.md)). All management endpoints require workspace authentication, exact app authorization and bounded JSON bodies. Errors use fixed public messages from `publicError`, never raw exceptions/provider output. HTTP 401 is authentication failure; 403 is permission denial; cross-workspace resource lookup returns 404. Invalid version/input is 400, idempotency/CAS conflict 409, body too large 413, quota exhaustion 429, dependency outage 503.
+The following paths are reserved for v1; the M10 source routes, the M12 deployment submit/status/cancel and app status routes, the M13 rollback route and the M14 app list are served ([DEPLOYMENTS](./DEPLOYMENTS.md), [CLI](./CLI.md)). All management endpoints require workspace authentication, exact app authorization and bounded JSON bodies. Errors use fixed public messages from `publicError`, never raw exceptions/provider output. HTTP 401 is authentication failure; 403 is permission denial; cross-workspace resource lookup returns 404. Invalid version/input is 400, idempotency/CAS conflict 409, body too large 413, quota exhaustion 429, dependency outage 503.
 
 | CLI surface (M14/M15) | Reserved API | Contract/permission |
 |---|---|---|
 | `embody source upload` (M10, served) | `POST /v1/workspaces/:workspace/apps/:app/sources`, `POST …/sources/:upload/complete`, `GET …/sources/:upload` | SourceUploadRequest / SourceStatus; deployment:submit (status: deployment:read). See [SOURCES](./SOURCES.md) |
-| `embody deploy` (M12 route served) | `POST /v1/workspaces/:workspace/apps/:app/deployments` | DeploymentSubmission / deployment:submit; 202, or 200 replay |
-| `embody deployments status <id>` (M12 route served) | `GET /v1/workspaces/:workspace/apps/:app/deployments/:id` | DeploymentStatus / deployment:read |
-| `embody apps list` | `GET /v1/workspaces/:workspace/apps` | AppList with authorized AppStatus summaries only / app:read |
-| app status (API first; M12 served) | `GET /v1/workspaces/:workspace/apps/:app` | AppStatus / app:read |
-| `embody rollback <app> <release>` | `POST .../apps/:app/rollback` | AppManagement rollback / app:rollback |
+| `embody deploy` (M14, served) | `POST /v1/workspaces/:workspace/apps/:app/deployments` | DeploymentSubmission / deployment:submit; 202, or 200 replay |
+| `embody deployments status <id>` (M14, served) | `GET /v1/workspaces/:workspace/apps/:app/deployments/:id` | DeploymentStatus / deployment:read |
+| `embody apps status` (M14, served) | `GET /v1/workspaces/:workspace/apps` | AppList with authorized AppStatus summaries only / app:read. `embody apps list` stays the callable catalog (compatibility) |
+| `embody apps status <app>` (M14; route M12) | `GET /v1/workspaces/:workspace/apps/:app` | AppStatus / app:read |
+| `embody rollback <app> <release>` (M14; route M13) | `POST .../apps/:app/rollback` | AppManagement rollback / app:rollback |
 | `embody apps disable <app>` | `POST .../apps/:app/disable` | AppManagement disable / app:disable |
 | `embody apps delete <app>` | `POST .../apps/:app/delete` | AppManagement delete, confirmAppId / app:delete |
-| deployment cancellation (API first; M12 served) | `POST .../apps/:app/deployments/:id/cancel` | AppManagement cancel / deployment:cancel |
+| `embody deployments cancel <id>` (M14; route M12) | `POST .../apps/:app/deployments/:id/cancel` | AppManagement cancel / deployment:cancel |
 | `embody secrets set <app> <name>` | Separate protected write endpoint, M15 | secret:write; no values in arguments/output |
 | `embody logs <app>` | Bounded log endpoint, M15 | app-scoped authorization; redacted results |
 
@@ -59,7 +59,7 @@ Submission contains an owned uploaded-source ID, SHA-256 digest and byte count; 
 
 **Durable profile (M11 amendment for M19–M21):** `capabilities` may instead be `profile: "durable-v1"` with boolean `workflows`, `events` (publishes events for other apps) and `subscriptions`; `schedules`, `appToAppRpc`, `persistentLocalState` and `genui` stay `false`. Build admission requires each flag to equal what the built app actually has, and `ReleaseManifest.artifact` carries the admitted [artifact manifest](./BUILDS.md#admission-trusted-code-outside-the-build) (profile, published event names, subscriptions, versioned workflow definitions).
 
-AppStatus carries current authoritative `generation`, app-wide `lifecycleFence`, lifecycle status (`enabled`, `disabled`, `deleted`) and nullable `activeReleaseId`. Read it before submitting any generation-bound operation and again after a CAS conflict. A successful promotion increments generation; a deployment's `expectedGeneration` remains its historical captured value, not current app state. AppList wraps unique workspace-bound summaries.
+AppStatus carries an optional `name` (the app's CLI/MCP namespace, M14; not an identity), current authoritative `generation`, app-wide `lifecycleFence`, lifecycle status (`enabled`, `disabled`, `deleted`) and nullable `activeReleaseId`. Read it before submitting any generation-bound operation and again after a CAS conflict. A successful promotion increments generation; a deployment's `expectedGeneration` remains its historical captured value, not current app state. AppList wraps unique workspace-bound summaries.
 
 Deployment response/status carries deployment ID, workspace/app, source digest, state, stage attempt, expected generation, captured app lifecycle fence and deployment cancellation fence. An active status requires a release ID; a failed status requires a safe error; other statuses carry no error. CLI noninteractive JSON output must preserve the ID so status polling resumes without resubmission. Existing call/discovery commands are unchanged; new commands are not implemented by M02.
 
