@@ -370,6 +370,9 @@ describe("M02.a versioned schemas and request-only profile", () => {
         apps: [appStatus, appStatus],
       }).success,
     ).toBe(false);
+    // M14: an optional namespace lets the CLI resolve `--app <name>`; it is not an identity.
+    expect(AppStatusSchema.safeParse({ ...appStatus, name: "kanban" }).success).toBe(true);
+    expect(AppStatusSchema.safeParse({ ...appStatus, name: "Kanban!" }).success).toBe(false);
   });
   it("deep-freezes shared policy arrays", () => {
     expect(Object.isFrozen(HOSTED_PROFILE)).toBe(true);

@@ -115,6 +115,17 @@ export async function createApp(options: CreateAppOptions): Promise<CreatedApp> 
   if (profile !== "reference" && profile !== "request-only" && profile !== "durable")
     throw new Error("Unsupported scaffold profile");
   const files = { ...template(options.name, profile) };
+  // M14: the static hosted declaration `embody deploy` submits (the CLI never runs project code;
+  // the isolated build checks it against the built app).
+  const hostedDeclaration =
+    profile === "durable"
+      ? { profile: "durable-v1", workflows: true, events: false, subscriptions: true }
+      : { profile: "request-only-v1" };
+  if (profile !== "reference") {
+    const manifest = JSON.parse(files["package.json"]!) as Record<string, unknown>;
+    files["package.json"] =
+      `${JSON.stringify({ ...manifest, embody: { hosted: hostedDeclaration } }, null, 2)}\n`;
+  }
   if (profile === "request-only") {
     files["embody.config.ts"] = files["embody.config.ts"]!.replace(
       "    actions: {",
