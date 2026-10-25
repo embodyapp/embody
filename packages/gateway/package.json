@@ -39,8 +39,8 @@
     "@embody/mcp": "workspace:*",
     "@types/pg": "^8.23.1",
     "fastify": "^5.12.7",
-    "jose": "^6.2.12",
-    "pg": "^8.23.0"
+    "jose": "^6.2.13",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@embody/auth": "workspace:*",
