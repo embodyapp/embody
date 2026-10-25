@@ -8,6 +8,7 @@ import {
   type Principal,
   type ProgressUpdate,
   type ValidationIssue,
+  type ViewManifest,
 } from "@embody/core";
 
 /** Client surface that initiated an execution; recorded in audit. */
@@ -268,6 +269,8 @@ export function jsonLineAuditSink(
 // ---------------------------------------------------------------------------
 
 export interface DispatchTarget {
+  readonly generation?: string;
+  readonly views?: Readonly<Record<string, ViewManifest>>;
   readonly endpoint: string;
   readonly status: string;
   readonly actions: Readonly<Record<string, unknown>>;
@@ -283,6 +286,7 @@ export interface DispatchDeps {
 }
 
 export interface DispatchContext {
+  readonly presentation?: { readonly generation: unknown; readonly viewId: unknown };
   readonly principal: Principal;
   readonly appId: string;
   readonly target: string;
@@ -339,6 +343,15 @@ export async function prepareDispatch(
       throw new NotFoundError("Target is not advertised");
     if (!deps.scopeAllows(context.principal, context.appId, context.target))
       throw new ForbiddenError(`Not authorized for ${context.appId}.${context.target}`);
+    const presentation = context.presentation;
+    if (
+      presentation &&
+      (typeof presentation.generation !== "string" ||
+        typeof presentation.viewId !== "string" ||
+        presentation.generation !== registered.generation ||
+        !registered.views?.[presentation.viewId]?.callableTargets.includes(context.target))
+    )
+      throw new ForbiddenError("Presentation binding is unavailable");
     const retry = deps.limit?.(
       `${context.principal.orgId}:${context.principal.actorId}:${context.appId}:${context.target}`,
     );

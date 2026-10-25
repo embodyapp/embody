@@ -21,4 +21,14 @@ The environment-driven process in [`apps/gateway`](https://github.com/embodyapp/
 
 See the [gateway guide](https://github.com/embodyapp/embody/blob/main/docs/guides/07-gateway-and-control-plane.md) and [self-hosting guide](https://github.com/embodyapp/embody/blob/main/docs/production/07-self-hosting-the-gateway.md).
 
+## Experimental GenUI resource broker
+
+Negotiated MCP Apps clients can discover and read static `ui://` resources for currently authorized presented actions through `/mcp` or `/mcp/:appId`. Resource reads use the registered application's exact manifest generation and integrity. The broker preserves the initiating organization, actor ID and actor type, but issues a separate ≤60-second application-audience credential containing only the reserved resource scope, no roles, and the exact signed URI/generation purpose. Client credentials and unrelated principal metadata are not forwarded as resource grants. Resource credentials cannot execute domain actions.
+
+The broker forbids redirects, limits response bodies to 8 MiB, validates the transport URI/MIME and static resource JSON/integrity, and rechecks registration health/generation/authorization before delivery. `resourceTimeoutMs` defaults to 10,000 and accepts integers from 1 to 30,000. Provider failures return value-free MCP errors and do not alter ordinary action output. General gateway token options also accept `ttlSeconds` from 1 to 300; ordinary tokens retain the 300-second default.
+
+MCP session identity is an unambiguous organization/actor-ID/actor-type tuple. Switching an agent session to a human credential—even for the same actor ID—requires a new session.
+
+This is authenticated resource/direct-props infrastructure, not a completed interactive MCP Apps host. App/AppBridge per-view call authorization, refresh/outcome visibility, browser/native rendering and vendor evidence remain pending.
+
 Licensed under the [Elastic License 2.0](./LICENSE).

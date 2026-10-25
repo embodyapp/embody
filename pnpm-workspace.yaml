@@ -5,6 +5,7 @@ packages:
   - "test/fixtures/*"
 
 allowBuilds:
+  "@google/genai": false
   better-sqlite3: true
   core-js: false
   cpu-features: false
@@ -15,6 +16,15 @@ allowBuilds:
 onlyBuiltDependencies: []
 
 overrides:
+  # Pi 1.0.0's internal packages use broad ranges but incompatible newer APIs.
+  # Preserve the GenUI branch's verified SDK family on fresh installations.
+  "@earendil-works/chord": 1.0.0
+  "@earendil-works/pi-agent-core": 1.0.0
+  "@earendil-works/pi-ai": 1.0.0
+  "@earendil-works/pi-codemode": 1.0.0
+  "@earendil-works/pi-mcp": 1.0.0
+  "@earendil-works/pi-telemetry": 1.0.0
+  "@earendil-works/pi-tui": 1.0.0
   source-map-js: ^1.2.2
 
 auditConfig:

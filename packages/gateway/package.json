@@ -32,16 +32,19 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@embody/core": "workspace:*",
     "@embody/cloud-contracts": "workspace:*",
-    "@types/pg": "^8.23.1",
-    "pg": "^8.23.0",
+    "@embody/core": "workspace:*",
+    "@embody/genui": "workspace:*",
     "@embody/host": "workspace:*",
     "@embody/mcp": "workspace:*",
-    "fastify": "^5.12.5",
-    "jose": "^6.2.10"
+    "@types/pg": "^8.23.1",
+    "fastify": "^5.12.7",
+    "jose": "^6.2.12",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
+    "@embody/auth": "workspace:*",
+    "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@types/node": "^22.20.1",
     "vitest": "^4.1.11"
