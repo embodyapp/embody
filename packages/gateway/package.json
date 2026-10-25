@@ -46,7 +46,7 @@
     "@embody/auth": "workspace:*",
     "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.32.1",
-    "@types/node": "^22.20.1",
+    "@types/node": "^26.6.5",
     "vitest": "^4.1.11"
   },
   "engines": {
