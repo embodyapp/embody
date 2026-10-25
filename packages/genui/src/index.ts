@@ -1,3 +1,28 @@
+export {
+  createGenUiSession,
+  type GenUiOutcome,
+  type GenUiSessionOptions,
+  type GenUiSessionState,
+} from "./session.js";
+
+export {
+  parseGenUiDocument,
+  parseGenUiEvent,
+  serializeGenUiDocument,
+  GenUiDocumentError,
+  GENUI_DOCUMENT_DEFAULT_LIMITS,
+  GENUI_DOCUMENT_HARD_LIMITS,
+  type GenUiDocument,
+  type GenUiNode,
+  type GenUiDocumentLimits,
+  type GenUiEventSchema,
+  type GenUiChangeEvent,
+  type GenUiActionEvent,
+  type GenUiActionControl,
+  type GenUiEventOptions,
+} from "./document.js";
+export { renderGenUiMarkdown, renderGenUiText, type GenUiTextOptions } from "./text.js";
+
 import { createHash } from "node:crypto";
 import {
   compileManifest,
@@ -201,6 +226,36 @@ export function genUiResourceIntegrity(resource: GenUiResourceDefinition): strin
   return `sha256:${digest}`;
 }
 
+/** Decodes transport JSON only; executable HTML still requires trusted manifest integrity verification. */
+export function parseGenUiResourceJson(json: string): GenUiResourceDefinition {
+  try {
+    if (Buffer.byteLength(json, "utf8") > 8 * 1024 * 1024) throw new Error();
+    const value: unknown = JSON.parse(json);
+    if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error();
+    if (Object.keys(value).some((key) => !["text", "mimeType", "metadata"].includes(key)))
+      throw new Error();
+    if (!("text" in value) || typeof value.text !== "string") throw new Error();
+    const mimeType = "mimeType" in value ? value.mimeType : undefined;
+    if (mimeType !== undefined && mimeType !== GENUI_MIME_TYPE) throw new Error();
+    const metadata = "metadata" in value ? value.metadata : undefined;
+    if (metadata !== undefined && !isResourceMetadata(metadata)) throw new Error();
+    const resource: GenUiResourceDefinition = {
+      text: value.text,
+      ...(mimeType === undefined ? {} : { mimeType }),
+      ...(metadata === undefined ? {} : { metadata }),
+    };
+    validateResource(resource);
+    return resource;
+  } catch {
+    throw new Error("GenUI resource JSON is invalid");
+  }
+}
+function isResourceMetadata(value: unknown): value is GenUiResourceMetadata {
+  return (
+    value !== null && typeof value === "object" && resourceMetadataSchema.safeParse(value).success
+  );
+}
+
 function viewManifest(appId: string, id: string, view: GenUiViewDefinition): ViewManifest {
   return {
     protocolVersion: GENUI_PROTOCOL_VERSION,
@@ -268,11 +323,35 @@ function customActionOutput(
   return undefined;
 }
 
+const resourceMetadataSchema = z
+  .strictObject({
+    csp: z
+      .strictObject({
+        connectDomains: z.array(z.string().max(2048)).max(100).optional(),
+        resourceDomains: z.array(z.string().max(2048)).max(100).optional(),
+        frameDomains: z.array(z.string().max(2048)).max(100).optional(),
+        baseUriDomains: z.array(z.string().max(2048)).max(100).optional(),
+      })
+      .optional(),
+    permissions: z
+      .strictObject({
+        camera: z.boolean().optional(),
+        microphone: z.boolean().optional(),
+        geolocation: z.boolean().optional(),
+        clipboardWrite: z.boolean().optional(),
+      })
+      .optional(),
+    prefersBorder: z.boolean().optional(),
+  })
+  .optional();
+
 function validateResource(resource: GenUiResourceDefinition): void {
   if (resource === null || typeof resource !== "object")
     throw new Error("GenUI resource is invalid");
   if ((resource.mimeType ?? GENUI_MIME_TYPE) !== GENUI_MIME_TYPE)
     throw new Error("GenUI resource MIME type is invalid");
+  if (!resourceMetadataSchema.safeParse(resource.metadata).success)
+    throw new Error("GenUI resource metadata is invalid");
   const bytes = Buffer.byteLength(resource.text);
   if (bytes === 0 || bytes > GENUI_MAX_RESOURCE_BYTES)
     throw new Error(`GenUI resource must be between 1 and ${GENUI_MAX_RESOURCE_BYTES} bytes`);

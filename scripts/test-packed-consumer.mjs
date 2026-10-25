@@ -73,6 +73,7 @@ try {
   const installOrder = [
     "@embody/core",
     "@embody/cloud-contracts",
+    "@embody/genui",
     "@embody/storage",
     "@embody/auth",
     "@embody/mcp",
