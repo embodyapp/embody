@@ -167,13 +167,21 @@ describe("MCP surface", () => {
   });
 
   it("propagates client cancellation to execution", async () => {
-    let cancelled = false;
+    let markStarted!: () => void;
+    let markCancelled!: (cancelled: boolean) => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const cancelled = new Promise<boolean>((resolve) => {
+      markCancelled = resolve;
+    });
     const url = await fixture(async function* (_context, _entry, _input, signal) {
+      markStarted();
       if (!signal.aborted)
         await new Promise<void>((resolve) => {
           signal.addEventListener("abort", () => resolve(), { once: true });
         });
-      cancelled = signal.aborted;
+      markCancelled(signal.aborted);
       if (!signal.aborted) yield { type: "result", value: null };
     });
     const client = new Client({ name: "test", version: "1.0.0" });
@@ -185,10 +193,16 @@ describe("MCP surface", () => {
     const call = client.callTool({ name: "kanban__cards_send_batch", arguments: {} }, undefined, {
       signal: controller.signal,
     });
-    controller.abort();
-    await expect(call).rejects.toThrow();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(cancelled).toBe(true);
-    await client.close();
+    const rejection = expect(call).rejects.toThrow();
+    try {
+      // Cancellation must target an in-flight server execution, rather than race
+      // request delivery. Wait for the server's abort observation as well.
+      await started;
+      controller.abort();
+      await rejection;
+      expect(await cancelled).toBe(true);
+    } finally {
+      await client.close();
+    }
   });
 });
