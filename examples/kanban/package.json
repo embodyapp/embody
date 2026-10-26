@@ -27,7 +27,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "1.0.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
     "@embody/auth": "workspace:*",
     "@embody/gateway": "workspace:*",
     "@embody/genui-pi": "workspace:*",
@@ -36,6 +36,6 @@
     "@modelcontextprotocol/sdk": "1.32.1",
     "@types/node": "^22.20.1",
     "esbuild": "0.28.2",
-    "playwright": "1.58.2"
+    "playwright": "1.64.1"
   }
 }
