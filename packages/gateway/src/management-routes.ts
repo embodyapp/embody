@@ -428,7 +428,8 @@ export function registerManagementRoutes(app: FastifyInstance, kit: ManagementKi
         appId: scope.appId as DeploymentLog["appId"],
         deploymentId: deploymentId as DeploymentLog["deploymentId"],
         attempt: log.attempt,
-        text: log.text.slice(0, MANAGEMENT_LIMITS.maxBuildLogBytes),
+        // The end of a build log holds the error: keep the tail within the bound.
+        text: log.text.slice(-MANAGEMENT_LIMITS.maxBuildLogBytes),
         truncated: log.truncated || log.text.length > MANAGEMENT_LIMITS.maxBuildLogBytes,
       };
       return reply.status(200).send(body);

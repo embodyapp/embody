@@ -238,19 +238,20 @@ class Api {
     const signal = this.context.signal ? AbortSignal.any([this.context.signal, timeout]) : timeout;
     let response: Response;
     try {
-      response = await this.context.fetch(
-        joinUrl(this.target.root, `v1/workspaces/${this.target.workspaceId}/${path}`),
-        {
-          method,
-          headers: {
-            authorization: `Bearer ${this.token}`,
-            ...(body === undefined ? {} : { "content-type": "application/json" }),
-          },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-          redirect: "error",
-          signal,
+      // `path` may carry a query string (logs): joinUrl only sets the path.
+      const [pathname, query] = path.split("?", 2) as [string, string | undefined];
+      const url = joinUrl(this.target.root, `v1/workspaces/${this.target.workspaceId}/${pathname}`);
+      if (query) url.search = query;
+      response = await this.context.fetch(url, {
+        method,
+        headers: {
+          authorization: `Bearer ${this.token}`,
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
-      );
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        redirect: "error",
+        signal,
+      });
     } catch {
       if (this.context.signal?.aborted) throw new Interrupted();
       if (timeout.aborted)
@@ -1060,11 +1061,7 @@ async function submitRollout(
   context: ManageContext,
   options: { readonly wait: boolean; readonly waitTimeoutMs: number },
 ): Promise<{ readonly code: number; readonly status?: DeploymentStatus }> {
-  if (!app.activeReleaseId)
-    throw new Failure(
-      EXIT.notFound,
-      `${label(app)} has no active release to roll out; deploy it first.`,
-    );
+  // The gateway authorizes first; an app without an active release is then not found (exit 5).
   const reply = await client.call("POST", `apps/${app.appId}/rollout`, {
     version: 1,
     workspaceId: client.target.workspaceId,
