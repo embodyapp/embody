@@ -282,7 +282,11 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
     args[0] === "deploy" ||
     args[0] === "deployments" ||
     args[0] === "rollback" ||
-    (args[0] === "apps" && args[1] === "status") ||
+    args[0] === "rollout" ||
+    args[0] === "logs" ||
+    args[0] === "secrets" ||
+    (args[0] === "apps" &&
+      ["status", "disable", "enable", "delete", "deletion"].includes(args[1] ?? "")) ||
     (args[0] === "mcp" && args[1] === "setup")
   )
     return runManageCommand(args, {

@@ -235,25 +235,26 @@ export function registerManagementRoutes(app: FastifyInstance, kit: ManagementKi
 
   // Secrets ---------------------------------------------------------------------------------------
 
+  // Metadata only, so it is served even without a vault (an app then has no secrets).
+  const list = async (scope: Scope): Promise<SecretList> => ({
+    version: 1,
+    workspaceId: scope.workspace as SecretList["workspaceId"],
+    appId: scope.appId as SecretList["appId"],
+    secrets: (
+      await bounded(store.secrets(scope.workspace, scope.appId), timeout).catch(opaque)
+    ).map(secretStatus),
+  });
+  const nameOf = (request: FastifyRequest) => {
+    const parsed = SecretNameSchema.safeParse((request.params as { name: string }).name);
+    if (!parsed.success) throw new DeploymentError("INVALID_INPUT");
+    return parsed.data;
+  };
+  app.get(`${prefix}/secrets`, routeOptions, async (request, reply) => {
+    const scope = authorize(request, "secret:list");
+    return reply.status(200).send(await list(scope));
+  });
   if (kit.secrets) {
     const secrets = kit.secrets;
-    const list = async (scope: Scope): Promise<SecretList> => ({
-      version: 1,
-      workspaceId: scope.workspace as SecretList["workspaceId"],
-      appId: scope.appId as SecretList["appId"],
-      secrets: (
-        await bounded(store.secrets(scope.workspace, scope.appId), timeout).catch(opaque)
-      ).map(secretStatus),
-    });
-    const nameOf = (request: FastifyRequest) => {
-      const parsed = SecretNameSchema.safeParse((request.params as { name: string }).name);
-      if (!parsed.success) throw new DeploymentError("INVALID_INPUT");
-      return parsed.data;
-    };
-    app.get(`${prefix}/secrets`, routeOptions, async (request, reply) => {
-      const scope = authorize(request, "secret:list");
-      return reply.status(200).send(await list(scope));
-    });
     // The only route that receives a secret value. It is never logged, stored by the platform or
     // returned: the vault holds it, the platform keeps the version metadata.
     app.put(
