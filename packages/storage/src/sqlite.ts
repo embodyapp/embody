@@ -302,6 +302,20 @@ class SqliteTransaction implements StorageTransaction {
       this.transitionFailure(id, error, retryAt, false),
     deadLetter: async (id: string, error: string) =>
       this.transitionFailure(id, error, undefined, true),
+    retryDeadLetter: async (id: string, now: string) => {
+      const row = this.database
+        .prepare(
+          "UPDATE embody_outbox SET status = 'pending', attempts = 0, last_error = NULL, scheduled_at = ?, claimed_at = NULL, claimed_by = NULL WHERE id = ? AND status = 'dead_letter' RETURNING *",
+        )
+        .get(timestamp(now), id) as Row | undefined;
+      return row === undefined ? null : outboxFromRow(row);
+    },
+    purgeDeadLetter: async (id: string) => {
+      const row = this.database
+        .prepare("DELETE FROM embody_outbox WHERE id = ? AND status = 'dead_letter' RETURNING *")
+        .get(id) as Row | undefined;
+      return row === undefined ? null : outboxFromRow(row);
+    },
     list: async (options: { readonly status?: OutboxStatus; readonly limit?: number } = {}) => {
       const limit = options.limit ?? 100;
       if (!Number.isInteger(limit) || limit < 1 || limit > 100)

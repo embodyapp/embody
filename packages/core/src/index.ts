@@ -65,14 +65,17 @@ export {
   compileEntity,
   generatedEntityActions,
   type CompiledEntity,
+  type DeadLetterRow,
   type EntityLifecycle,
   type EntityTransaction,
 } from "./entities.js";
 export {
   ACTION_TITLE_LIMIT,
   APP_METADATA_LIMITS,
+  DEAD_LETTER_LIMIT,
   actionEffect,
   compileManifest,
+  deadLetterActions,
   stableStringify,
   type ActionEffect,
   type ActionManifest,

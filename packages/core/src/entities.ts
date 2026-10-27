@@ -23,6 +23,17 @@ export interface EntityLifecycle {
   publish?(eventName: string, payload: unknown): Promise<void>;
 }
 
+/** The outbox fields dead-letter controls read; never the payload. */
+export interface DeadLetterRow {
+  readonly id: string;
+  readonly orgId: string;
+  readonly eventName: string;
+  readonly occurredAt: string;
+  readonly attempts: number;
+  readonly status: string;
+  readonly lastError?: string;
+}
+
 export interface EntityTransaction {
   readonly entities: {
     create<TData>(
@@ -67,6 +78,13 @@ export interface EntityTransaction {
         readonly schemaVersion?: string;
       },
     ): Promise<unknown>;
+    /** M15 dead-letter resolution (see `@embody/storage` `OutboxRepository`). */
+    list?(options?: {
+      readonly status?: "dead_letter";
+      readonly limit?: number;
+    }): Promise<readonly DeadLetterRow[]>;
+    retryDeadLetter?(id: string, now: string): Promise<DeadLetterRow | null>;
+    purgeDeadLetter?(id: string): Promise<DeadLetterRow | null>;
   };
   readonly workflows?: WorkflowRepositoryPort;
   readonly inbox?: {

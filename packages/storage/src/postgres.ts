@@ -274,6 +274,21 @@ class PostgresTransaction implements StorageTransaction {
     fail: async (id: string, error: string, retryAt?: string) =>
       this.fail(id, error, retryAt, false),
     deadLetter: async (id: string, error: string) => this.fail(id, error, undefined, true),
+    // M15 dead-letter resolution; row-level security keeps both to the transaction's tenant.
+    retryDeadLetter: async (id: string, now: string) => {
+      const result = await this.client.query(
+        "UPDATE embody_outbox SET status = 'pending', attempts = 0, last_error = NULL, scheduled_at = $2, claimed_at = NULL, claimed_by = NULL WHERE id = $1 AND status = 'dead_letter' RETURNING *",
+        [id, timestamp(now)],
+      );
+      return result.rows[0] === undefined ? null : outbox(result.rows[0]);
+    },
+    purgeDeadLetter: async (id: string) => {
+      const result = await this.client.query(
+        "DELETE FROM embody_outbox WHERE id = $1 AND status = 'dead_letter' RETURNING *",
+        [id],
+      );
+      return result.rows[0] === undefined ? null : outbox(result.rows[0]);
+    },
     list: async (options: { readonly status?: OutboxStatus; readonly limit?: number } = {}) => {
       const limit = options.limit ?? 100;
       if (!Number.isInteger(limit) || limit < 1 || limit > 100)

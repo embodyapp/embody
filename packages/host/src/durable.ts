@@ -247,6 +247,16 @@ class WakeTracker {
           await outbox.complete(id);
           this.completed = true;
         },
+        // M15: a retried dead letter is new work, woken like an enqueued event (before commit).
+        ...(outbox.retryDeadLetter
+          ? {
+              retryDeadLetter: async (id: string, now: string) => {
+                const event = await outbox.retryDeadLetter!(id, now);
+                if (event !== null) this.events.push(event);
+                return event;
+              },
+            }
+          : {}),
       },
       workflows: tracked,
     };
