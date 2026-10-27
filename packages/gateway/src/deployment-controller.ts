@@ -28,6 +28,7 @@ import {
   type ReleaseRecord,
   type StageOutcome,
 } from "./deployment.js";
+import type { ManagementStore } from "./management.js";
 import type { Registration } from "./index.js";
 import { registerWakeRoute, type WakeRouteOptions } from "./wake-forwarder.js";
 
@@ -90,6 +91,11 @@ export interface DeploymentStages {
   promote?(context: DeploymentStageContext): Promise<PromoteResult>;
   /** Removes resources this deployment created after it failed or was cancelled. Verifies ownership. */
   abandon?(deployment: DeploymentRecord): Promise<void>;
+  /**
+   * M15 app delete: removes the deployment's candidate even though it served (ownership-checked)
+   * and revokes the app's runtime database credential. Idempotent.
+   */
+  retire?(deployment: DeploymentRecord): Promise<void>;
 }
 /** M13: removes drained and orphaned candidates (ownership-checked); bounded per pass. */
 export interface CandidateSweeper {
@@ -99,7 +105,8 @@ export interface CandidateSweeper {
 export interface DeploymentControllerOptions {
   readonly store: DeploymentStore &
     Pick<ArtifactStore, "artifact" | "artifactForAttempt"> &
-    Pick<SourceStore, "source">;
+    Pick<SourceStore, "source"> &
+    Partial<Pick<ManagementStore, "stopped">>;
   readonly queue: TaskQueue<DeploymentTaskBody>;
   readonly builds: Pick<BuildAdmission, "start" | "settle" | "abandon">;
   readonly stages: DeploymentStages;
@@ -205,6 +212,9 @@ function buildFailure(code: BuildErrorCode): PublicErrorCode {
   return "BUILD_FAILED";
 }
 
+/** How often a stopped workspace's deployment task looks again (M15 emergency stop). */
+export const SUSPENDED_RECHECK_MS = 5 * 60 * 1000;
+
 export class DeploymentController {
   private readonly clock: { now(): Date };
   private readonly wake: DeploymentWakeHook;
@@ -244,6 +254,15 @@ export class DeploymentController {
   }
 
   private async dispatch(task: DeploymentTaskBody): Promise<TaskResult> {
+    // M15 emergency stop: no deployment of a stopped workspace advances (nothing is claimed or
+    // changed); the task re-arms itself and the work resumes once the stop is lifted.
+    if (await this.options.store.stopped?.(task.workspaceId)) {
+      await this.followUp(
+        task,
+        new Date(this.clock.now().getTime() + SUSPENDED_RECHECK_MS).toISOString(),
+      );
+      return { status: 200, outcome: "suspended" };
+    }
     const key = {
       workspaceId: task.workspaceId,
       appId: task.appId,
@@ -501,7 +520,12 @@ export class DeploymentController {
       );
       if (artifact?.state === "building") await this.options.builds.abandon(artifact);
     }
-    if (record.state !== "active") await this.options.stages.abandon?.(record);
+    // M15: a deleted app keeps nothing: even the candidate that served goes, and its runtime
+    // credential is revoked.
+    const status = await this.options.store.appStatus(record.workspaceId, record.appId);
+    if (status?.status === "deleted" && this.options.stages.retire)
+      await this.options.stages.retire(record);
+    else if (record.state !== "active") await this.options.stages.abandon?.(record);
   }
 
   private async abandonIfEnded(record: DeploymentRecord): Promise<void> {

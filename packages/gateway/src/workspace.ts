@@ -14,12 +14,15 @@ import {
 } from "./source-admission.js";
 import { registerDeploymentRoutes, type DeploymentRouteOptions } from "./deployment-routes.js";
 import type { DeploymentStore } from "./deployment.js";
+import type { ManagementStore } from "./management.js";
 
 interface RequestContext {
   credential: WorkspaceCredential;
   principal: Principal;
   apps: readonly RegisteredApp[];
   catalog: readonly CatalogApp[];
+  /** M15 operator emergency stop: nothing is dispatched, management mutations are refused. */
+  suspended: boolean;
 }
 export interface WorkspaceGatewayOptions extends Omit<
   GatewayOptions,
@@ -131,12 +134,20 @@ export function createWorkspaceGateway(options: WorkspaceGatewayOptions) {
           activeRelease: app.activeRelease,
           state: app.state,
           generation: String(app.generation),
+          // Disabled apps and an emergency stop refuse dispatch on the very next request: the
+          // catalog is read per request, never cached (M15 revocation bound).
           status:
-            app.state === "idle" || app.state === "ready"
+            !snapshot.suspended && (app.state === "idle" || app.state === "ready")
               ? ("healthy" as const)
               : ("unhealthy" as const),
         }));
-      return { credential, principal: credential.principal, apps, catalog: snapshot.apps };
+      return {
+        credential,
+        principal: credential.principal,
+        apps,
+        catalog: snapshot.apps,
+        suspended: snapshot.suspended === true,
+      };
     };
     void authenticate().then(
       (value) => context.run(value, done),
@@ -163,7 +174,9 @@ export function createWorkspaceGateway(options: WorkspaceGatewayOptions) {
     const store =
       options.deployments.store ??
       ("submitDeployment" in options.store
-        ? (options.store as unknown as DeploymentStore & Pick<SourceStore, "source">)
+        ? (options.store as unknown as DeploymentStore &
+            ManagementStore &
+            Pick<SourceStore, "source">)
         : undefined);
     if (!store) throw new TypeError("Deployment routes require a DeploymentStore");
     registerDeploymentRoutes(gateway, {
@@ -171,6 +184,8 @@ export function createWorkspaceGateway(options: WorkspaceGatewayOptions) {
       admission: options.store,
       store,
       queue: options.deployments.queue,
+      ...(options.deployments.secrets ? { secrets: options.deployments.secrets } : {}),
+      ...(options.deployments.buildLogs ? { buildLogs: options.deployments.buildLogs } : {}),
       clock: options.clock ?? { now: () => new Date() },
       ...(options.deployments.storageTimeoutMs === undefined
         ? {}

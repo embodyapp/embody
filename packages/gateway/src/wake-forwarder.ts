@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { platformInvokerVerifier, type PlatformInvokerVerifier } from "@embody/auth";
 import { authenticateTask } from "@embody/host";
 import type { DeploymentStore } from "./deployment.js";
+import type { ManagementStore } from "./management.js";
 
 /**
  * M13 stable wake route for hosted durable apps (review B1 of `a561eaf`). A durable app's queue
@@ -21,7 +22,8 @@ export interface WakeRouteOptions {
   invokerFor(workspaceId: string, appId: string): string;
   /** Mints an ID token as `invokerEmail` for `audience` (IAM credentials `generateIdToken`). */
   mint(invokerEmail: string, audience: string, signal: AbortSignal): Promise<string>;
-  readonly store: Pick<DeploymentStore, "appStatus" | "release">;
+  readonly store: Pick<DeploymentStore, "appStatus" | "release"> &
+    Partial<Pick<ManagementStore, "stopped">>;
   /** Test seam; production verifies Google-signed tokens. */
   readonly verifier?: (audience: string, invokerEmail: string) => PlatformInvokerVerifier;
   readonly fetch?: typeof fetch;
@@ -72,6 +74,13 @@ export function registerWakeRoute(app: FastifyInstance, options: WakeRouteOption
     const { workspace, app: appId } = request.params as { workspace: string; app: string };
     const status = await options.store.appStatus(workspace, appId);
     if (!status || status.status === "deleted") return reply.status(200).send({ outcome: "gone" });
+    // M15: a disabled app's queued work (delayed steps, deliveries, leases) never runs. The task
+    // is acknowledged; the work stays in the app's database and, after an enable, MD12 recovery
+    // re-enqueues it on the app's next authenticated request.
+    if (status.status === "disabled") return reply.status(200).send({ outcome: "disabled" });
+    // An emergency stop holds work without dropping it: the queue retries after the stop.
+    if (await options.store.stopped?.(workspace))
+      return reply.status(503).header("retry-after", "300").send({ outcome: "suspended" });
     const release = status.activeReleaseId
       ? await options.store.release(workspace, appId, status.activeReleaseId)
       : null;

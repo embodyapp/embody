@@ -19,6 +19,7 @@ export {
 } from "./profile.js";
 export * from "./source.js";
 export * from "./build.js";
+export * from "./management.js";
 import { ArtifactManifestSchema } from "./build.js";
 
 const generation = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
@@ -135,6 +136,8 @@ export const PublicErrorCodeSchema = z.enum([
   "CHECK_FAILED",
   "DEPENDENCY_UNAVAILABLE",
   "ROLLBACK_INCOMPATIBLE",
+  "SUSPENDED",
+  "SECRET_IN_USE",
 ]);
 const publicMessages: Record<z.infer<typeof PublicErrorCodeSchema>, string> = {
   INVALID_INPUT: "Invalid deployment request.",
@@ -150,6 +153,10 @@ const publicMessages: Record<z.infer<typeof PublicErrorCodeSchema>, string> = {
   DEPENDENCY_UNAVAILABLE: "Deployment dependency unavailable; retry status lookup.",
   ROLLBACK_INCOMPATIBLE:
     "Rollback target is no longer retained or is incompatible with current data or workflows.",
+  SUSPENDED:
+    "Workspace operations are suspended by the platform operator; status and logs remain readable.",
+  SECRET_IN_USE:
+    "Secret version is referenced by the active release or a running deployment; roll out a newer version first.",
 };
 export const PublicErrorSchema = z
   .strictObject({
@@ -246,6 +253,23 @@ export const AppManagementSchema = z.discriminatedUnion("operation", [
     operation: z.literal("disable"),
     expectedGeneration: generation,
   }),
+  /** M15: an operator re-enables a disabled app (never a deleted one). */
+  z.strictObject({
+    version,
+    ...binding,
+    operation: z.literal("enable"),
+    expectedGeneration: generation,
+  }),
+  /**
+   * M15: redeploys the active release's admitted artifact with the app's current secret versions
+   * (secret rotation); fenced and checked like a rollback.
+   */
+  z.strictObject({
+    version,
+    ...binding,
+    operation: z.literal("rollout"),
+    expectedGeneration: generation,
+  }),
   z
     .strictObject({
       version,
@@ -289,6 +313,7 @@ export type Permission =
   | "app:disable"
   | "app:delete"
   | "secret:write"
+  | "secret:list"
   | "secret:read";
 const grants: Record<Role, readonly Permission[]> = {
   "app-caller": ["app:call", "app:read"],
@@ -298,6 +323,7 @@ const grants: Record<Role, readonly Permission[]> = {
     "deployment:read",
     "deployment:cancel",
     "app:rollback",
+    "secret:list",
   ],
   operator: [
     "app:read",
@@ -308,6 +334,7 @@ const grants: Record<Role, readonly Permission[]> = {
     "app:disable",
     "app:delete",
     "secret:write",
+    "secret:list",
   ],
 };
 export interface ScopedGrant {

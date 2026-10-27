@@ -9,6 +9,7 @@ import {
 } from "@embody/core";
 import {
   ScopedGrantSchema,
+  SecretReferenceSchema,
   WorkspaceIdSchema,
   AppIdSchema,
   ReleaseIdSchema,
@@ -54,7 +55,7 @@ import {
   releasedPin,
   releaseSourceUsable,
   replacedRelease,
-  rollbackKey,
+  redeployKey,
   wakeFor,
   type AppControl,
   type ClaimDecision,
@@ -67,6 +68,31 @@ import {
   type StageOutcome,
   type SubmitInput,
 } from "./deployment.js";
+import {
+  decideLifecycle,
+  decideRevoke,
+  decideSecretWrite,
+  deletedRelease,
+  deletionCleanup,
+  deletionReceipt,
+  deploymentEntry,
+  fencedDeployment,
+  lifecycleCatalog,
+  markDisabled,
+  olderThan,
+  newestFirst,
+  referencedVersions,
+  releasedForDeletion,
+  requestEntry,
+  revokedForDeletion,
+  type LifecycleInput,
+  type LifecycleResult,
+  type LogQuery,
+  type ManagementStore,
+  type SecretRecord,
+  type StopScope,
+} from "./management.js";
+import type { AppDeletionReceipt, LogEntry } from "@embody/cloud-contracts";
 
 export interface Workspace {
   readonly id: string;
@@ -111,6 +137,8 @@ export type CredentialWrite = Omit<WorkspaceCredential, "revision">;
 export interface WorkspaceSnapshot {
   readonly workspace: Workspace;
   readonly apps: readonly CatalogApp[];
+  /** M15: an operator emergency stop covers this workspace (global or its own). */
+  readonly suspended?: boolean;
 }
 /** Trusted control-plane interface. All mutations are CAS; null means create only. */
 export interface GatewayStore extends DispatchAdmission {
@@ -251,10 +279,34 @@ function validateRollback(input: RollbackInput): void {
     input.expectedGeneration < 0 ||
     typeof input.actorId !== "string" ||
     !input.actorId ||
-    !Number.isFinite(input.now.getTime())
+    !Number.isFinite(input.now.getTime()) ||
+    (input.secretReferences !== undefined &&
+      !input.secretReferences.every(
+        (ref) =>
+          SecretReferenceSchema.safeParse(ref).success &&
+          ref.workspaceId === input.workspaceId &&
+          ref.appId === input.appId,
+      ))
   )
     throw new BadRequestError("Invalid rollback request");
 }
+function validateLifecycle(input: LifecycleInput): void {
+  id(input.workspaceId);
+  if (
+    !AppIdSchema.safeParse(input.appId).success ||
+    !["disable", "enable", "delete"].includes(input.operation) ||
+    !Number.isSafeInteger(input.expectedGeneration) ||
+    input.expectedGeneration < 0 ||
+    typeof input.actorId !== "string" ||
+    !input.actorId ||
+    !Number.isFinite(input.now.getTime())
+  )
+    throw new BadRequestError("Invalid lifecycle request");
+}
+function validateStopScope(scope: StopScope): void {
+  if (scope !== "global") id(scope);
+}
+const LOG_LIMIT = (limit: number) => Math.max(1, Math.min(200, Math.trunc(limit)));
 const newLeaseToken = () => randomBytes(16).toString("hex");
 function validateSourceInput(input: SourceAdmitInput): void {
   id(input.workspaceId);
@@ -275,8 +327,11 @@ function sameSourceIdentity(a: SourceRecord, b: SourceRecord): boolean {
 }
 /* eslint-disable @typescript-eslint/require-await -- Atomic memory operations contain no await; async converts validation/CAS errors to rejections. */
 export class MemoryGatewayStore
-  implements GatewayStore, SourceStore, ArtifactStore, DeploymentStore
+  implements GatewayStore, SourceStore, ArtifactStore, DeploymentStore, ManagementStore
 {
+  private secretRecords = new Map<string, SecretRecord>();
+  private deletions = new Map<string, AppDeletionReceipt>();
+  private stops = new Map<string, { actor: string; at: string }>();
   private sources = new Map<string, SourceRecord>();
   private artifacts = new Map<string, ArtifactRecord>();
   private workspaces = new Map<string, Workspace>();
@@ -284,7 +339,7 @@ export class MemoryGatewayStore
   private credentials = new Map<string, WorkspaceCredential>();
   private admissions = new Map<
     string,
-    { record: AuditRecord; expires: number; completed: boolean }
+    { record: AuditRecord; expires: number; completed: boolean; admittedAt: string }
   >();
   private quotas = new Map<string, { count: number; reset: number }>();
   public async admit(record: AuditRecord): Promise<void> {
@@ -302,13 +357,23 @@ export class MemoryGatewayStore
       throw new DispatchRateLimitedError(Math.max(1, Math.ceil((quota.reset - now) / 1000)));
     quota.count++;
     this.quotas.set(workspace, quota);
-    this.admissions.set(key, { record: clone(record), expires: now + 60_000, completed: false });
+    this.admissions.set(key, {
+      record: clone(record),
+      expires: now + 60_000,
+      completed: false,
+      admittedAt: new Date(now).toISOString(),
+    });
   }
   public async complete(record: AuditRecord): Promise<void> {
     const key = `${record.orgId}/${record.requestId}`;
     const prior = this.admissions.get(key);
     if (prior && !prior.completed)
-      this.admissions.set(key, { record: clone(record), expires: 0, completed: true });
+      this.admissions.set(key, {
+        record: clone(record),
+        expires: 0,
+        completed: true,
+        admittedAt: prior.admittedAt,
+      });
   }
   public constructor(private readonly policy: GatewayRegistryOptions = defaultPolicy) {}
   public async createWorkspace(workspaceId: string): Promise<Workspace> {
@@ -326,6 +391,7 @@ export class MemoryGatewayStore
       apps: [...this.apps.values()]
         .filter((a) => a.workspaceId === workspaceId)
         .sort((a, b) => a.appId.localeCompare(b.appId)),
+      ...(this.isStopped(workspaceId) ? { suspended: true } : {}),
     });
   }
   private bump(workspaceId: string): void {
@@ -616,7 +682,7 @@ export class MemoryGatewayStore
       const origin = target
         ? (this.deployments.get(this.deploymentKey(ws, target.deploymentId)) ?? null)
         : null;
-      const key = rollbackKey(input.releaseId, input.expectedGeneration);
+      const key = redeployKey(input);
       const existing =
         [...this.deployments.values()].find(
           (d) => d.workspaceId === ws && d.appId === input.appId && d.idempotencyKey === key,
@@ -864,12 +930,214 @@ export class MemoryGatewayStore
   ): Promise<"in-progress" | "committed" | "aborted" | "unknown"> {
     return this.txids.get(txid) ?? "unknown";
   }
+  // M15 lifecycle, secrets, logs and the emergency stop.
+  private isStopped(workspaceId: string): boolean {
+    return this.stops.has("global") || this.stops.has(workspaceId);
+  }
+  public changeLifecycle(
+    input: LifecycleInput,
+    wake: DeploymentWakeHook,
+  ): Promise<LifecycleResult> {
+    validateLifecycle(input);
+    return this.transaction(async (txid) => {
+      const ws = input.workspaceId;
+      if (!this.workspaces.has(ws)) throw new DeploymentError("NOT_FOUND");
+      const key = `${ws}/${input.appId}`;
+      const prior = this.apps.get(key);
+      if (decideLifecycle(prior, input) === "replay") {
+        const receipt = this.deletions.get(key);
+        return {
+          app: clone(prior!),
+          changed: false,
+          cancelled: [],
+          ...(prior!.state === "deleted" && receipt ? { receipt: clone(receipt) } : {}),
+        };
+      }
+      const app = prior!;
+      const operation = input.operation;
+      const deployments = new Map<string, DeploymentRecord>();
+      const wakes = [];
+      const cancelled: string[] = [];
+      for (const [id, record] of this.deployments) {
+        if (record.workspaceId !== ws || record.appId !== input.appId) continue;
+        if (operation !== "enable") {
+          const fenced = fencedDeployment(clone(record), operation, input.now);
+          if (fenced) {
+            deployments.set(id, fenced.next);
+            if (fenced.wake) wakes.push(fenced.wake);
+            cancelled.push(record.deploymentId);
+            continue;
+          }
+        }
+        if (operation === "delete") {
+          const cleanup = deletionCleanup(clone(record), input.now);
+          if (cleanup) {
+            deployments.set(id, cleanup.next);
+            wakes.push(cleanup.wake);
+          }
+        }
+      }
+      const catalog = lifecycleCatalog(app, operation);
+      const next: CatalogApp = {
+        ...catalog,
+        revision: app.revision + 1,
+        generation: app.generation + 1,
+        lifecycleFence: nextLifecycleFence(app, catalog),
+      };
+      const receipt =
+        operation === "delete"
+          ? deletionReceipt(app, input, next.lifecycleFence ?? 0, cancelled)
+          : undefined;
+      if (wakes.length) await wake(wakes, txid);
+      // Committed below, after every check and the wake (memory transactions are serialized).
+      for (const [id, record] of deployments) this.deployments.set(id, record);
+      if (operation === "delete") {
+        for (const [id, release] of this.releases)
+          if (release.workspaceId === ws && release.appId === input.appId)
+            this.releases.set(id, deletedRelease(release, input.now));
+        for (const [id, source] of this.sources)
+          if (source.workspaceId === ws && source.appId === input.appId && !source.purging)
+            this.sources.set(id, {
+              ...releasedForDeletion(source, input.now),
+              revision: source.revision + 1,
+            });
+        for (const [id, artifact] of this.artifacts)
+          if (artifact.workspaceId === ws && artifact.appId === input.appId && !artifact.purging)
+            this.artifacts.set(id, {
+              ...releasedForDeletion(artifact, input.now),
+              revision: artifact.revision + 1,
+            });
+        for (const [id, record] of this.secretRecords)
+          if (record.workspaceId === ws && record.appId === input.appId)
+            this.secretRecords.set(id, revokedForDeletion(record, input.now));
+        this.deletions.set(key, receipt!);
+      }
+      this.apps.set(key, next);
+      this.bump(ws);
+      return {
+        app: clone(next),
+        changed: true,
+        cancelled,
+        ...(receipt ? { receipt: clone(receipt) } : {}),
+      };
+    });
+  }
+  public async deletionReceipt(
+    workspaceId: string,
+    appId: string,
+  ): Promise<AppDeletionReceipt | null> {
+    return clone(this.deletions.get(`${workspaceId}/${appId}`) ?? null);
+  }
+  public async secrets(workspaceId: string, appId: string): Promise<readonly SecretRecord[]> {
+    return [...this.secretRecords.values()]
+      .filter((record) => record.workspaceId === workspaceId && record.appId === appId)
+      .sort((a, b) => (a.name < b.name ? -1 : 1))
+      .map(clone);
+  }
+  public putSecretVersion(
+    input: Parameters<ManagementStore["putSecretVersion"]>[0],
+  ): Promise<SecretRecord> {
+    id(input.workspaceId);
+    return this.transaction(async () => {
+      const app = this.catalogApp(input.workspaceId, input.appId);
+      if (!app || app.state === "deleted") throw new DeploymentError("NOT_FOUND");
+      const key = `${input.workspaceId}/${input.appId}/${input.name}`;
+      const count = [...this.secretRecords.values()].filter(
+        (record) => record.workspaceId === input.workspaceId && record.appId === input.appId,
+      ).length;
+      const next = decideSecretWrite(clone(this.secretRecords.get(key)), input, count);
+      this.secretRecords.set(key, next);
+      return clone(next);
+    });
+  }
+  public revokeSecretVersion(
+    input: Parameters<ManagementStore["revokeSecretVersion"]>[0],
+  ): Promise<SecretRecord> {
+    id(input.workspaceId);
+    return this.transaction(async () => {
+      const app = this.catalogApp(input.workspaceId, input.appId);
+      if (!app || app.state === "deleted") throw new DeploymentError("NOT_FOUND");
+      const key = `${input.workspaceId}/${input.appId}/${input.name}`;
+      const active = app.activeRelease
+        ? this.releases.get(`${input.workspaceId}/${app.activeRelease}`)
+        : undefined;
+      const references = [
+        ...(active?.manifest.secretReferences ?? []),
+        ...[...this.deployments.values()]
+          .filter(
+            (d) =>
+              d.workspaceId === input.workspaceId &&
+              d.appId === input.appId &&
+              !TERMINAL.has(d.state),
+          )
+          .flatMap((d) => d.submission.secretReferences),
+      ];
+      const { next, changed } = decideRevoke(
+        clone(this.secretRecords.get(key)),
+        input.secretVersion,
+        referencedVersions(references, input.name),
+        input.now,
+      );
+      if (changed) this.secretRecords.set(key, next);
+      return clone(next);
+    });
+  }
+  public confirmSecretDisabled(
+    workspaceId: string,
+    appId: string,
+    name: string,
+    secretVersion: number,
+  ): Promise<void> {
+    return this.transaction(async () => {
+      const key = `${workspaceId}/${appId}/${name}`;
+      const record = this.secretRecords.get(key);
+      if (record) this.secretRecords.set(key, markDisabled(record, secretVersion));
+    });
+  }
+  public async appLogs(query: LogQuery): Promise<readonly LogEntry[]> {
+    id(query.workspaceId);
+    const limit = LOG_LIMIT(query.limit) + 1;
+    const aliases = new Set([query.appId, ...(query.aliases ?? [])]);
+    const requests = [...this.admissions.values()]
+      .filter(
+        (entry) =>
+          entry.record.orgId === query.workspaceId &&
+          entry.record.appId !== undefined &&
+          aliases.has(entry.record.appId) &&
+          entry.admittedAt >= query.since,
+      )
+      .map((entry) => requestEntry(entry.record, entry.admittedAt))
+      .filter((entry): entry is LogEntry => entry !== null);
+    const deployments = [...this.deployments.values()]
+      .filter(
+        (d) =>
+          d.workspaceId === query.workspaceId &&
+          d.appId === query.appId &&
+          d.updatedAt >= query.since,
+      )
+      .map(deploymentEntry);
+    return [...requests, ...deployments]
+      .filter((entry) => olderThan(entry, query.before))
+      .sort(newestFirst)
+      .slice(0, limit)
+      .map(clone);
+  }
+  public setStop(scope: StopScope, stopped: boolean, actor: string, now: Date): Promise<void> {
+    validateStopScope(scope);
+    return this.transaction(async () => {
+      if (stopped) this.stops.set(scope, { actor, at: now.toISOString() });
+      else this.stops.delete(scope);
+    });
+  }
+  public async stopped(workspaceId: string): Promise<boolean> {
+    return this.isStopped(workspaceId);
+  }
   public async close(): Promise<void> {}
 }
 /* eslint-enable @typescript-eslint/require-await */
 /** Platform database only. Migrations must be invoked separately using the maintenance role. */
 export class PostgresGatewayStore
-  implements GatewayStore, SourceStore, ArtifactStore, DeploymentStore
+  implements GatewayStore, SourceStore, ArtifactStore, DeploymentStore, ManagementStore
 {
   private readonly pool: Pool;
   private closing?: Promise<void>;
@@ -919,7 +1187,13 @@ export class PostgresGatewayStore
         CREATE INDEX IF NOT EXISTS embody_platform_artifacts_retention ON embody_platform_artifacts(retain_until) WHERE NOT pinned;
         CREATE TABLE IF NOT EXISTS embody_platform_deployments (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), deployment_id text NOT NULL, app_id text NOT NULL, idempotency_key text NOT NULL, state text NOT NULL CHECK (state IN ('accepted','validating','building','provisioning','checking','promoting','active','failed','cancelled')), due_at timestamptz NOT NULL, lease_until timestamptz, cleanup boolean NOT NULL DEFAULT false, retain_until timestamptz NOT NULL, revision bigint NOT NULL CHECK (revision > 0), document jsonb NOT NULL, PRIMARY KEY(workspace_id,deployment_id), UNIQUE(workspace_id,app_id,idempotency_key));
         CREATE INDEX IF NOT EXISTS embody_platform_deployments_due ON embody_platform_deployments(due_at) WHERE state NOT IN ('active','failed','cancelled') OR cleanup;
-        CREATE TABLE IF NOT EXISTS embody_platform_releases (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), release_id text NOT NULL, app_id text NOT NULL, deployment_id text NOT NULL, artifact_id text NOT NULL, created_at timestamptz NOT NULL, document jsonb NOT NULL, PRIMARY KEY(workspace_id,release_id), UNIQUE(workspace_id,deployment_id));`);
+        CREATE TABLE IF NOT EXISTS embody_platform_releases (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), release_id text NOT NULL, app_id text NOT NULL, deployment_id text NOT NULL, artifact_id text NOT NULL, created_at timestamptz NOT NULL, document jsonb NOT NULL, PRIMARY KEY(workspace_id,release_id), UNIQUE(workspace_id,deployment_id));
+        CREATE TABLE IF NOT EXISTS embody_platform_secrets (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), app_id text NOT NULL, name text NOT NULL, revision bigint NOT NULL CHECK (revision > 0), document jsonb NOT NULL, PRIMARY KEY(workspace_id,app_id,name));
+        CREATE TABLE IF NOT EXISTS embody_platform_app_deletions (workspace_id text NOT NULL REFERENCES embody_platform_workspaces(id), app_id text NOT NULL, document jsonb NOT NULL, PRIMARY KEY(workspace_id,app_id));
+        CREATE TABLE IF NOT EXISTS embody_platform_stops (scope text PRIMARY KEY CHECK (scope = 'global' OR scope ~ '^ws_[a-z0-9]{8,64}$'), document jsonb NOT NULL);
+        CREATE INDEX IF NOT EXISTS embody_platform_audit_app ON embody_platform_audit(workspace_id,(document->>'appId'),admitted_at DESC);
+        CREATE INDEX IF NOT EXISTS embody_platform_audit_age ON embody_platform_audit(workspace_id,admitted_at) WHERE completed;
+        CREATE INDEX IF NOT EXISTS embody_platform_deployments_app ON embody_platform_deployments(workspace_id,app_id,state);`);
       // M13: releases replaced before M13 have no lifecycle and may still pin their artifact
       // and source (M12 re-review N1/N3). Mark them inactive now, with the inactive-release
       // retention starting now, and release what any inactive release still pins. An inactive
@@ -962,14 +1236,24 @@ export class PostgresGatewayStore
     return { id: workspaceId, revision: 1 };
   }
   public async snapshot(workspaceId: string): Promise<WorkspaceSnapshot | null> {
-    const result = await this.pool.query<{ id: string; revision: string; apps: CatalogApp[] }>(
-      `SELECT w.id,w.revision, COALESCE(jsonb_agg(a.document ORDER BY a.id) FILTER (WHERE a.id IS NOT NULL),'[]'::jsonb) AS apps
+    const result = await this.pool.query<{
+      id: string;
+      revision: string;
+      apps: CatalogApp[];
+      suspended: boolean;
+    }>(
+      `SELECT w.id,w.revision, COALESCE(jsonb_agg(a.document ORDER BY a.id) FILTER (WHERE a.id IS NOT NULL),'[]'::jsonb) AS apps,
+      EXISTS (SELECT 1 FROM embody_platform_stops s WHERE s.scope IN ('global', w.id)) AS suspended
       FROM embody_platform_workspaces w LEFT JOIN embody_platform_apps a ON a.workspace_id=w.id WHERE w.id=$1 GROUP BY w.id,w.revision`,
       [workspaceId],
     );
     const row = result.rows[0];
     return row
-      ? { workspace: { id: row.id, revision: Number(row.revision) }, apps: row.apps }
+      ? {
+          workspace: { id: row.id, revision: Number(row.revision) },
+          apps: row.apps,
+          ...(row.suspended ? { suspended: true } : {}),
+        }
       : null;
   }
   private async write<T extends { workspaceId: string; id?: string; appId?: string }, R>(
@@ -1085,6 +1369,13 @@ export class PostgresGatewayStore
       await client.query(
         `INSERT INTO embody_platform_audit(workspace_id,request_id,document,lease_until) VALUES($1,$2,$3,clock_timestamp()+interval '60 seconds')`,
         [record.orgId, record.requestId, record],
+      );
+      // M15 log retention: each admission removes a few expired completed records of its own
+      // workspace, so the audit (and the logs read from it) stay bounded without a periodic job.
+      await client.query(
+        `DELETE FROM embody_platform_audit WHERE ctid IN (SELECT ctid FROM embody_platform_audit
+          WHERE workspace_id=$1 AND completed AND admitted_at < clock_timestamp() - interval '${HOSTED_PROFILE.logRetentionDays} days' LIMIT 20)`,
+        [record.orgId],
       );
       await client.query("COMMIT");
     } catch (error) {
@@ -1574,7 +1865,7 @@ export class PostgresGatewayStore
           (
             await client.query<{ document: DeploymentRecord }>(
               "SELECT document FROM embody_platform_deployments WHERE workspace_id=$1 AND app_id=$2 AND idempotency_key=$3",
-              [ws, input.appId, rollbackKey(input.releaseId, input.expectedGeneration)],
+              [ws, input.appId, redeployKey(input)],
             )
           ).rows[0]?.document ?? null;
         const source = target?.sourceUploadId
@@ -2018,6 +2309,282 @@ export class PostgresGatewayStore
       : status === "committed" || status === "aborted"
         ? status
         : "unknown";
+  }
+  // M15 lifecycle, secrets, logs and the emergency stop. Lock order as for promotions:
+  // workspace, then deployments, then artifacts and sources, then secrets.
+  public changeLifecycle(
+    input: LifecycleInput,
+    wake: DeploymentWakeHook,
+  ): Promise<LifecycleResult> {
+    validateLifecycle(input);
+    return this.deploymentTransaction(async (client, txid) => {
+      const ws = input.workspaceId;
+      const workspace = await client.query(
+        "SELECT id FROM embody_platform_workspaces WHERE id=$1 FOR UPDATE",
+        [ws],
+      );
+      if (!workspace.rowCount) throw new DeploymentError("NOT_FOUND");
+      const prior = await this.catalogDocument(client, ws, input.appId);
+      if (decideLifecycle(prior, input) === "replay") {
+        const receipt =
+          prior!.state === "deleted" ? await this.deletionReceipt(ws, input.appId) : null;
+        return { app: prior!, changed: false, cancelled: [], ...(receipt ? { receipt } : {}) };
+      }
+      const app = prior!;
+      const operation = input.operation;
+      const wakes = [];
+      const cancelled: string[] = [];
+      const records = (
+        await client.query<{ document: DeploymentRecord }>(
+          "SELECT document FROM embody_platform_deployments WHERE workspace_id=$1 AND app_id=$2 AND (state NOT IN ('active','failed','cancelled') OR state='active') ORDER BY deployment_id FOR UPDATE",
+          [ws, input.appId],
+        )
+      ).rows.map((row) => row.document);
+      for (const record of records) {
+        if (operation === "enable") break;
+        const fenced = fencedDeployment(record, operation, input.now);
+        const cleanup =
+          !fenced && operation === "delete" ? deletionCleanup(record, input.now) : null;
+        const next = fenced?.next ?? cleanup?.next;
+        if (!next) continue;
+        await this.writeDeployment(client, next, record.revision);
+        if (fenced) cancelled.push(record.deploymentId);
+        const due = fenced?.wake ?? cleanup?.wake;
+        if (due) wakes.push(due);
+      }
+      const catalog = lifecycleCatalog(app, operation);
+      const next: CatalogApp = {
+        ...catalog,
+        revision: app.revision + 1,
+        generation: app.generation + 1,
+        lifecycleFence: nextLifecycleFence(app, catalog),
+      };
+      let receipt: AppDeletionReceipt | undefined;
+      if (operation === "delete") {
+        receipt = deletionReceipt(app, input, next.lifecycleFence ?? 0, cancelled);
+        const at = input.now.toISOString();
+        for (const release of (
+          await client.query<{ document: ReleaseRecord }>(
+            "SELECT document FROM embody_platform_releases WHERE workspace_id=$1 AND app_id=$2 FOR UPDATE",
+            [ws, input.appId],
+          )
+        ).rows)
+          await client.query(
+            "UPDATE embody_platform_releases SET document=$3 WHERE workspace_id=$1 AND release_id=$2",
+            [ws, release.document.releaseId, deletedRelease(release.document, input.now)],
+          );
+        for (const table of ["artifacts", "sources"] as const)
+          await client.query(
+            `UPDATE embody_platform_${table} t SET pinned=false, retain_until=least(t.retain_until,$3::timestamptz), revision=t.revision+1,
+              document=(t.document - 'pinnedBy') || jsonb_build_object('retainUntil',
+                to_char(least(t.retain_until,$3::timestamptz) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), 'revision', t.revision+1)
+            WHERE t.workspace_id=$1 AND t.app_id=$2 AND NOT t.purging`,
+            [ws, input.appId, at],
+          );
+        for (const row of (
+          await client.query<{ document: SecretRecord; revision: string }>(
+            "SELECT document,revision FROM embody_platform_secrets WHERE workspace_id=$1 AND app_id=$2 FOR UPDATE",
+            [ws, input.appId],
+          )
+        ).rows) {
+          const revoked = revokedForDeletion(row.document, input.now);
+          await client.query(
+            "UPDATE embody_platform_secrets SET revision=$4,document=$5 WHERE workspace_id=$1 AND app_id=$2 AND name=$3",
+            [ws, input.appId, revoked.name, revoked.revision, revoked],
+          );
+        }
+        await client.query(
+          "INSERT INTO embody_platform_app_deletions(workspace_id,app_id,document) VALUES($1,$2,$3)",
+          [ws, input.appId, receipt],
+        );
+      }
+      const pointer = await client.query(
+        `UPDATE embody_platform_apps SET document=$3 WHERE workspace_id=$1 AND id=$2 AND (document->>'revision')::bigint=$4`,
+        [ws, input.appId, next, app.revision],
+      );
+      if (pointer.rowCount !== 1) throw new ConflictError("App revision conflict");
+      await client.query("UPDATE embody_platform_workspaces SET revision=revision+1 WHERE id=$1", [
+        ws,
+      ]);
+      if (wakes.length) await wake(wakes, await txid());
+      return { app: next, changed: true, cancelled, ...(receipt ? { receipt } : {}) };
+    });
+  }
+  public async deletionReceipt(
+    workspaceId: string,
+    appId: string,
+  ): Promise<AppDeletionReceipt | null> {
+    return (
+      (
+        await this.pool.query<{ document: AppDeletionReceipt }>(
+          "SELECT document FROM embody_platform_app_deletions WHERE workspace_id=$1 AND app_id=$2",
+          [workspaceId, appId],
+        )
+      ).rows[0]?.document ?? null
+    );
+  }
+  public async secrets(workspaceId: string, appId: string): Promise<readonly SecretRecord[]> {
+    return (
+      await this.pool.query<{ document: SecretRecord }>(
+        "SELECT document FROM embody_platform_secrets WHERE workspace_id=$1 AND app_id=$2 ORDER BY name",
+        [workspaceId, appId],
+      )
+    ).rows.map((row) => row.document);
+  }
+  public putSecretVersion(
+    input: Parameters<ManagementStore["putSecretVersion"]>[0],
+  ): Promise<SecretRecord> {
+    id(input.workspaceId);
+    return this.deploymentTransaction(async (client) => {
+      const workspace = await client.query(
+        "SELECT id FROM embody_platform_workspaces WHERE id=$1 FOR UPDATE",
+        [input.workspaceId],
+      );
+      if (!workspace.rowCount) throw new DeploymentError("NOT_FOUND");
+      const app = await this.catalogDocument(client, input.workspaceId, input.appId);
+      if (!app || app.state === "deleted") throw new DeploymentError("NOT_FOUND");
+      const rows = (
+        await client.query<{ document: SecretRecord }>(
+          "SELECT document FROM embody_platform_secrets WHERE workspace_id=$1 AND app_id=$2 FOR UPDATE",
+          [input.workspaceId, input.appId],
+        )
+      ).rows.map((row) => row.document);
+      const prior = rows.find((record) => record.name === input.name);
+      const next = decideSecretWrite(prior, input, rows.length);
+      await client.query(
+        `INSERT INTO embody_platform_secrets(workspace_id,app_id,name,revision,document) VALUES($1,$2,$3,$4,$5)
+        ON CONFLICT(workspace_id,app_id,name) DO UPDATE SET revision=EXCLUDED.revision,document=EXCLUDED.document`,
+        [input.workspaceId, input.appId, input.name, next.revision, next],
+      );
+      return next;
+    });
+  }
+  public revokeSecretVersion(
+    input: Parameters<ManagementStore["revokeSecretVersion"]>[0],
+  ): Promise<SecretRecord> {
+    id(input.workspaceId);
+    return this.deploymentTransaction(async (client) => {
+      // The workspace lock orders this against submissions and promotions, which read the
+      // references this check depends on.
+      const workspace = await client.query(
+        "SELECT id FROM embody_platform_workspaces WHERE id=$1 FOR UPDATE",
+        [input.workspaceId],
+      );
+      if (!workspace.rowCount) throw new DeploymentError("NOT_FOUND");
+      const app = await this.catalogDocument(client, input.workspaceId, input.appId);
+      if (!app || app.state === "deleted") throw new DeploymentError("NOT_FOUND");
+      const record = (
+        await client.query<{ document: SecretRecord }>(
+          "SELECT document FROM embody_platform_secrets WHERE workspace_id=$1 AND app_id=$2 AND name=$3 FOR UPDATE",
+          [input.workspaceId, input.appId, input.name],
+        )
+      ).rows[0]?.document;
+      const active = app.activeRelease
+        ? (
+            await client.query<{ document: ReleaseRecord }>(
+              "SELECT document FROM embody_platform_releases WHERE workspace_id=$1 AND release_id=$2",
+              [input.workspaceId, app.activeRelease],
+            )
+          ).rows[0]?.document
+        : undefined;
+      const running = (
+        await client.query<{ document: DeploymentRecord }>(
+          "SELECT document FROM embody_platform_deployments WHERE workspace_id=$1 AND app_id=$2 AND state NOT IN ('active','failed','cancelled')",
+          [input.workspaceId, input.appId],
+        )
+      ).rows.map((row) => row.document);
+      const references = [
+        ...(active?.manifest.secretReferences ?? []),
+        ...running.flatMap((d) => d.submission.secretReferences),
+      ];
+      const { next, changed } = decideRevoke(
+        record,
+        input.secretVersion,
+        referencedVersions(references, input.name),
+        input.now,
+      );
+      if (changed)
+        await client.query(
+          "UPDATE embody_platform_secrets SET revision=$4,document=$5 WHERE workspace_id=$1 AND app_id=$2 AND name=$3",
+          [input.workspaceId, input.appId, input.name, next.revision, next],
+        );
+      return next;
+    });
+  }
+  public async confirmSecretDisabled(
+    workspaceId: string,
+    appId: string,
+    name: string,
+    secretVersion: number,
+  ): Promise<void> {
+    await this.deploymentTransaction(async (client) => {
+      const record = (
+        await client.query<{ document: SecretRecord }>(
+          "SELECT document FROM embody_platform_secrets WHERE workspace_id=$1 AND app_id=$2 AND name=$3 FOR UPDATE",
+          [workspaceId, appId, name],
+        )
+      ).rows[0]?.document;
+      if (!record) return;
+      const next = markDisabled(record, secretVersion);
+      await client.query(
+        "UPDATE embody_platform_secrets SET revision=$4,document=$5 WHERE workspace_id=$1 AND app_id=$2 AND name=$3",
+        [workspaceId, appId, name, next.revision, next],
+      );
+    });
+  }
+  public async appLogs(query: LogQuery): Promise<readonly LogEntry[]> {
+    id(query.workspaceId);
+    const limit = LOG_LIMIT(query.limit) + 1;
+    const aliases = [query.appId, ...(query.aliases ?? [])];
+    const before = query.before?.time ?? null;
+    // Indexed, bounded reads of this workspace's own rows: no provider query is ever made.
+    const requests = (
+      await this.pool.query<{ document: AuditRecord; admitted: string }>(
+        `SELECT document, to_char(admitted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS admitted
+        FROM embody_platform_audit WHERE workspace_id=$1 AND document->>'appId' = ANY($2::text[])
+          AND admitted_at >= $3::timestamptz AND ($4::timestamptz IS NULL OR admitted_at <= $4::timestamptz)
+        ORDER BY admitted_at DESC LIMIT $5`,
+        [query.workspaceId, aliases, query.since, before, limit + 50],
+      )
+    ).rows
+      .map((row) => requestEntry(row.document, row.admitted))
+      .filter((entry): entry is LogEntry => entry !== null);
+    const deployments = (
+      await this.pool.query<{ document: DeploymentRecord }>(
+        `SELECT document FROM embody_platform_deployments WHERE workspace_id=$1 AND app_id=$2
+          AND document->>'updatedAt' >= $3 AND ($4::text IS NULL OR document->>'updatedAt' <= $4)
+        ORDER BY document->>'updatedAt' DESC LIMIT $5`,
+        [query.workspaceId, query.appId, query.since, before, limit + 50],
+      )
+    ).rows.map((row) => deploymentEntry(row.document));
+    return [...requests, ...deployments]
+      .filter((entry) => olderThan(entry, query.before))
+      .sort(newestFirst)
+      .slice(0, limit);
+  }
+  public async setStop(
+    scope: StopScope,
+    stopped: boolean,
+    actor: string,
+    now: Date,
+  ): Promise<void> {
+    validateStopScope(scope);
+    if (stopped)
+      await this.pool.query(
+        "INSERT INTO embody_platform_stops(scope,document) VALUES($1,$2) ON CONFLICT(scope) DO UPDATE SET document=EXCLUDED.document",
+        [scope, { actor, at: now.toISOString() }],
+      );
+    else await this.pool.query("DELETE FROM embody_platform_stops WHERE scope=$1", [scope]);
+  }
+  public async stopped(workspaceId: string): Promise<boolean> {
+    return (
+      (
+        await this.pool.query<{ stopped: boolean }>(
+          "SELECT EXISTS (SELECT 1 FROM embody_platform_stops WHERE scope IN ('global',$1)) AS stopped",
+          [workspaceId],
+        )
+      ).rows[0]?.stopped ?? false
+    );
   }
   public close(): Promise<void> {
     return (this.closing ??= this.pool.end());
