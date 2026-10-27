@@ -215,6 +215,11 @@ export const DeploymentTransitionSchema = z
 export const AppStatusSchema = z.strictObject({
   version,
   ...binding,
+  /** The app's CLI/MCP namespace (M14: lets the CLI resolve `--app <name>`). Not an identity. */
+  name: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]{0,62}$/)
+    .optional(),
   generation,
   lifecycleFence: generation,
   status: z.enum(["enabled", "disabled", "deleted"]),

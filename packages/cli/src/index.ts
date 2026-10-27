@@ -13,24 +13,11 @@ export {
 } from "./dev.js";
 export { startMcpBridge, type McpBridge, type McpBridgeOptions } from "./mcp-bridge.js";
 import { runSourceCommand } from "./source.js";
+import { EXIT, USAGE as MANAGE_USAGE, runManageCommand } from "./manage.js";
+import { joinUrl as gatewayUrl, resolveTarget, TargetError } from "./target.js";
 
-function gatewayUrl(base: string | URL | undefined, path: string): URL {
-  const url = new URL(base ?? "");
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}/${path}`;
-  url.search = "";
-  url.hash = "";
-  return url;
-}
-
-export const EXIT = {
-  usage: 2,
-  auth: 3,
-  forbidden: 4,
-  notFound: 5,
-  remote: 6,
-  unavailable: 7,
-  internal: 1,
-} as const;
+export { EXIT, hostedCapabilities } from "./manage.js";
+export { resolveTarget, type GatewayTarget } from "./target.js";
 export interface CliIo {
   readonly stdin: NodeJS.ReadableStream;
   readonly stdout: NodeJS.WritableStream;
@@ -41,6 +28,12 @@ export interface CliOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly io?: CliIo;
   readonly signal?: AbortSignal;
+  /** Deployment status polling while waiting (tests and embedders); defaults to 2 s timers. */
+  readonly poll?: {
+    readonly intervalMs?: number;
+    readonly sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+    readonly now?: () => number;
+  };
 }
 interface Schema {
   readonly type?: string;
@@ -57,13 +50,18 @@ type CatalogApp = {
   readonly appId: string;
   readonly manifest: {
     readonly entities: Readonly<Record<string, { readonly schema: Schema }>>;
-    readonly actions: Readonly<Record<string, { readonly inputSchema: Schema }>>;
+    readonly actions: Readonly<
+      Record<string, { readonly inputSchema: Schema; readonly effect?: string }>
+    >;
   };
 };
 interface CliConfig {
   readonly defaultProfile?: string;
   readonly profiles?: Readonly<
-    Record<string, { readonly baseUrl?: string; readonly token?: string }>
+    Record<
+      string,
+      { readonly baseUrl?: string; readonly token?: string; readonly workspace?: string }
+    >
   >;
 }
 interface CatalogCache {
@@ -114,12 +112,39 @@ function scalar(value: string, schema?: Schema): unknown {
     throw new Error("must be an allowed value");
   return value;
 }
+/** An option's name without any `=value` part: error messages never echo values (M14.c). */
+export function optionName(arg: string): string {
+  const name = arg.slice(2);
+  const equals = name.indexOf("=");
+  return equals >= 0 ? name.slice(0, equals) : name;
+}
+/**
+ * Removes a global `--name <value>` or `--name=<value>` from `args`. `undefined` when absent;
+ * a missing value is an error that names the option only.
+ */
+function takeOption(args: string[], name: string): string | undefined {
+  const index = args.findIndex((arg) => arg === `--${name}` || arg.startsWith(`--${name}=`));
+  if (index < 0) return undefined;
+  const arg = args[index]!;
+  if (arg !== `--${name}`) {
+    args.splice(index, 1);
+    const value = arg.slice(name.length + 3);
+    if (!value) throw new Error(`Missing value for --${name}`);
+    return value;
+  }
+  const value = args[index + 1];
+  if (value === undefined || value.startsWith("--")) throw new Error(`Missing value for --${name}`);
+  args.splice(index, 2);
+  return value;
+}
 function flags(args: string[], schema: Schema): Record<string, unknown> {
   const properties = (schema.properties ?? {}) as Record<string, Schema>;
   const result: Record<string, unknown> = {};
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
-    if (!arg?.startsWith("--")) throw new Error(`Unexpected argument: ${arg}`);
+    // Never echo an argument's text: it may be a credential passed in the wrong place.
+    if (!arg?.startsWith("--")) throw new Error(`Unexpected argument at position ${i + 1}`);
+    if (arg.includes("=")) throw new Error(`Use --${optionName(arg)} <value> (no "=")`);
     const key = arg.slice(2);
     const property = properties[key];
     if (!property) throw new Error(`Unknown option: --${key}`);
@@ -174,7 +199,7 @@ function validate(value: unknown, schema: Schema, path = "input"): void {
 function usage(io: CliIo, code: number = EXIT.usage): number {
   return fail(
     io,
-    "Usage: embody dev [configPath] | embody mcp --url <endpoint> [--token <token>] | embody source pack|upload [dir] [--workspace <ws>] [--app <app>] [--out <file>] | embody apps list|inspect <app> | embody <app> <entity> <create|get|list|update|delete> [id] [--flags] | embody <app> <action> [--flags]",
+    `Usage: embody dev [configPath] | embody mcp --url <endpoint> [--token <token>] | embody source pack|upload [dir] [--workspace <ws>] [--app <app>] [--out <file>] | embody apps list|inspect <app> | embody <app> <entity> <create|get|list|update|delete> [id] [--flags] | embody <app> <action> [--flags]\n${MANAGE_USAGE}\nGlobal: --profile <name> --base-url <url> --token <token> --output json|table --request-timeout <seconds>`,
     code,
   );
 }
@@ -203,9 +228,20 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
   const fetcher = options.fetch ?? fetch;
   const args = [...argv];
   if (args.length === 0 || (args.length === 1 && args[0] === "--help")) return usage(io, 0);
-  const profileIndex = args.indexOf("--profile");
-  const requestedProfile =
-    profileIndex >= 0 ? args.splice(profileIndex, 2)[1] : env["EMBODY_PROFILE"];
+  let requestedProfile: string | undefined;
+  let baseUrlOption: string | undefined;
+  let tokenOption: string | undefined;
+  let outputOption: string | undefined;
+  let timeoutOption: string | undefined;
+  try {
+    requestedProfile = takeOption(args, "profile") ?? env["EMBODY_PROFILE"];
+    baseUrlOption = takeOption(args, "base-url");
+    tokenOption = takeOption(args, "token");
+    outputOption = takeOption(args, "output");
+    timeoutOption = takeOption(args, "request-timeout");
+  } catch (error) {
+    return fail(io, error instanceof Error ? error.message : "Invalid option", EXIT.usage);
+  }
   let settings: CliConfig;
   const configPath = env["EMBODY_CONFIG"] ?? join(homedir(), ".config", "embody", "config.json");
   try {
@@ -215,56 +251,93 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
   }
   const profile = requestedProfile ?? settings.defaultProfile ?? "default";
   const profileSettings = settings.profiles?.[profile];
-  const baseUrlIndex = args.indexOf("--base-url");
   const baseUrl =
-    baseUrlIndex >= 0
-      ? args.splice(baseUrlIndex, 2)[1]
-      : (env["EMBODY_GATEWAY_URL"] ?? profileSettings?.baseUrl ?? "http://localhost:3000");
-  const tokenIndex = args.indexOf("--token");
-  const token =
-    tokenIndex >= 0
-      ? args.splice(tokenIndex, 2)[1]
-      : (env["EMBODY_TOKEN"] ?? profileSettings?.token);
+    baseUrlOption ??
+    env["EMBODY_GATEWAY_URL"] ??
+    profileSettings?.baseUrl ??
+    "http://localhost:3000";
+  const token = tokenOption ?? env["EMBODY_TOKEN"] ?? profileSettings?.token;
   const json = args.includes("--json");
   if (json) args.splice(args.indexOf("--json"), 1);
-  const outputIndex = args.indexOf("--output");
-  const output = outputIndex >= 0 ? args.splice(outputIndex, 2)[1] : "table";
+  const output = outputOption ?? "table";
   if (output !== "json" && output !== "table")
     return fail(io, "--output must be json or table", EXIT.usage);
+  const timeoutValue = timeoutOption ?? env["EMBODY_REQUEST_TIMEOUT"];
+  const requestTimeoutMs = timeoutValue === undefined ? 90_000 : Number(timeoutValue) * 1000;
+  if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0 || requestTimeoutMs > 600_000)
+    return fail(io, "--request-timeout must be more than 0 and at most 600 seconds", EXIT.usage);
+  const workspace = env["EMBODY_WORKSPACE"] ?? profileSettings?.workspace;
   if (args[0] === "source")
     return runSourceCommand(args.slice(1), {
       io,
       fetch: fetcher,
       baseUrl: baseUrl ?? "",
+      ...(workspace ? { workspace } : {}),
       token,
       output,
       exit: EXIT,
       ...(options.signal ? { signal: options.signal } : {}),
     });
+  if (
+    args[0] === "deploy" ||
+    args[0] === "deployments" ||
+    args[0] === "rollback" ||
+    (args[0] === "apps" && args[1] === "status") ||
+    (args[0] === "mcp" && args[1] === "setup")
+  )
+    return runManageCommand(args, {
+      io,
+      fetch: fetcher,
+      baseUrl: baseUrl ?? "",
+      ...(workspace ? { workspace } : {}),
+      token,
+      output,
+      requestTimeoutMs,
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.poll?.intervalMs !== undefined ? { pollMs: options.poll.intervalMs } : {}),
+      ...(options.poll?.sleep ? { sleep: options.poll.sleep } : {}),
+      ...(options.poll?.now ? { now: options.poll.now } : {}),
+    });
+  let base: string;
+  try {
+    base = resolveTarget(baseUrl ?? "", workspace).workspaceBase;
+  } catch (error) {
+    return fail(
+      io,
+      error instanceof TargetError ? error.message : "Invalid gateway URL",
+      EXIT.usage,
+    );
+  }
   if (!token)
     return fail(io, "Authentication token is required (EMBODY_TOKEN or --token)", EXIT.auth);
+  const coldTimeout = (what: string) =>
+    `${what} did not answer within ${requestTimeoutMs / 1000} s (the gateway or app may be starting from zero instances).`;
   let catalog: CatalogApp[];
   const cacheRoot = env["EMBODY_CACHE_DIR"] ?? join(homedir(), ".cache", "embody");
   const cachePath = join(
     cacheRoot,
-    `${createHash("sha256").update(`${profile}:${baseUrl}:${token}`).digest("hex")}.json`,
+    `${createHash("sha256").update(`${profile}:${base}:${token}`).digest("hex")}.json`,
   );
   const cached = await readCache(cachePath);
+  const catalogTimeout = AbortSignal.timeout(requestTimeoutMs);
   try {
-    const response = await fetcher(gatewayUrl(baseUrl, "api/catalog"), {
+    const response = await fetcher(gatewayUrl(base, "api/catalog"), {
       headers: {
         authorization: `Bearer ${token}`,
         ...(cached?.etag ? { "if-none-match": cached.etag } : {}),
       },
+      signal: options.signal ? AbortSignal.any([options.signal, catalogTimeout]) : catalogTimeout,
     });
     if (response.status === 304 && cached) catalog = cached.catalog;
     else {
       if (!response.ok)
-        return fail(
-          io,
-          "Gateway unavailable",
-          response.status === 401 ? EXIT.auth : EXIT.unavailable,
-        );
+        return response.status === 401
+          ? fail(
+              io,
+              "Authentication failed: the credential is missing, expired, revoked or for another workspace. Ask your workspace operator for a new key and update your profile.",
+              EXIT.auth,
+            )
+          : fail(io, "Gateway unavailable; retry.", EXIT.unavailable);
       catalog = (await response.json()) as CatalogApp[];
       const etag = response.headers.get("etag") ?? undefined;
       await mkdir(dirname(cachePath), { recursive: true, mode: 0o700 });
@@ -275,7 +348,10 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
       );
     }
   } catch {
-    return fail(io, "Gateway unavailable", EXIT.unavailable);
+    if (options.signal?.aborted) return EXIT.interrupted;
+    if (catalogTimeout.aborted)
+      return fail(io, `${coldTimeout("The gateway")} Retry.`, EXIT.unavailable);
+    return fail(io, "Gateway unavailable; retry.", EXIT.unavailable);
   }
   if (args[0] === "apps") {
     if (args[1] === "--help") return usage(io, 0);
@@ -370,38 +446,56 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
   } catch (error) {
     return fail(io, error instanceof Error ? error.message : "Invalid input", EXIT.usage);
   }
+  // Public gateway errors carry a fixed code, message and request ID (never raw host output).
+  const describe = (value: unknown): string => {
+    const error = (value as { error?: { code?: unknown; message?: unknown; requestId?: unknown } })
+      ?.error;
+    if (!error || typeof error.code !== "string") return "Remote execution failed";
+    return `Remote execution failed: ${error.code}${typeof error.message === "string" ? `: ${error.message}` : ""}${typeof error.requestId === "string" ? ` (request ${error.requestId})` : ""}`;
+  };
+  const write = action.effect !== "read";
+  const unknownOutcome = write
+    ? " The outcome is unknown: check the result before retrying; the CLI never replays a write."
+    : " Retry.";
+  const executeTimeout = AbortSignal.timeout(requestTimeoutMs);
   try {
     const response = await fetcher(
       gatewayUrl(
-        baseUrl,
+        base,
         `api/execute/stream/${encodeURIComponent(app.appId)}/${encodeURIComponent(target)}`,
       ),
       {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify(body),
-        ...(options.signal ? { signal: options.signal } : {}),
+        signal: options.signal ? AbortSignal.any([options.signal, executeTimeout]) : executeTimeout,
       },
     );
-    if (!response.ok || !response.body)
+    if (!response.ok || !response.body) {
+      const detail: unknown = await response.json().catch(() => undefined);
       return fail(
         io,
-        "Remote execution failed",
+        response.status === 401
+          ? "Authentication failed: the credential is missing, expired, revoked or for another workspace."
+          : response.status === 403
+            ? `${describe(detail)}. This credential may lack app-caller access to ${app.appId}.`
+            : `${describe(detail)}${response.status >= 500 ? `.${unknownOutcome}` : ""}`,
         response.status === 403
           ? EXIT.forbidden
           : response.status === 404
             ? EXIT.notFound
             : response.status === 401
               ? EXIT.auth
-              : response.status >= 500
+              : response.status >= 500 || response.status === 429
                 ? EXIT.unavailable
                 : EXIT.remote,
       );
+    }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let pending = "";
     let result: unknown;
-    let remoteError = false;
+    let remoteError: unknown;
     const handle = (frame: string): void => {
       const event = /^event: (.+)$/m.exec(frame)?.[1];
       const data = /^data: (.+)$/m.exec(frame)?.[1];
@@ -413,7 +507,7 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
         io.stderr.write((io.stderr as { isTTY?: boolean }).isTTY ? `\r${line}` : `${line}\n`);
       }
       if (event === "result") result = value;
-      if (event === "error") remoteError = true;
+      if (event === "error") remoteError = value ?? {};
     };
     for (;;) {
       const next = await reader.read();
@@ -426,11 +520,30 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
       }
     }
     if ((io.stderr as { isTTY?: boolean }).isTTY) io.stderr.write("\n");
-    if (remoteError) return fail(io, "Remote execution failed", EXIT.remote);
+    if (remoteError !== undefined) {
+      const code = (remoteError as { error?: { code?: unknown } }).error?.code;
+      const unavailable = code === "UNAVAILABLE" || code === "INTERNAL_ERROR";
+      return fail(
+        io,
+        `${describe(remoteError)}${unavailable ? `.${unknownOutcome}` : ""}`,
+        unavailable || code === "RATE_LIMITED" ? EXIT.unavailable : EXIT.remote,
+      );
+    }
     io.stdout.write(`${JSON.stringify(result, null, output === "json" ? 0 : 2)}\n`);
     return 0;
   } catch {
-    if (options.signal?.aborted) return 130;
-    return fail(io, "Gateway unavailable", EXIT.unavailable);
+    if (options.signal?.aborted) {
+      io.stderr.write(
+        `Interrupted.${write ? " A write may already have been applied; check before retrying." : ""}\n`,
+      );
+      return EXIT.interrupted;
+    }
+    if (executeTimeout.aborted)
+      return fail(
+        io,
+        `${coldTimeout(`${app.appId} ${target}`)}${unknownOutcome}`,
+        EXIT.unavailable,
+      );
+    return fail(io, `Gateway unavailable.${unknownOutcome}`, EXIT.unavailable);
   }
 }

@@ -794,3 +794,59 @@ describe("M12.d malicious tasks and task ingress", () => {
     });
   });
 });
+
+describe("M14 app list route", () => {
+  it("lists only apps the credential may read, with names, and refuses another workspace", async () => {
+    const h = await harness();
+    const other = "app_unrelated001";
+    await h.store.putApp(
+      {
+        workspaceId: WS,
+        appId: other,
+        name: "unrelated",
+        registration: null,
+        activeRelease: null,
+        state: "unavailable",
+      },
+      null,
+    );
+    const issue = async (grants: { appId: string; role: "deployer" | "app-caller" }[]) => {
+      const issued = newCredential({
+        ...credentialInput(WS),
+        grants: grants.map((grant) => ({ workspaceId: WS, ...grant })),
+      });
+      await h.store.putCredential(issued.credential, null);
+      return { authorization: `Bearer ${issued.token}` };
+    };
+    const gateway = createWorkspaceGateway({
+      store: h.store,
+      token: signingIdentity,
+      clock: h.clock,
+      deployments: { queue: h.queue },
+    });
+    const deployer = await issue([{ appId: APP, role: "deployer" }]);
+    const list = await gateway.inject({ url: `/v1/workspaces/${WS}/apps`, headers: deployer });
+    expect(list.statusCode).toBe(200);
+    const body: { workspaceId: string; apps: { appId: string; name?: string }[] } = list.json();
+    expect(body.workspaceId).toBe(WS);
+    expect(body.apps.map((app) => app.appId)).toEqual([APP]);
+    expect(body.apps[0]).toMatchObject({ version: 1, generation: 1, status: "enabled" });
+    // App status carries the name too, so the CLI can resolve `--app <name>`.
+    const single = await gateway.inject({
+      url: `/v1/workspaces/${WS}/apps/${APP}`,
+      headers: deployer,
+    });
+    expect(single.json()).toMatchObject({ appId: APP, name: body.apps[0]!.name });
+    const none = await issue([]);
+    expect(
+      (await gateway.inject({ url: `/v1/workspaces/${WS}/apps`, headers: none })).json(),
+    ).toMatchObject({ apps: [] });
+    const foreign = await gateway.inject({
+      url: `/v1/workspaces/ws_otherws00001/apps`,
+      headers: deployer,
+    });
+    expect(foreign.statusCode).toBe(401);
+    expect(foreign.body).not.toContain(APP);
+    await gateway.close();
+  });
+});

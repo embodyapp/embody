@@ -7,11 +7,12 @@ import { m10Approval } from "../infra/mvp/m10/qualify.mjs";
 import { m11Approval } from "../infra/mvp/m11/qualify.mjs";
 import { m12Approval } from "../infra/mvp/m12/qualify.mjs";
 import { m13Approval } from "../infra/mvp/m13/qualify.mjs";
+import { m14Approval } from "../infra/mvp/m14/qualify.mjs";
 
-// Real-provider qualification. M09–M13 exist; later suites (M14–M17, M20, M21 cloud cases)
+// Real-provider qualification. M09–M14 exist; later suites (M15–M17, M20, M21 cloud cases)
 // must be added here before this gate can stand for a release (M18). Requesting one fails closed.
-const IMPLEMENTED = ["m09", "m10", "m11", "m12", "m13"];
-const PENDING = ["m14", "m15", "m16", "m17", "m20", "m21"];
+const IMPLEMENTED = ["m09", "m10", "m11", "m12", "m13", "m14"];
+const PENDING = ["m15", "m16", "m17", "m20", "m21"];
 
 await main("mvp-cloud", async () => {
   requireVariables([
@@ -28,6 +29,7 @@ await main("mvp-cloud", async () => {
   if (suites.includes("m11")) m11Approval(process.env);
   if (suites.includes("m12")) m12Approval(process.env);
   if (suites.includes("m13")) m13Approval(process.env);
+  if (suites.includes("m14")) m14Approval(process.env);
   // Either the operator's own gcloud login (no key file, as in M05) or a credential file.
   if (process.env.EMBODY_MVP_CLOUD_CREDENTIALS !== "gcloud") {
     requireVariables(["GOOGLE_APPLICATION_CREDENTIALS"]);
@@ -45,6 +47,70 @@ await main("mvp-cloud", async () => {
   if (suites.length !== 1)
     throw new Error("Run one cloud suite per invocation; no resources created");
   const credentials = process.env.EMBODY_MVP_CLOUD_CREDENTIALS === "gcloud" ? "gcloud" : "adc";
+  if (suites[0] === "m14") {
+    const require = createRequire(new URL("../packages/gateway/package.json", import.meta.url));
+    const [
+      { createM14GcpProvider },
+      { CLOUD_BUILDERS_DOCKER },
+      { runM14Suite },
+      { runM14Journey, M14_CASES },
+      consumer,
+      gateway,
+      { stageRecipe },
+      { startFrameworkRegistry },
+      jose,
+    ] = await Promise.all([
+      import("../infra/mvp/m14/gcp.mjs"),
+      import("../infra/mvp/m11/gcp.mjs"),
+      import("../infra/mvp/m14/qualify.mjs"),
+      import("../infra/mvp/m14/journey.mjs"),
+      import("../infra/mvp/m14/consumer.mjs"),
+      import("../packages/gateway/dist/index.js"),
+      import("../infra/mvp/builder/stage.mjs"),
+      import("../infra/mvp/builder/registry.mjs"),
+      import(pathToFileURL(require.resolve("jose")).href),
+    ]);
+    const provider = createM14GcpProvider({
+      project: process.env.EMBODY_MVP_CLOUD_PROJECT,
+      gateway,
+      credentials,
+    });
+    const result = await runM14Suite(process.env, provider, {
+      gateway,
+      stageRecipe,
+      startFrameworkRegistry,
+      consumer,
+      runM14Journey,
+      cases: M14_CASES,
+      root: new URL("..", import.meta.url).pathname,
+      require,
+      cloudBuildersDocker: CLOUD_BUILDERS_DOCKER,
+      // A throwaway run-scoped gateway signing key (private half only in the run's secret).
+      async signingKey(kid) {
+        const pair = await jose.generateKeyPair("ES256", { extractable: true });
+        return {
+          kid,
+          privateKeyPem: await jose.exportPKCS8(pair.privateKey),
+          publicJwks: {
+            keys: [{ ...(await jose.exportJWK(pair.publicKey)), kid, alg: "ES256", use: "sig" }],
+          },
+        };
+      },
+    });
+    const outcomes = Object.values(result.cases);
+    const counts = {
+      passed: outcomes.filter((value) => value.pass === true).length,
+      failed: outcomes.filter((value) => value.pass !== true).length,
+      skipped: 0,
+    };
+    const details = { suites, releaseGate: false, pendingSuites: PENDING, m14: result };
+    if (!result.pass) {
+      await evidence("mvp-cloud-m14", "failed", counts, [], details);
+      throw new SuiteFailure("M14 cloud journey failed; see sanitized case results", counts);
+    }
+    await evidence("mvp-cloud-m14", "passed", counts, [], details);
+    return;
+  }
   if (suites[0] === "m13") {
     const [
       { createM13GcpProvider },

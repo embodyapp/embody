@@ -119,6 +119,10 @@ jobs:
           EMBODY_POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
       - name: Mandatory isolated build recipe, sandbox adversaries and artifact admission on Docker (zero skips)
         run: pnpm test:m11
+      - name: Mandatory packed CLI deploy/control journey on the local integration topology (zero skips)
+        run: pnpm test:m14
+        env:
+          EMBODY_POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -1,0 +1,134 @@
+{
+  "gate": "mvp-cloud-m14",
+  "status": "passed",
+  "timestamp": "2026-10-27T14:45:13.941Z",
+  "commit": "8d4bb071a0dfa593a406702deec25ef37f71894b",
+  "dirty": false,
+  "node": "v24.21.0",
+  "lockfileSha256": "a49024b0d7e69ea3ff966010cf4a7c8d51a6fb50d1bf148691de8ffc8ddcfaf4",
+  "schemaSourceSha256": "c00e7f163182d5ff5a289e699818dee352286cb05677983f7f428e87c80e55a5",
+  "platformSchemaSourceSha256": "c7155e827a82e0c4ba3a462c10b99c6cf159403e131f3d8a242af1b4258f3f73",
+  "postgresFixtureSha256": "452d210ed819f640cc713a860d189b1be18a690519227605cab9423459c39fb2",
+  "counts": {
+    "passed": 18,
+    "failed": 0,
+    "skipped": 0
+  },
+  "images": [],
+  "suites": ["m14"],
+  "releaseGate": false,
+  "pendingSuites": ["m15", "m16", "m17", "m20", "m21"],
+  "m14": {
+    "pass": true,
+    "runId": "e1a52e",
+    "projectionUsd": 1.05,
+    "estimatedUsd": 0.72,
+    "builds": 4,
+    "buildMinutes": 5.8682,
+    "deployments": 6,
+    "cases": {
+      "setUp": {
+        "pass": true,
+        "gateway": "public Cloud Run gateway with M10 source routes"
+      },
+      "M14.a.deploy-returns-id": {
+        "pass": true,
+        "ms": 2896,
+        "deploymentId": "dep_52b15669744294036c476881",
+        "state": "accepted"
+      },
+      "M14.a.reconnect-by-id": {
+        "pass": true,
+        "ms": 287511,
+        "releaseId": "rel_6ddeccf70b66648c5c68a63a",
+        "resumedSameId": true
+      },
+      "M14.a.discover": {
+        "pass": true,
+        "ms": 1422,
+        "apps": 2
+      },
+      "M14.a.crud": {
+        "pass": true,
+        "ms": 5701,
+        "operations": 6
+      },
+      "M14.a.durable-workflow": {
+        "pass": true,
+        "ms": 234869,
+        "releaseId": "rel_7580ee1e4ed6f447288ffec4",
+        "instanceStatus": "pending",
+        "wakeTasks": 1
+      },
+      "M14.a.interrupt-keeps-running": {
+        "pass": true,
+        "ms": 199525,
+        "deploymentId": "dep_718ff4dd587856be7bd4ae42",
+        "finalState": "active"
+      },
+      "M14.a.cancel-fenced": {
+        "pass": true,
+        "ms": 5651,
+        "deploymentId": "dep_5026326ae6089c0c921e12e2",
+        "fence": 1
+      },
+      "M14.a.rollback": {
+        "pass": true,
+        "ms": 114762,
+        "rolledBackTo": "rel_6ddeccf70b66648c5c68a63a",
+        "newRelease": "rel_f8f79556a65e18f1d1cac8d8"
+      },
+      "M14.a.mcp-setup": {
+        "pass": true,
+        "ms": 1437,
+        "url": "<gateway>/w/ws_m14e1a52e/mcp/m14-cards"
+      },
+      "M14.b.malformed-source": {
+        "pass": true,
+        "ms": 171,
+        "exit": 2,
+        "message": "Packaging failed: embody.config.ts (or .mts/.js/.mjs) is required"
+      },
+      "M14.b.build-failure": {
+        "pass": true,
+        "ms": 82470,
+        "exit": 8
+      },
+      "M14.b.missing-scope": {
+        "pass": true,
+        "ms": 736,
+        "exit": 4
+      },
+      "M14.b.stale-key": {
+        "pass": true,
+        "ms": 852,
+        "exits": [3, 3]
+      },
+      "M14.b.cold-timeout": {
+        "pass": true,
+        "ms": 1608,
+        "exit": 7,
+        "deadlineSeconds": 0.05
+      },
+      "M14.c.workspace-prefixes": {
+        "pass": true,
+        "ms": 2467,
+        "forms": ["workspace URL", "root + profile workspace", "reverse proxy", "--workspace flag"]
+      },
+      "M14.c.no-secrets": {
+        "pass": true,
+        "ms": 98408,
+        "checkedBytes": 585197,
+        "secrets": 4
+      },
+      "cleanup": {
+        "pass": true,
+        "leftovers": [],
+        "removed": 31,
+        "projectIamUnchanged": true,
+        "servicesEnabled": [],
+        "iamOriginalUnchanged": true
+      }
+    }
+  }
+}
