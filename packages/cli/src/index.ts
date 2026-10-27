@@ -112,12 +112,39 @@ function scalar(value: string, schema?: Schema): unknown {
     throw new Error("must be an allowed value");
   return value;
 }
+/** An option's name without any `=value` part: error messages never echo values (M14.c). */
+export function optionName(arg: string): string {
+  const name = arg.slice(2);
+  const equals = name.indexOf("=");
+  return equals >= 0 ? name.slice(0, equals) : name;
+}
+/**
+ * Removes a global `--name <value>` or `--name=<value>` from `args`. `undefined` when absent;
+ * a missing value is an error that names the option only.
+ */
+function takeOption(args: string[], name: string): string | undefined {
+  const index = args.findIndex((arg) => arg === `--${name}` || arg.startsWith(`--${name}=`));
+  if (index < 0) return undefined;
+  const arg = args[index]!;
+  if (arg !== `--${name}`) {
+    args.splice(index, 1);
+    const value = arg.slice(name.length + 3);
+    if (!value) throw new Error(`Missing value for --${name}`);
+    return value;
+  }
+  const value = args[index + 1];
+  if (value === undefined || value.startsWith("--")) throw new Error(`Missing value for --${name}`);
+  args.splice(index, 2);
+  return value;
+}
 function flags(args: string[], schema: Schema): Record<string, unknown> {
   const properties = (schema.properties ?? {}) as Record<string, Schema>;
   const result: Record<string, unknown> = {};
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
-    if (!arg?.startsWith("--")) throw new Error(`Unexpected argument: ${arg}`);
+    // Never echo an argument's text: it may be a credential passed in the wrong place.
+    if (!arg?.startsWith("--")) throw new Error(`Unexpected argument at position ${i + 1}`);
+    if (arg.includes("=")) throw new Error(`Use --${optionName(arg)} <value> (no "=")`);
     const key = arg.slice(2);
     const property = properties[key];
     if (!property) throw new Error(`Unknown option: --${key}`);
@@ -201,9 +228,20 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
   const fetcher = options.fetch ?? fetch;
   const args = [...argv];
   if (args.length === 0 || (args.length === 1 && args[0] === "--help")) return usage(io, 0);
-  const profileIndex = args.indexOf("--profile");
-  const requestedProfile =
-    profileIndex >= 0 ? args.splice(profileIndex, 2)[1] : env["EMBODY_PROFILE"];
+  let requestedProfile: string | undefined;
+  let baseUrlOption: string | undefined;
+  let tokenOption: string | undefined;
+  let outputOption: string | undefined;
+  let timeoutOption: string | undefined;
+  try {
+    requestedProfile = takeOption(args, "profile") ?? env["EMBODY_PROFILE"];
+    baseUrlOption = takeOption(args, "base-url");
+    tokenOption = takeOption(args, "token");
+    outputOption = takeOption(args, "output");
+    timeoutOption = takeOption(args, "request-timeout");
+  } catch (error) {
+    return fail(io, error instanceof Error ? error.message : "Invalid option", EXIT.usage);
+  }
   let settings: CliConfig;
   const configPath = env["EMBODY_CONFIG"] ?? join(homedir(), ".config", "embody", "config.json");
   try {
@@ -213,28 +251,21 @@ export async function runCli(argv: readonly string[], options: CliOptions = {}):
   }
   const profile = requestedProfile ?? settings.defaultProfile ?? "default";
   const profileSettings = settings.profiles?.[profile];
-  const baseUrlIndex = args.indexOf("--base-url");
   const baseUrl =
-    baseUrlIndex >= 0
-      ? args.splice(baseUrlIndex, 2)[1]
-      : (env["EMBODY_GATEWAY_URL"] ?? profileSettings?.baseUrl ?? "http://localhost:3000");
-  const tokenIndex = args.indexOf("--token");
-  const token =
-    tokenIndex >= 0
-      ? args.splice(tokenIndex, 2)[1]
-      : (env["EMBODY_TOKEN"] ?? profileSettings?.token);
+    baseUrlOption ??
+    env["EMBODY_GATEWAY_URL"] ??
+    profileSettings?.baseUrl ??
+    "http://localhost:3000";
+  const token = tokenOption ?? env["EMBODY_TOKEN"] ?? profileSettings?.token;
   const json = args.includes("--json");
   if (json) args.splice(args.indexOf("--json"), 1);
-  const outputIndex = args.indexOf("--output");
-  const output = outputIndex >= 0 ? args.splice(outputIndex, 2)[1] : "table";
+  const output = outputOption ?? "table";
   if (output !== "json" && output !== "table")
     return fail(io, "--output must be json or table", EXIT.usage);
-  const timeoutIndex = args.indexOf("--request-timeout");
-  const timeoutValue =
-    timeoutIndex >= 0 ? args.splice(timeoutIndex, 2)[1] : env["EMBODY_REQUEST_TIMEOUT"];
+  const timeoutValue = timeoutOption ?? env["EMBODY_REQUEST_TIMEOUT"];
   const requestTimeoutMs = timeoutValue === undefined ? 90_000 : Number(timeoutValue) * 1000;
   if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0 || requestTimeoutMs > 600_000)
-    return fail(io, "--request-timeout must be between 0 and 600 seconds", EXIT.usage);
+    return fail(io, "--request-timeout must be more than 0 and at most 600 seconds", EXIT.usage);
   const workspace = env["EMBODY_WORKSPACE"] ?? profileSettings?.workspace;
   if (args[0] === "source")
     return runSourceCommand(args.slice(1), {

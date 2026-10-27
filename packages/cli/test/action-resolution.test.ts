@@ -67,7 +67,7 @@ async function run(args: string[], stdin = "") {
     io,
     env: {
       EMBODY_TOKEN: "token",
-      EMBODY_GATEWAY_URL: "http://gateway.test",
+      EMBODY_GATEWAY_URL: "https://gateway.test",
       EMBODY_CACHE_DIR: cache,
       EMBODY_CONFIG: join(cache, "missing.json"),
     },

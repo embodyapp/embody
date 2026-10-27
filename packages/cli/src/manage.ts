@@ -87,14 +87,14 @@ const DEPLOYMENT_HINTS: Readonly<Record<string, string>> = {
     'The built app does not match package.json "embody.hosted" (profile or workflows/events/subscriptions flags), or uses an unsupported feature. Fix the declaration and deploy again.',
   LIMIT_EXCEEDED: "The build output or the app exceeded a hosted limit (see the hosted profile).",
   CHECK_FAILED:
-    "The release did not pass its readiness checks (the app did not start or report ready, its appId differs from the app's name, or a migration was refused). The previous release keeps serving.",
+    "The release did not pass its readiness checks (the app did not start or report ready, its appId differs from the app's name, or a migration was refused). The previous release keeps serving. After fixing the cause, deploy new source; to retry the same source, add --retry.",
   STALE_GENERATION:
     "Another deployment or rollback was promoted first. Deploy again to build on the current release.",
   DEPENDENCY_UNAVAILABLE:
     "A platform dependency stayed unavailable. Deploy again with --retry to submit a new attempt.",
   ROLLBACK_INCOMPATIBLE:
     "The rollback target is no longer retained or is incompatible with current data or workflows.",
-  CANCELLED: "The deployment was cancelled.",
+  CANCELLED: "The deployment was cancelled. To deploy the same source again, add --retry.",
 };
 
 const sleeper = (ms: number, signal?: AbortSignal) =>
@@ -126,8 +126,15 @@ function parse(
       positionals.push(arg);
       continue;
     }
-    const name = arg.slice(2);
-    if (booleans.includes(name)) flags.add(name);
+    // Never echo an option's value: it may be a credential (`--token=…` in the wrong place).
+    const equals = arg.indexOf("=");
+    const name = equals >= 0 ? arg.slice(2, equals) : arg.slice(2);
+    if (equals >= 0) {
+      if (!values.includes(name)) throw new Failure(EXIT.usage, `Unknown option: --${name}`);
+      const value = arg.slice(equals + 1);
+      if (!value) throw new Failure(EXIT.usage, `Missing value for --${name}`);
+      parsed[name] = value;
+    } else if (booleans.includes(name)) flags.add(name);
     else if (values.includes(name)) {
       const value = args[index + 1];
       if (value === undefined || value.startsWith("--"))
@@ -143,7 +150,7 @@ function seconds(value: string | undefined, name: string, fallbackSeconds: numbe
   if (value === undefined) return fallbackSeconds * 1000;
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0 || n > 86_400)
-    throw new Failure(EXIT.usage, `--${name} must be a number of seconds between 0 and 86400`);
+    throw new Failure(EXIT.usage, `--${name} must be more than 0 and at most 86400 seconds`);
   return n * 1000;
 }
 
@@ -320,10 +327,18 @@ function rejection(
   }
 }
 
+/**
+ * A reply that does not match the contract is not transient (retrying cannot fix it): exit 6,
+ * keeping the deployment ID when the reply has one so the user can still follow it.
+ */
 function parseStatus(json: unknown): DeploymentStatus {
   const parsed = DeploymentStatusSchema.safeParse(json);
-  if (!parsed.success) throw new Failure(EXIT.unavailable, "Unexpected deployment status reply.");
-  return parsed.data;
+  if (parsed.success) return parsed.data;
+  const id = (json as { deploymentId?: unknown } | undefined)?.deploymentId;
+  throw new Failure(
+    EXIT.remote,
+    `Unexpected deployment status reply (contract mismatch; check that this CLI version matches the gateway).${typeof id === "string" && DEPLOYMENT_ID.test(id) ? ` Deployment ${id}.` : ""}`,
+  );
 }
 
 export async function runManageCommand(
@@ -516,7 +531,7 @@ function finish(
     if (context.output !== "json")
       io.stdout.write(`Deployment ${status.deploymentId} was cancelled.\n`);
     io.stderr.write(
-      "The previous release (if any) keeps serving. Database migrations already applied are not undone.\n",
+      "The previous release (if any) keeps serving. Database migrations already applied are not undone. To deploy the same source again, add --retry.\n",
     );
     return EXIT.deploymentCancelled;
   }
@@ -531,7 +546,7 @@ function finish(
 
 async function deploy(args: readonly string[], context: ManageContext): Promise<number> {
   const { io } = context;
-  const options = parse(args, ["app", "workspace", "wait-timeout"], ["no-wait", "wait", "retry"]);
+  const options = parse(args, ["app", "workspace", "wait-timeout"], ["no-wait", "retry"]);
   if (options.positionals.length > 1) throw new Failure(EXIT.usage, USAGE);
   const dir = options.positionals[0] ?? ".";
   const waitTimeout = seconds(options.values["wait-timeout"], "wait-timeout", 1_800);

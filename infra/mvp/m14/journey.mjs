@@ -146,6 +146,7 @@ export async function runM14Journey(t) {
       profile: t.profiles.deployer,
     });
     expect(deployed.code === 0, `durable deploy exited ${deployed.code}: ${deployed.err}`);
+    const startedAt = Date.now();
     const started = await cli([flow, "followUp", "start", "--json", "--output", "json"], {
       profile: t.profiles.caller,
       stdin: JSON.stringify({ input: { title: "Journey" }, idempotencyKey: "m14-journey-0001" }),
@@ -160,12 +161,17 @@ export async function runM14Journey(t) {
     const read = json(status.out);
     expect(read.id === instance.id && typeof read.status === "string", "status mismatch");
     const tasks = await t.tasks();
-    // The delayed step's wake task exists (created before the start committed, MD12).
-    expect(tasks === null || tasks.length > 0, "no wake task for the delayed step");
+    // The delayed step's wake task (the scaffold delays it one hour) was created before the start
+    // committed (MD12): due about an hour after the start, not a lease or retention task.
+    const dueSoon = (tasks ?? []).filter((task) => {
+      const due = Date.parse(task.scheduleTime) - startedAt;
+      return due >= 55 * 60_000 && due <= 65 * 60_000;
+    });
+    expect(Array.isArray(tasks) && dueSoon.length >= 1, "no wake task for the delayed step");
     return {
       releaseId: json(deployed.out).releaseId,
       instanceStatus: read.status,
-      wakeTasks: tasks?.length ?? "not observable",
+      wakeTasks: dueSoon.length,
     };
   });
 

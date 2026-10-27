@@ -15,6 +15,15 @@ export interface GatewayTarget {
 export class TargetError extends Error {}
 
 const WORKSPACE = /^ws_[a-z0-9]{8,64}$/;
+/** `localhost`, `*.localhost`, 127.0.0.0/8 and [::1]: the only hosts plain http may reach. */
+export function loopback(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname === "[::1]" ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)
+  );
+}
 
 export function resolveTarget(baseUrl: string, workspace?: string): GatewayTarget {
   let url: URL;
@@ -23,8 +32,11 @@ export function resolveTarget(baseUrl: string, workspace?: string): GatewayTarge
   } catch {
     throw new TargetError("A valid gateway URL is required (EMBODY_GATEWAY_URL or --base-url)");
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:")
-    throw new TargetError("The gateway URL must use https (or http on loopback)");
+  // Credentials go in every request's Authorization header: never in cleartext off this machine.
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback(url.hostname)))
+    throw new TargetError(
+      "The gateway URL must use https (http only on loopback: localhost, 127.x, [::1])",
+    );
   if (url.username || url.password || url.search || url.hash)
     throw new TargetError(
       "The gateway URL must not contain credentials, a query or a fragment; use a profile token",

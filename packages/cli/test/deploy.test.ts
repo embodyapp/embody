@@ -29,6 +29,8 @@ import { EXIT, hostedCapabilities, resolveTarget, runCli } from "../src/index.js
 // binary against real builds and candidates is `pnpm test:m14`.
 
 const CANARY = "EMBODY_M14_SOURCE_SECRET_5ca1ab1e";
+/** A credential passed on the command line in the wrong form (review B1). */
+const ARG_CANARY = "emb_ARG_CANARY_d0n0tpr1nt";
 const APP = "app_cards000001";
 const NAME = "cards";
 const cleanups: Array<() => Promise<unknown>> = [];
@@ -218,9 +220,13 @@ async function topology() {
   cleanups.push(() => rm(cache, { recursive: true, force: true }));
   const requests: string[] = [];
   let hang: ((url: string) => boolean) | undefined;
+  /** Runs before a request is forwarded (races, interrupts); one hook at a time. */
+  let before: ((request: Request) => Promise<void>) | undefined;
+  let after: ((request: Request, response: Response) => Promise<Response>) | undefined;
   const fetcher: typeof fetch = async (input, init) => {
     let request = new Request(input, init);
     requests.push(`${request.method} ${new URL(request.url).pathname}`);
+    await before?.(request);
     if (hang?.(request.url))
       return new Promise((_resolve, reject) =>
         request.signal.addEventListener("abort", () => reject(new Error("aborted")), {
@@ -234,7 +240,8 @@ async function topology() {
       url.pathname = url.pathname.slice("/edge".length);
       request = new Request(url, request);
     }
-    return fetch(request);
+    const response = await fetch(request);
+    return after ? after(request, response) : response;
   };
   /** One due controller task (completing builds first); false when nothing is due or pending. */
   const step = async (): Promise<boolean> => {
@@ -296,7 +303,7 @@ async function topology() {
     });
     const text = out.text();
     // M14.c: no credential and no source secret in any CLI output.
-    for (const secret of [deployer.token, caller.token, CANARY]) {
+    for (const secret of [deployer.token, caller.token, CANARY, ARG_CANARY]) {
       expect(text.out).not.toContain(secret);
       expect(text.err).not.toContain(secret);
     }
@@ -318,6 +325,9 @@ async function topology() {
     setBuild: (status: SimulatedBuildResult["status"]) => (buildStatus = status),
     holdBuilds: (value: boolean) => (holdBuilds = value),
     hang: (match: ((url: string) => boolean) | undefined) => (hang = match),
+    before: (hook: ((request: Request) => Promise<void>) | undefined) => (before = hook),
+    after: (hook: ((request: Request, response: Response) => Promise<Response>) | undefined) =>
+      (after = hook),
   };
 }
 
@@ -566,6 +576,159 @@ describe("M14.b stable exits and actionable errors", () => {
     expect(write.code).toBe(EXIT.unavailable);
     expect(write.err).toContain("may be starting from zero");
     expect(write.err).toContain("outcome is unknown");
+  });
+});
+
+describe("M14 review fixes (B1, B2, N2, N7)", () => {
+  it("B1: --name=value never echoes the value; global --token=… works as a token", async () => {
+    const t = await topology();
+    const dir = await project();
+    for (const args of [
+      ["deploy", dir, "--app", NAME, `--trace=${ARG_CANARY}`],
+      ["deployments", "status", "dep_aaaaaaaa", "--app", NAME, `--bogus=${ARG_CANARY}`],
+      ["apps", "status", `--x=${ARG_CANARY}`],
+      ["mcp", "setup", `--nope=${ARG_CANARY}`],
+      ["cards", "card", "list", `--title=${ARG_CANARY}`],
+      ["cards", "card", "list", ARG_CANARY],
+    ]) {
+      const result = await t.run(args, { token: t.caller.token });
+      expect(result.code, args.join(" ")).toBe(EXIT.usage);
+    }
+    // The documented global options accept the `=` form; a wrong token is an auth failure,
+    // and its value is never printed (run() checks every stream for the canary).
+    const wrong = await t.run(["apps", "status", `--token=${ARG_CANARY}`]);
+    expect(wrong.code).toBe(EXIT.auth);
+    const right = await t.run(["apps", "status", `--token=${t.deployer.token}`, "--output=json"], {
+      env: { EMBODY_TOKEN: "" },
+    });
+    expect(right.code).toBe(0);
+    expect(JSON.parse(right.out)).toMatchObject({ workspaceId: t.workspace });
+    expect((await t.run(["apps", "status", "--request-timeout"])).code).toBe(EXIT.usage);
+    expect((await t.run(["apps", "status", "--token="])).code).toBe(EXIT.usage);
+  });
+
+  it("B2: plain http to a non-loopback gateway is refused before any request", async () => {
+    const t = await topology();
+    const remote = { EMBODY_GATEWAY_URL: "http://gateway.invalid/w/ws_abcdefgh12" };
+    const dir = await mkdtemp(join(tmpdir(), "embody-cli-b2-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const file = join(dir, "mcp.json");
+    for (const args of [
+      ["apps", "status"],
+      ["apps", "list"],
+      ["deploy", await project(), "--app", NAME],
+      ["mcp", "setup", "--write", file],
+      ["cards", "card", "list"],
+    ]) {
+      const result = await t.run(args, { env: remote });
+      expect(result.code, args.join(" ")).toBe(EXIT.usage);
+      expect(result.err).toContain("must use https");
+    }
+    await expect(stat(file)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(t.requests).toEqual([]);
+    for (const base of ["http://localhost:1", "http://127.0.0.9:1", "http://[::1]:1"])
+      expect(resolveTarget(base).root).toBe(base);
+    expect(() => resolveTarget("http://10.0.0.1/w/ws_aaaaaaaa")).toThrow(/https/);
+  });
+
+  it("N2: a reply that breaks the status contract stops waiting at once with exit 6", async () => {
+    const t = await topology();
+    t.holdBuilds(true);
+    const dir = await project();
+    const submitted = await t.run(["deploy", dir, "--app", NAME, "--no-wait", "--output", "json"]);
+    const { deploymentId } = JSON.parse(submitted.out) as { deploymentId: string };
+    // A newer gateway adds a field the strict v1 contract does not know.
+    t.after(async (request, response) => {
+      if (request.method !== "GET" || !request.url.endsWith(deploymentId)) return response;
+      const body = (await response.json()) as Record<string, unknown>;
+      return Response.json({ ...body, extra: 1 }, { status: response.status });
+    });
+    let polls = 0;
+    const drift = await t.run(["deployments", "status", deploymentId, "--app", NAME, "--wait"], {
+      sleep: () => {
+        polls += 1;
+        return Promise.resolve();
+      },
+    });
+    expect(drift.code).toBe(EXIT.remote);
+    expect(drift.err).toContain("contract mismatch");
+    expect(drift.err).toContain(`Deployment ${deploymentId}.`);
+    expect(polls).toBe(0);
+  });
+
+  it("N7: cancel that loses to promotion, cancel that races another cancel, Ctrl-C during submit", async () => {
+    const t = await topology();
+    t.holdBuilds(true);
+    const first = await t.run([
+      "deploy",
+      await project(),
+      "--app",
+      NAME,
+      "--no-wait",
+      "--output",
+      "json",
+    ]);
+    const a = (JSON.parse(first.out) as { deploymentId: string }).deploymentId;
+    // Promotion wins between the CLI's read and its cancel.
+    t.before(async (request) => {
+      if (request.method === "POST" && request.url.endsWith(`${a}/cancel`)) {
+        t.holdBuilds(false);
+        await t.drain();
+      }
+    });
+    const lost = await t.run(["deployments", "cancel", a, "--app", NAME]);
+    expect(lost.code).toBe(EXIT.remote);
+    expect(lost.err).toContain(`Cancellation lost the race: deployment ${a} is active`);
+    // Another cancel wins between the read and this cancel: reported as already cancelled.
+    t.holdBuilds(true);
+    const second = await t.run([
+      "deploy",
+      await project({ profile: "request-only-v1" }, "v2"),
+      "--app",
+      NAME,
+      "--no-wait",
+      "--output",
+      "json",
+    ]);
+    const b = (JSON.parse(second.out) as { deploymentId: string; cancellationFence: number })
+      .deploymentId;
+    t.before(async (request) => {
+      if (request.method === "POST" && request.url.endsWith(`${b}/cancel`)) {
+        t.before(undefined);
+        const record = (await t.store.deployment(t.workspace, APP, b))!;
+        await t.store.cancelDeployment(
+          { workspaceId: t.workspace, appId: APP, deploymentId: b },
+          record.cancellationFence,
+          t.clock.now(),
+          () => Promise.resolve(),
+        );
+        // The CLI's own request now carries a stale fence.
+      }
+    });
+    // The gateway answers a repeated cancel idempotently: cancelled, fence advanced once.
+    const raced = await t.run(["deployments", "cancel", b, "--app", NAME, "--output", "json"]);
+    expect(raced.code).toBe(0);
+    expect(JSON.parse(raced.out)).toMatchObject({ deploymentId: b, state: "cancelled" });
+    expect((await t.store.deployment(t.workspace, APP, b))!.cancellationFence).toBe(1);
+    // Ctrl-C while the submission is in flight: acceptance unknown, rerun resolves it.
+    const controller = new AbortController();
+    t.before((request) => {
+      if (request.method === "POST" && request.url.endsWith("/deployments")) {
+        t.before(undefined);
+        controller.abort();
+      }
+      return Promise.resolve();
+    });
+    const third = await project({ profile: "request-only-v1" }, "v3");
+    const interrupted = await t.run(["deploy", third, "--app", NAME, "--no-wait"], {
+      signal: controller.signal,
+    });
+    expect(interrupted.code).toBe(EXIT.interrupted);
+    expect(interrupted.err).toContain("may or may not have been accepted");
+    expect(interrupted.err).toContain("Run the same command again");
+    const rerun = await t.run(["deploy", third, "--app", NAME, "--no-wait", "--output", "json"]);
+    expect(rerun.code).toBe(0);
+    expect(rerun.err).toMatch(/Submitted deployment|Resuming existing deployment/);
   });
 });
 

@@ -65,13 +65,14 @@ The CLI is a thin client of the central gateway. Every platform call goes to the
 
 ## Command reference
 
-Global options (accepted anywhere on the command line): `--profile <name>` (`EMBODY_PROFILE`), `--base-url <url>` (`EMBODY_GATEWAY_URL`), `--token <token>` (`EMBODY_TOKEN`; prefer profiles: arguments are visible in process listings), `--output json|table`, `--request-timeout <seconds>` (`EMBODY_REQUEST_TIMEOUT`, default 90). A profile may carry `workspace`; `EMBODY_WORKSPACE` sets it too.
+Global options (accepted anywhere on the command line, as `--name value` or `--name=value`): `--profile <name>` (`EMBODY_PROFILE`), `--base-url <url>` (`EMBODY_GATEWAY_URL`), `--token <token>` (`EMBODY_TOKEN`; prefer profiles: arguments are visible in process listings), `--output json|table`, `--request-timeout <seconds>` (`EMBODY_REQUEST_TIMEOUT`, default 90). A profile may carry `workspace`; `EMBODY_WORKSPACE` sets it too.
 
 | Command | Permission | What it does |
 |---|---|---|
 | `embody deploy [dir] --app <name\|app_id> [--workspace <ws>] [--no-wait] [--wait-timeout <s>] [--retry]` | `deployment:submit` (deployer) | Reads `embody.hosted` from `package.json`, packs `dir` (default `.`) with the [M10 rules](./SOURCES.md), resolves the app, uploads, submits at the app's current generation and waits (default 30 minutes) unless `--no-wait` |
 | `embody deployments status <dep_id> --app <name\|app_id> [--wait] [--wait-timeout <s>]` | `deployment:read` | Reads (or follows) a deployment by ID from any machine |
 | `embody deployments cancel <dep_id> --app <name\|app_id>` | `deployment:cancel` | Server-side cancellation under the deployment's cancellation fence |
+| `embody rollback <name\|app_id> <rel_id> [--no-wait] [--wait-timeout <s>]` | `app:rollback` (deployer) | The M13 rollback: a new fenced deployment of a retained release's artifact on a fresh candidate, followed like a deploy; an incompatible or expired target is refused (`ROLLBACK_INCOMPATIBLE`, exit 6) |
 | `embody apps status [name\|app_id]` | `app:read` | Apps this key may read, including reserved ones: name, ID, lifecycle status, generation, active release |
 | `embody apps list` / `apps inspect <name>` | `app:call` | Unchanged: the callable catalog (namespaces) and an app's manifest |
 | `embody <app> <entity> create\|get\|list\|update\|delete …`, `embody <app> <action> …`, workflow `start\|status\|cancel\|retry` | `app:call` + scopes | Unchanged; see the [CLI reference](../developer-tools/01-cli-reference.md) |
@@ -87,7 +88,7 @@ Global options (accepted anywhere on the command line): `--profile <name>` (`EMB
 
 `events` means the app declares `publishes` in `defineApp` (events for other apps); `subscriptions` means it handles events; `workflows` means it defines workflows. The generated durable starter has workflows and a handler but publishes nothing for other apps. Schedules, app-to-app RPC, local state and GenUI cannot be declared.
 
-**Resuming instead of resubmitting.** The submission's idempotency key is derived from the source digest and the app generation it was read at. Running the same `embody deploy` again (after a lost connection, a crash, or `--no-wait`) returns the same deployment (`Resuming existing deployment …`), even after it ended. To try the same source again after a transient failure, pass `--retry` (a new key, so a new deployment). New source or a newer generation is always a new deployment.
+**Resuming instead of resubmitting.** The submission's idempotency key is derived from the source digest and the app generation it was read at. Running the same `embody deploy` again (after a lost connection, a crash, or `--no-wait`) returns the same deployment (`Resuming existing deployment …`) while it is in progress, and after it ended `failed` or `cancelled` (the rerun then reports that outcome again). Once it went **active**, the app's generation has moved on, so rerunning the same command submits a new deployment of the same source (a second identical release): follow an existing deployment with `embody deployments status <id> --wait` instead. To try the same source again after a failure or a cancellation, pass `--retry`: a new random key, so a new deployment. A lost reply to a `--retry` submission cannot be resumed by rerunning it; check `embody apps status` and the deployment it printed.
 
 **Waiting, disconnects, Ctrl-C.** While waiting, the CLI polls `GET …/deployments/<id>` (every 2 s, backing off to 15 s while the gateway is unreachable or cold) and prints each state change on stderr. A dropped connection or a gateway restart does not affect the deployment: it is a durable job driven by the deployment worker ([DEPLOYMENTS](./DEPLOYMENTS.md)). Ctrl-C stops the local wait only and says so; nothing is cancelled. A Ctrl-C before the gateway answered the submission leaves its acceptance unknown; rerunning the same command resolves it without a second deployment.
 
@@ -101,7 +102,7 @@ Global options (accepted anywhere on the command line): `--profile <name>` (`EMB
 | `baseUrl: https://gw.example`, `workspace: ws_abcd1234` (or `--workspace`, `EMBODY_WORKSPACE`) | same | same |
 | `baseUrl: https://edge.example/embody/w/ws_abcd1234` (reverse proxy path) | `https://edge.example/embody/w/ws_abcd1234/…` | `https://edge.example/embody/v1/workspaces/ws_abcd1234/…` |
 
-A workspace in the URL and a different `--workspace` is a usage error. URLs with user info, a query or a fragment are refused (put tokens in profiles). A root URL without any workspace keeps the reference-gateway behavior for `apps`/action commands; management commands then fail with a usage error.
+A workspace in the URL and a different `--workspace` is a usage error. Plain `http` is accepted only for loopback hosts (`localhost`, `127.x`, `[::1]`): a remote gateway must use `https`, because every request carries the key. URLs with user info, a query or a fragment are refused (put tokens in profiles). A root URL without any workspace keeps the reference-gateway behavior for `apps`/action commands; management commands then fail with a usage error.
 
 ## Output and exit codes
 
@@ -115,7 +116,7 @@ Human output goes to stdout (results) and stderr (progress, hints, errors). With
 | 3 | `auth` | Key missing, expired, revoked or for another workspace: ask the operator for a new key |
 | 4 | `forbidden` | Key lacks the permission (for example a caller key used to deploy), or the app is disabled |
 | 5 | `notFound` | App or deployment not found or not visible to this key |
-| 6 | `remote` | The gateway or app rejected the request (invalid, idempotency or generation conflict, cancel after the end, action error) |
+| 6 | `remote` | The gateway or app rejected the request (invalid, idempotency or generation conflict, cancel after the end, action error), or a reply did not match the v1 contract (CLI and gateway versions differ; not retried) |
 | 7 | `unavailable` | Gateway unreachable, timed out (cold start), rate limited or a dependency outage. Retry reads; for writes the outcome is unknown, so check before retrying (the CLI never replays a write) |
 | 8 | `deploymentFailed` | The deployment ended `failed`; stderr has the public error code, its fixed message and a fix-it hint |
 | 9 | `deploymentCancelled` | The deployment ended `cancelled` |
@@ -190,7 +191,7 @@ The supported client is **Claude Code 2.1.296 over direct HTTP** (MD07, [MCP](./
 
 ## Secrets and telemetry (M14.c)
 
-- Tokens come from profiles or the environment and go only in the `Authorization` header to the gateway. They never appear in URLs, stdout, stderr, cache keys in clear (the catalog cache is keyed by a SHA-256), error messages or the source archive. Storage receives only the signed upload headers.
+- Tokens come from profiles, the environment or `--token` and go only in the `Authorization` header to the gateway, over HTTPS unless the gateway is on loopback. Usage errors name a bad option but never echo its value (`--token=…` in the wrong place is not printed). They never appear in URLs, stdout, stderr, cache keys in clear (the catalog cache is keyed by a SHA-256), error messages or the source archive. Storage receives only the signed upload headers.
 - Packaging excludes `.env*`, dotfiles, credentials, local databases, `.git`, `node_modules` and build output, and refuses private-key material ([SOURCES](./SOURCES.md)); the deploy output lists only counts.
 - Error messages are fixed texts; the CLI never prints raw provider or host output. It sends no telemetry of its own; the gateway's audit lines carry IDs, outcome and timing only.
 
@@ -208,6 +209,7 @@ The supported client is **Claude Code 2.1.296 over direct HTTP** (MD07, [MCP](./
 | `M14.a.durable-workflow` | the durable scaffold deploys; `followUp start` and `followUp status` through the CLI; the delayed step's wake task was created |
 | `M14.a.interrupt-keeps-running` | SIGINT after the ID: exit 130, "NOT cancelled"; the same deployment reaches `active`; data survives the update |
 | `M14.a.cancel-fenced` | cancel right after submission: `cancelled`; a repeat keeps the fence; waiting exits 9; the previous release still serves |
+| `M14.a.rollback` | `embody rollback` to the first release promotes a new release on a fresh candidate; data intact |
 | `M14.a.mcp-setup` | `mcp setup --write` makes a `0600` file; the official MCP SDK client lists and calls the app's tools with it |
 | `M14.b.malformed-source` | missing `embody.config.ts`: exit 2, names the rule |
 | `M14.b.build-failure` | failing build script: exit 8, `BUILD_FAILED`, fix-it hint; the previous release still serves |
@@ -225,5 +227,5 @@ The local topology ([`infra/mvp/m14`](../../infra/mvp/m14/)) is the real hosted 
 
 ## Not yet proven / later tasks
 
-- **M15:** `embody logs`, `secrets set`, `apps disable|delete`, `rollback` commands (the rollback route exists since M13; its CLI command lands with M15's lifecycle controls). Build logs for failed deployments.
+- **M15:** `embody logs`, `secrets set`, `apps disable|delete`. Build logs for failed deployments.
 - App reservation and key issuance stay operator steps for the invite-only MVP (no signup or OAuth, README).
