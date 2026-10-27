@@ -14,6 +14,7 @@ import {
   type DeploymentSubmission,
   type PublicErrorCodeSchema,
   type ReleaseManifest,
+  type SecretReference,
 } from "@embody/cloud-contracts";
 import { deterministicTaskName } from "@embody/host";
 import type { ArtifactRecord } from "./build-admission.js";
@@ -92,6 +93,8 @@ export interface DeploymentRecord {
    * promotes as a new release. A rollback skips the build; every other stage runs as for a deploy.
    */
   readonly rollbackOf?: string;
+  /** M15: a rollback of the active release itself with new secret versions (secret rotation). */
+  readonly rollout?: boolean;
   /** M13: the candidate the provisioning stage created, named and labelled from this record. */
   readonly candidate?: CandidateRef;
   /** When the current state was entered; bounds provisioning and readiness (M13). */
@@ -404,6 +407,8 @@ export function decideSubmit(input: {
 // workers behave exactly as for a deploy (M13.c).
 
 export const ROLLBACK_KEY_PREFIX = "rollback-";
+/** M15 rollouts (secret rotation) share the rollback mechanism and key space. */
+export const ROLLOUT_KEY_PREFIX = "rollback-rollout-";
 /** One rollback per target and generation: a retry replays it, a later generation is new. */
 export function rollbackKey(releaseId: string, generation: number): string {
   return `${ROLLBACK_KEY_PREFIX}${releaseId}-g${generation}`;
@@ -415,6 +420,21 @@ export interface RollbackInput {
   readonly expectedGeneration: number;
   readonly actorId: string;
   readonly now: Date;
+  /**
+   * M15: the app's current secret versions, which the redeployed release uses instead of the
+   * ones it was built with (a rotated, revoked value never comes back). Absent keeps them.
+   */
+  readonly secretReferences?: readonly SecretReference[];
+  /** M15: redeploy the active release itself (secret rotation) rather than an earlier one. */
+  readonly rollout?: boolean;
+}
+/** Idempotency key of a rollback or rollout: one per target and generation. */
+export function redeployKey(
+  input: Pick<RollbackInput, "releaseId" | "expectedGeneration" | "rollout">,
+): string {
+  return input.rollout
+    ? `${ROLLOUT_KEY_PREFIX}${input.releaseId}-g${input.expectedGeneration}`
+    : rollbackKey(input.releaseId, input.expectedGeneration);
 }
 export type RollbackDecision =
   | { readonly replay: true; readonly record: DeploymentRecord }
@@ -425,6 +445,25 @@ export type RollbackDecision =
       readonly source: SourceRecord;
       readonly artifact: ArtifactRecord;
     };
+/** The active release's artifact and source (pinned to it) are still there to redeploy. */
+function rolloutTargetUsable(
+  target: ReleaseRecord,
+  artifact: ArtifactRecord | null,
+  source: SourceRecord | null,
+): boolean {
+  return (
+    !!target.registration &&
+    !!artifact &&
+    !artifact.purging &&
+    artifact.state === "admitted" &&
+    artifact.artifactId === target.artifactId &&
+    artifact.imageReference === target.imageReference &&
+    !!source &&
+    !source.purging &&
+    source.state === "verified" &&
+    source.uploadId === target.sourceUploadId
+  );
+}
 /** Why a release cannot be rolled back to; the operator-facing reason, never public. */
 export function rollbackRefusal(
   target: ReleaseRecord,
@@ -482,8 +521,11 @@ export function decideRollback(input: {
   const submission: DeploymentSubmission | undefined = input.origin
     ? {
         ...input.origin.submission,
-        idempotencyKey: rollbackKey(target.releaseId, request.expectedGeneration),
+        idempotencyKey: redeployKey(request),
         expectedGeneration: request.expectedGeneration,
+        ...(request.secretReferences
+          ? { secretReferences: request.secretReferences.map((ref) => ({ ...ref })) }
+          : {}),
       }
     : undefined;
   const fingerprint = submission ? submissionFingerprint(submission) : "";
@@ -497,11 +539,16 @@ export function decideRollback(input: {
   }
   if (app.status === "disabled") throw new DeploymentError("FORBIDDEN");
   if (request.expectedGeneration !== app.generation) throw new DeploymentError("STALE_GENERATION");
+  // A rollout redeploys exactly the release that is active at this generation.
+  if (request.rollout && app.activeReleaseId !== target.releaseId)
+    throw new DeploymentError("STALE_GENERATION");
   const now = request.now.getTime();
+  const refusal = rollbackRefusal(target, app, input.artifact, input.source, now);
   if (
     !submission ||
     input.origin?.appId !== target.appId ||
-    rollbackRefusal(target, app, input.artifact, input.source, now) !== null
+    (refusal !== null && !(request.rollout && refusal === "ROLLBACK_TO_ACTIVE")) ||
+    (request.rollout && !rolloutTargetUsable(target, input.artifact, input.source))
   )
     throw new DeploymentError("ROLLBACK_INCOMPATIBLE");
   if (
@@ -525,6 +572,7 @@ export function decideRollback(input: {
     cancellationFence: 0,
     artifactId: target.artifactId,
     rollbackOf: target.releaseId,
+    ...(request.rollout ? { rollout: true } : {}),
     epoch: 1,
     dueAt: iso(now),
     crashes: 0,

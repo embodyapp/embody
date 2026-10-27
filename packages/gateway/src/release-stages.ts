@@ -29,6 +29,7 @@ import type {
   PromoteResult,
   StageResult,
 } from "./deployment-controller.js";
+import { resolveReferences, type ManagementStore } from "./management.js";
 
 /**
  * M13 provisioning, readiness checks, promotion preparation and candidate retirement against
@@ -419,6 +420,8 @@ export interface ReleaseStagesOptions {
   /** Build outputs (the retained `manifest.json`). */
   readonly outputs: Pick<BuildProvider, "readOutput">;
   readonly store: Pick<DeploymentStore, "appStatus">;
+  /** M15 customer secrets (metadata; values stay in the vault). Absent: references are refused. */
+  readonly secrets?: Pick<ManagementStore, "secrets">;
   /** Storage migration policy; defaults to the bundled framework's. */
   readonly migrations: readonly MigrationPolicyEntry[];
   /** Registration policy (M04/M06 validation); defaults to the hosted policy. */
@@ -473,9 +476,28 @@ export class ReleaseStages implements DeploymentStages {
   public async provision(context: DeploymentStageContext): Promise<StageResult> {
     const { deployment: record, artifact, signal } = context;
     const rollback = record.rollbackOf !== undefined;
-    // Customer secret references are served by M15; until then a release cannot use them.
-    if (record.submission.secretReferences.length > 0)
-      return { ok: false, retryable: false, reason: "SECRETS_UNSUPPORTED", code: "INVALID_INPUT" };
+    // M15: customer secrets are injected by reference (the vault resolves the pinned version at
+    // instance start); the worker never reads a value. A revoked or unknown version fails here.
+    let secretEnv: readonly CandidateEnv[] = [];
+    if (record.submission.secretReferences.length > 0) {
+      if (!this.options.secrets)
+        return {
+          ok: false,
+          retryable: false,
+          reason: "SECRETS_UNSUPPORTED",
+          code: "INVALID_INPUT",
+        };
+      const resolved = resolveReferences(
+        record.submission.secretReferences,
+        await this.options.secrets.secrets(record.workspaceId, record.appId),
+      );
+      if (typeof resolved === "string")
+        return fail(resolved, rollback ? "ROLLBACK_INCOMPATIBLE" : "CHECK_FAILED");
+      secretEnv = resolved.env.map((entry) => ({
+        name: entry.name,
+        secret: { secret: entry.secret, version: entry.version },
+      }));
+    }
     const started = Date.now();
     const names = this.names(record);
     const { identities, database } = this.options;
@@ -525,7 +547,7 @@ export class ReleaseStages implements DeploymentStages {
     const existing = await this.options.candidates.get(name, signal);
     if (!existing) {
       await this.options.candidates.create(
-        this.spec(record, artifact, name, account.email, names, wake),
+        this.spec(record, artifact, name, account.email, names, wake, secretEnv),
         signal,
       );
       return pending("CANDIDATE_CREATING");
@@ -556,6 +578,7 @@ export class ReleaseStages implements DeploymentStages {
     runtimeEmail: string,
     names: AppResourceNames,
     wake: { readonly queue: string; readonly invokerEmail: string } | undefined,
+    secretEnv: readonly CandidateEnv[] = [],
   ): CandidateSpec {
     const { platform } = this.options;
     const drain = wake
@@ -591,6 +614,7 @@ export class ReleaseStages implements DeploymentStages {
               { name: "EMBODY_DRAIN_INVOKER_EMAIL", value: wake.invokerEmail },
             ]
           : []),
+        ...secretEnv,
       ],
       maxInstances: HOSTED_PROFILE.maxInstancesPerApp,
       ...(drain ? { customAudiences: [drain] } : {}),
@@ -692,6 +716,20 @@ export class ReleaseStages implements DeploymentStages {
     const state = await this.options.candidates.get(name, signal);
     if (state && this.owned(state, record)) await this.options.candidates.remove(name, signal);
   }
+
+  /**
+   * M15 app delete: the candidate goes (ownership-checked) and the runtime role's password is
+   * replaced by one nobody holds, without writing a secret version: any surviving connection
+   * string stops working. Idempotent.
+   */
+  public async retire(record: DeploymentRecord): Promise<void> {
+    await this.abandon(record);
+    const names = this.names(record);
+    const { database } = this.options;
+    await database.withCredentialLock(names, () =>
+      database.setCredential(names, randomBytes(24).toString("base64url"), "revoked"),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -749,6 +787,8 @@ export async function decideSweep(
   );
   if (!release) return { decision: "keep" };
   const status = await options.store.appStatus(owner.workspaceId, owner.appId);
+  // M15: a deleted app's candidates all go (its releases were ended by the delete).
+  if (status?.status === "deleted") return { decision: "remove", release };
   if (status?.activeReleaseId === release.releaseId) return { decision: "keep", release };
   if (!release.drainUntil || Date.parse(release.drainUntil) > now.getTime())
     return { decision: "keep", release };

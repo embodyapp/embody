@@ -155,6 +155,50 @@ function workflowActions(
   };
 }
 
+/** M15: what a dead letter shows (no payload: ADR 0004 hides payloads by default). */
+export const deadLetterSchema = z.object({
+  id: z.string(),
+  eventName: z.string(),
+  occurredAt: z.string(),
+  attempts: z.number(),
+  lastError: z.string().optional(),
+});
+export const DEAD_LETTER_LIMIT = 100;
+/**
+ * M15 dead-letter controls of a plugin that handles events: list, retry (only failed handlers run
+ * again; completed ones are recorded in the inbox) and purge (explicit resolution). Tenant-scoped
+ * like every action; grant them only to operators.
+ */
+export function deadLetterActions(pluginId: string): Record<string, ActionManifest> {
+  const prefix = formatTarget([pluginId, "deadLetters"]);
+  const id = z.object({ id: z.string().min(1).max(200) });
+  return {
+    [`${prefix}.list`]: {
+      effect: "read",
+      description: `List dead-lettered events handled by ${pluginId}`,
+      inputSchema: jsonSchema(
+        z.object({ limit: z.number().int().min(1).max(DEAD_LETTER_LIMIT).optional() }),
+      ),
+      outputSchema: jsonSchema(z.object({ deadLetters: z.array(deadLetterSchema) })),
+      generated: true,
+    },
+    [`${prefix}.retry`]: {
+      effect: "write",
+      description: `Retry one dead-lettered event handled by ${pluginId}`,
+      inputSchema: jsonSchema(id),
+      outputSchema: jsonSchema(z.object({ id: z.string(), status: z.string() })),
+      generated: true,
+    },
+    [`${prefix}.purge`]: {
+      effect: "destructive",
+      description: `Delete one dead-lettered event handled by ${pluginId}`,
+      inputSchema: jsonSchema(id),
+      outputSchema: jsonSchema(z.object({ id: z.string(), purged: z.boolean() })),
+      generated: true,
+    },
+  };
+}
+
 function generatedActions(
   pluginId: string,
   entityName: string,
@@ -257,6 +301,9 @@ export function compileManifest(
       for (const [target, action] of Object.entries(workflowActions(plugin.id, name, definition)))
         registerAction(actions, target, action);
     }
+    if (Object.keys(plugin.events ?? {}).length > 0)
+      for (const [target, action] of Object.entries(deadLetterActions(plugin.id)))
+        registerAction(actions, target, action);
     for (const [name, definition] of Object.entries(plugin.actions ?? {})) {
       const target = formatTarget([plugin.id, name]);
       if (definition.title !== undefined)

@@ -2,13 +2,22 @@ import { randomBytes } from "node:crypto";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  AppDeletionReceiptSchema,
   AppListSchema,
   AppStatusSchema,
   CapabilitiesSchema,
+  DeploymentLogSchema,
   DeploymentStatusSchema,
+  LogPageSchema,
+  MANAGEMENT_LIMITS,
+  SecretListSchema,
+  SecretNameSchema,
+  SecretStatusSchema,
+  type AppDeletionReceipt,
   type AppStatus,
   type Capabilities,
   type DeploymentStatus,
+  type SecretStatus,
 } from "@embody/cloud-contracts";
 import { packProject, uploadPacked } from "./source.js";
 import { joinUrl, resolveTarget, TargetError, type GatewayTarget } from "./target.js";
@@ -45,6 +54,8 @@ export const EXIT = {
 export interface ManageIo {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
+  /** Secret values are read only from here (a pipe, or a terminal with echo off). */
+  readonly stdin?: NodeJS.ReadableStream;
 }
 export interface ManageContext {
   readonly io: ManageIo;
@@ -219,7 +230,7 @@ class Api {
     private readonly token: string,
   ) {}
   public async call(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT",
     path: string,
     body?: unknown,
   ): Promise<{ status: number; json: unknown; retryAfter: string | null }> {
@@ -227,19 +238,20 @@ class Api {
     const signal = this.context.signal ? AbortSignal.any([this.context.signal, timeout]) : timeout;
     let response: Response;
     try {
-      response = await this.context.fetch(
-        joinUrl(this.target.root, `v1/workspaces/${this.target.workspaceId}/${path}`),
-        {
-          method,
-          headers: {
-            authorization: `Bearer ${this.token}`,
-            ...(body === undefined ? {} : { "content-type": "application/json" }),
-          },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-          redirect: "error",
-          signal,
+      // `path` may carry a query string (logs): joinUrl only sets the path.
+      const [pathname, query] = path.split("?", 2) as [string, string | undefined];
+      const url = joinUrl(this.target.root, `v1/workspaces/${this.target.workspaceId}/${pathname}`);
+      if (query) url.search = query;
+      response = await this.context.fetch(url, {
+        method,
+        headers: {
+          authorization: `Bearer ${this.token}`,
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
-      );
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        redirect: "error",
+        signal,
+      });
     } catch {
       if (this.context.signal?.aborted) throw new Interrupted();
       if (timeout.aborted)
@@ -273,6 +285,11 @@ function rejection(
         `Authentication failed: the credential is missing, expired, revoked or not for workspace ${scope.workspace}. Ask your workspace operator for a new key and update your profile (EMBODY_TOKEN, --token or --profile).`,
       );
     case 403:
+      if (code === "SUSPENDED")
+        return new Failure(
+          EXIT.forbidden,
+          "The platform operator has suspended this workspace (emergency stop). Status and logs stay readable; deploys, secret writes and app calls are refused until the stop is lifted.",
+        );
       return new Failure(
         EXIT.forbidden,
         `Permission denied: this credential lacks ${scope.permission}${app}, or the app is disabled. Deploying needs a deployer credential (app-caller keys can only call actions), for example --profile <deployer-profile>.`,
@@ -296,7 +313,12 @@ function rejection(
       if (code === "STALE_GENERATION")
         return new Failure(
           EXIT.remote,
-          "The app changed while submitting (another deployment or rollback was promoted). Run the command again.",
+          "The app changed while submitting (another deployment, rollback or lifecycle change, or a concurrent secret write). Run the command again.",
+        );
+      if (code === "SECRET_IN_USE")
+        return new Failure(
+          EXIT.remote,
+          `SECRET_IN_USE: the active release or a running deployment still uses that version. Roll out a newer version first (\`embody secrets rotate\` does both).`,
         );
       return new Failure(
         EXIT.remote,
@@ -351,8 +373,21 @@ export async function runManageCommand(
     if (command === "deploy") return await deploy(argv.slice(1), context);
     if (command === "deployments" && (sub === "status" || sub === "cancel"))
       return await deployments(sub, argv.slice(2), context);
+    if (command === "deployments" && sub === "logs")
+      return await deploymentLogs(argv.slice(2), context);
     if (command === "apps" && sub === "status") return await appsStatus(argv.slice(2), context);
+    if (command === "apps" && (sub === "disable" || sub === "enable"))
+      return await appLifecycle(sub, argv.slice(2), context);
+    if (command === "apps" && sub === "delete") return await appDelete(argv.slice(2), context);
+    if (command === "apps" && sub === "deletion") return await appDeletion(argv.slice(2), context);
     if (command === "rollback") return await rollback(argv.slice(1), context);
+    if (command === "rollout") return await rollout(argv.slice(1), context);
+    if (command === "logs") return await logs(argv.slice(1), context);
+    if (
+      command === "secrets" &&
+      (sub === "list" || sub === "set" || sub === "rotate" || sub === "revoke")
+    )
+      return await secrets(sub, argv.slice(2), context);
     if (command === "mcp" && sub === "setup") return await mcpSetup(argv.slice(2), context);
     throw new Failure(EXIT.usage, USAGE);
   } catch (error) {
@@ -376,6 +411,15 @@ export const USAGE = [
   "  embody deployments cancel <dep_id> --app <name|app_id>",
   "  embody rollback <name|app_id> <rel_id> [--no-wait] [--wait-timeout <s>]",
   "  embody apps status [name|app_id]",
+  "  embody apps disable|enable <name|app_id>",
+  "  embody apps delete <name|app_id> --confirm <app_id>",
+  "  embody apps deletion <app_id>",
+  "  embody rollout <name|app_id> [--no-wait] [--wait-timeout <s>]",
+  "  embody secrets list <name|app_id>",
+  "  embody secrets set|rotate <name|app_id> <NAME> [--rollout]   (value on stdin, never an argument)",
+  "  embody secrets revoke <name|app_id> <NAME> --version <n>",
+  "  embody logs <name|app_id> [--limit <n>] [--since <iso>] [--cursor <c>]",
+  "  embody deployments logs <dep_id> --app <name|app_id> [--attempt <n>]",
   "  embody mcp setup [--app <name>] [--write <file>]",
 ].join("\n");
 
@@ -595,7 +639,8 @@ async function deploy(args: readonly string[], context: ManageContext): Promise<
     },
     expectedGeneration: app.generation,
     capabilities,
-    secretReferences: [],
+    // M15: the release reads every app secret at its latest enabled version (by reference).
+    secretReferences: await secretReferences(client, app),
   };
   let reply;
   try {
@@ -846,5 +891,499 @@ async function mcpSetup(args: readonly string[], context: ManageContext): Promis
     context.io.stdout.write(
       `MCP endpoint: ${url}\nSend the workspace credential as "Authorization: Bearer …" on every request; there is no MCP session.\n\nClaude Code 2.1.296 (the qualified client): save this as a private file (chmod 600) with your credential in place of the placeholder, or run \`embody mcp setup --write <file>\` to do that without printing it:\n${JSON.stringify(config(placeholder), null, 2)}\n  ${launch("<file>")}\nOther MCP clients are not qualified.\n`,
     );
+  return 0;
+}
+
+// ---------------------------------------------------------------------------------------------
+// M15: lifecycle, secrets, rollout and logs (docs/mvp/MANAGEMENT.md).
+
+async function listSecrets(client: Api, app: AppStatus): Promise<SecretStatus[]> {
+  const reply = await client.call("GET", `apps/${app.appId}/secrets`);
+  if (reply.status !== 200)
+    throw rejection(reply, {
+      permission: "secret:list",
+      app: label(app),
+      workspace: client.target.workspaceId,
+    });
+  const parsed = SecretListSchema.safeParse(reply.json);
+  if (!parsed.success) throw new Failure(EXIT.remote, "Unexpected secret list reply.");
+  return parsed.data.secrets;
+}
+/** The latest enabled version of every app secret, as deployment references. */
+async function secretReferences(client: Api, app: AppStatus) {
+  let list: SecretStatus[];
+  try {
+    list = await listSecrets(client, app);
+  } catch (error) {
+    // A gateway that does not serve customer secrets has none to reference.
+    if (error instanceof Failure && error.exit === EXIT.notFound) return [];
+    throw error;
+  }
+  return list.flatMap((secret) => {
+    const latest = [...secret.versions].reverse().find((v) => v.state === "enabled");
+    return latest
+      ? [
+          {
+            version: 1 as const,
+            workspaceId: secret.workspaceId,
+            appId: secret.appId,
+            name: secret.name,
+            secretId: secret.secretId,
+            secretVersion: latest.secretVersion,
+          },
+        ]
+      : [];
+  });
+}
+
+function statusLine(app: AppStatus): string {
+  return `${(app.name ?? "-").padEnd(24)} ${app.appId}  ${app.status}  generation ${app.generation}  ${app.activeReleaseId ?? "no release yet"}`;
+}
+
+async function appLifecycle(
+  operation: "disable" | "enable",
+  args: readonly string[],
+  context: ManageContext,
+): Promise<number> {
+  const options = parse(args, ["workspace"], []);
+  if (options.positionals.length !== 1) throw new Failure(EXIT.usage, USAGE);
+  const client = api(context, options.values["workspace"]);
+  const app = await resolveApp(client, options.positionals[0]);
+  const reply = await client.call("POST", `apps/${app.appId}/${operation}`, {
+    version: 1,
+    workspaceId: client.target.workspaceId,
+    appId: app.appId,
+    operation,
+    expectedGeneration: app.generation,
+  });
+  if (reply.status !== 200)
+    throw rejection(reply, {
+      permission: "app:disable",
+      app: label(app),
+      workspace: client.target.workspaceId,
+    });
+  const parsed = AppStatusSchema.safeParse(reply.json);
+  if (!parsed.success) throw new Failure(EXIT.remote, "Unexpected app status reply.");
+  if (context.output === "json") context.io.stdout.write(`${JSON.stringify(parsed.data)}\n`);
+  else
+    context.io.stdout.write(
+      operation === "disable"
+        ? `Disabled ${label(app)}. New calls, deliveries and delayed steps are refused now; calls already running finish within 60 s. Deployments in progress were cancelled. Data is kept; \`embody apps enable ${app.name ?? app.appId}\` restores service.\n${statusLine(parsed.data)}\n`
+        : `Enabled ${label(app)}. Work that came due while disabled resumes on the app's next call.\n${statusLine(parsed.data)}\n`,
+    );
+  return 0;
+}
+
+function printReceipt(context: ManageContext, receipt: AppDeletionReceipt): void {
+  if (context.output === "json") {
+    context.io.stdout.write(`${JSON.stringify(receipt)}\n`);
+    return;
+  }
+  context.io.stdout.write(
+    `Deleted ${receipt.name} (${receipt.appId}) at ${receipt.deletedAt}. Deletion is final.\n` +
+      `  Cancelled deployments: ${receipt.cancelledDeployments.length ? receipt.cancelledDeployments.join(", ") : "none"}\n` +
+      `  Database: kept until ${receipt.retention.databaseUntil} for operator export or recovery, then dropped\n` +
+      `  Sources and images: released to the retention sweeps\n` +
+      `  Secrets: every version revoked\n` +
+      `  Backups: expire with the shared instance's backup retention\n` +
+      `  Audit and this receipt: retained (\`embody apps deletion ${receipt.appId}\`)\n`,
+  );
+}
+
+async function appDelete(args: readonly string[], context: ManageContext): Promise<number> {
+  const options = parse(args, ["workspace", "confirm"], []);
+  const ref = options.positionals[0];
+  if (options.positionals.length !== 1 || !ref) throw new Failure(EXIT.usage, USAGE);
+  const confirm = options.values["confirm"];
+  if (!confirm || !APP_ID.test(confirm))
+    throw new Failure(
+      EXIT.usage,
+      "Deleting an app is final. Confirm with --confirm <app_id> (the app's ID, see `embody apps status`).",
+    );
+  const client = api(context, options.values["workspace"]);
+  // A repeated delete of an already deleted app returns its receipt.
+  let app: AppStatus | undefined;
+  try {
+    app = await resolveApp(client, ref);
+  } catch (error) {
+    if (!(error instanceof Failure) || error.exit !== EXIT.notFound || !APP_ID.test(ref))
+      throw error;
+  }
+  const appId = app?.appId ?? ref;
+  if (confirm !== appId)
+    throw new Failure(
+      EXIT.usage,
+      `--confirm does not match the app's ID (${appId}). Nothing was deleted.`,
+    );
+  const reply = await client.call("POST", `apps/${appId}/delete`, {
+    version: 1,
+    workspaceId: client.target.workspaceId,
+    appId,
+    operation: "delete",
+    expectedGeneration: app?.generation ?? 0,
+    confirmAppId: confirm,
+  });
+  if (reply.status !== 200)
+    throw rejection(reply, {
+      permission: "app:delete",
+      app: app ? label(app) : appId,
+      workspace: client.target.workspaceId,
+    });
+  const parsed = AppDeletionReceiptSchema.safeParse(reply.json);
+  if (!parsed.success) throw new Failure(EXIT.remote, "Unexpected deletion receipt.");
+  printReceipt(context, parsed.data);
+  return 0;
+}
+
+async function appDeletion(args: readonly string[], context: ManageContext): Promise<number> {
+  const options = parse(args, ["workspace"], []);
+  const appId = options.positionals[0];
+  if (options.positionals.length !== 1 || !appId || !APP_ID.test(appId))
+    throw new Failure(EXIT.usage, `A deleted app's ID (app_…) is required.\n${USAGE}`);
+  const client = api(context, options.values["workspace"]);
+  const reply = await client.call("GET", `apps/${appId}/deletion`);
+  if (reply.status !== 200)
+    throw rejection(reply, {
+      permission: "app:delete",
+      app: appId,
+      workspace: client.target.workspaceId,
+    });
+  const parsed = AppDeletionReceiptSchema.safeParse(reply.json);
+  if (!parsed.success) throw new Failure(EXIT.remote, "Unexpected deletion receipt.");
+  printReceipt(context, parsed.data);
+  return 0;
+}
+
+/** Submits a rollout and follows it like a deploy (or returns at once with --no-wait). */
+async function submitRollout(
+  client: Api,
+  app: AppStatus,
+  context: ManageContext,
+  options: { readonly wait: boolean; readonly waitTimeoutMs: number },
+): Promise<{ readonly code: number; readonly status?: DeploymentStatus }> {
+  // The gateway authorizes first; an app without an active release is then not found (exit 5).
+  const reply = await client.call("POST", `apps/${app.appId}/rollout`, {
+    version: 1,
+    workspaceId: client.target.workspaceId,
+    appId: app.appId,
+    operation: "rollout",
+    expectedGeneration: app.generation,
+  });
+  if (reply.status !== 200 && reply.status !== 202)
+    throw rejection(reply, {
+      permission: "app:rollback",
+      app: label(app),
+      workspace: client.target.workspaceId,
+    });
+  const status = parseStatus(reply.json);
+  context.io.stderr.write(
+    `${reply.status === 200 ? "Resuming existing" : "Submitted"} rollout ${status.deploymentId} of ${label(app)} (release ${app.activeReleaseId} with the current secret versions).\n${hints(status.deploymentId, app)}\n`,
+  );
+  if (!options.wait) return { code: 0, status };
+  const result = await wait(client, app, status, context, options.waitTimeoutMs);
+  if (result.outcome !== "terminal" || result.status.state !== "active")
+    return { code: finish(context, app, result), status: result.status };
+  return { code: 0, status: result.status };
+}
+
+async function rollout(args: readonly string[], context: ManageContext): Promise<number> {
+  const options = parse(args, ["workspace", "wait-timeout"], ["no-wait"]);
+  if (options.positionals.length !== 1) throw new Failure(EXIT.usage, USAGE);
+  const client = api(context, options.values["workspace"]);
+  const app = await resolveApp(client, options.positionals[0]);
+  const waitTimeoutMs = seconds(options.values["wait-timeout"], "wait-timeout", 1_800);
+  const result = await submitRollout(client, app, context, {
+    wait: !options.flags.has("no-wait"),
+    waitTimeoutMs,
+  });
+  if (result.code !== 0) return result.code;
+  if (options.flags.has("no-wait")) {
+    context.io.stdout.write(
+      context.output === "json"
+        ? `${JSON.stringify(result.status)}\n`
+        : `${result.status!.deploymentId} ${result.status!.state}\n`,
+    );
+    return 0;
+  }
+  return finish(context, app, { status: result.status!, outcome: "terminal" });
+}
+
+/**
+ * Reads one secret value from stdin: a pipe (one trailing newline removed) or, on a terminal,
+ * typed with echo off. Never from an argument, an environment variable or a file name.
+ */
+async function readSecretValue(context: ManageContext, name: string): Promise<string> {
+  const stdin = context.io.stdin as
+    | (NodeJS.ReadableStream & {
+        isTTY?: boolean;
+        setRawMode?: (raw: boolean) => unknown;
+        pause?: () => unknown;
+      })
+    | undefined;
+  if (!stdin) throw new Failure(EXIT.usage, "Provide the secret value on stdin.");
+  const limit = MANAGEMENT_LIMITS.maxSecretBytes;
+  let value: string;
+  if (stdin.isTTY) {
+    if (!stdin.setRawMode)
+      throw new Failure(
+        EXIT.usage,
+        "Pipe the secret value on stdin (the terminal cannot hide it).",
+      );
+    context.io.stderr.write(`Value for ${name} (input hidden; Enter to finish): `);
+    stdin.setRawMode(true);
+    try {
+      value = await new Promise<string>((resolve, reject) => {
+        let text = "";
+        const onData = (chunk: Buffer | string) => {
+          for (const char of String(chunk)) {
+            if (char === "\u0003") {
+              cleanup();
+              reject(new Interrupted());
+              return;
+            }
+            if (char === "\r" || char === "\n") {
+              cleanup();
+              resolve(text);
+              return;
+            }
+            if (char === "\u007f" || char === "\b") text = text.slice(0, -1);
+            else text += char;
+            if (Buffer.byteLength(text, "utf8") > limit) {
+              cleanup();
+              reject(new Failure(EXIT.usage, `The secret value is larger than ${limit} bytes.`));
+              return;
+            }
+          }
+        };
+        const cleanup = () => {
+          stdin.removeListener("data", onData);
+          stdin.pause?.();
+        };
+        stdin.on("data", onData);
+        stdin.resume();
+      });
+    } finally {
+      stdin.setRawMode(false);
+      context.io.stderr.write("\n");
+    }
+  } else {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for await (const chunk of stdin) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      bytes += buffer.length;
+      if (bytes > limit + 2)
+        throw new Failure(EXIT.usage, `The secret value is larger than ${limit} bytes.`);
+      chunks.push(buffer);
+    }
+    value = Buffer.concat(chunks)
+      .toString("utf8")
+      .replace(/\r?\n$/, "");
+  }
+  if (!value) throw new Failure(EXIT.usage, "The secret value on stdin is empty.");
+  if (Buffer.byteLength(value, "utf8") > limit)
+    throw new Failure(EXIT.usage, `The secret value is larger than ${limit} bytes.`);
+  return value;
+}
+
+function secretLine(secret: SecretStatus): string {
+  const enabled = secret.versions.filter((v) => v.state === "enabled").map((v) => v.secretVersion);
+  const latest = secret.versions.at(-1)?.secretVersion ?? 0;
+  return `${secret.name.padEnd(32)} latest ${latest}  enabled ${enabled.length ? enabled.join(",") : "none"}`;
+}
+
+async function secrets(
+  sub: "list" | "set" | "rotate" | "revoke",
+  args: readonly string[],
+  context: ManageContext,
+): Promise<number> {
+  const options = parse(
+    args,
+    ["workspace", "version", "wait-timeout"],
+    sub === "set" ? ["rollout"] : [],
+  );
+  const [appRef, rawName] = options.positionals;
+  if (sub === "list" ? options.positionals.length !== 1 : options.positionals.length !== 2)
+    throw new Failure(EXIT.usage, USAGE);
+  // A value given as an argument would be in shell history and process listings: refuse it,
+  // and never echo it.
+  let name: string | undefined;
+  if (sub !== "list") {
+    const parsedName = SecretNameSchema.safeParse(rawName);
+    if (!parsedName.success)
+      throw new Failure(
+        EXIT.usage,
+        "Secret names are UPPER_SNAKE_CASE (A–Z, 0–9, _), at most 64 characters, and cannot be a platform name (DATABASE_URL, PORT, NODE_*, EMBODY_*, …). Give the value on stdin, never as an argument.",
+      );
+    name = parsedName.data;
+  }
+  const client = api(context, options.values["workspace"]);
+  const app = await resolveApp(client, appRef);
+  const scope = { app: label(app), workspace: client.target.workspaceId };
+  if (sub === "list") {
+    const list = await listSecrets(client, app);
+    if (context.output === "json")
+      context.io.stdout.write(
+        `${JSON.stringify({ version: 1, workspaceId: client.target.workspaceId, appId: app.appId, secrets: list })}\n`,
+      );
+    else if (!list.length) context.io.stdout.write(`No secrets for ${label(app)}.\n`);
+    else for (const secret of list) context.io.stdout.write(`${secretLine(secret)}\n`);
+    return 0;
+  }
+  const revoke = async (secretVersion: number): Promise<SecretStatus> => {
+    const reply = await client.call("POST", `apps/${app.appId}/secrets/${name}/revoke`, {
+      version: 1,
+      workspaceId: client.target.workspaceId,
+      appId: app.appId,
+      name,
+      secretVersion,
+    });
+    if (reply.status !== 200) throw rejection(reply, { ...scope, permission: "secret:write" });
+    const parsed = SecretStatusSchema.safeParse(reply.json);
+    if (!parsed.success) throw new Failure(EXIT.remote, "Unexpected secret status reply.");
+    return parsed.data;
+  };
+  if (sub === "revoke") {
+    const version = Number(options.values["version"]);
+    if (!Number.isSafeInteger(version) || version < 1)
+      throw new Failure(EXIT.usage, "--version <n> (the version to revoke) is required.");
+    const status = await revoke(version);
+    context.io.stdout.write(
+      context.output === "json"
+        ? `${JSON.stringify(status)}\n`
+        : `Revoked ${name} version ${version} of ${label(app)}: nothing can read it any more.\n${secretLine(status)}\n`,
+    );
+    return 0;
+  }
+  // set / rotate: the value comes from stdin only.
+  const value = await readSecretValue(context, name!);
+  const prior = (await listSecrets(client, app)).find((secret) => secret.name === name);
+  const reply = await client.call("PUT", `apps/${app.appId}/secrets/${name}`, {
+    version: 1,
+    workspaceId: client.target.workspaceId,
+    appId: app.appId,
+    name,
+    value,
+    expectedVersion: prior?.versions.at(-1)?.secretVersion ?? 0,
+  });
+  if (reply.status !== 200) throw rejection(reply, { ...scope, permission: "secret:write" });
+  const parsed = SecretStatusSchema.safeParse(reply.json);
+  if (!parsed.success) throw new Failure(EXIT.remote, "Unexpected secret status reply.");
+  const written = parsed.data.versions.at(-1)!.secretVersion;
+  context.io.stderr.write(
+    `Stored ${name} version ${written} for ${label(app)} (value not shown).\n`,
+  );
+  if (sub === "set" && !options.flags.has("rollout")) {
+    context.io.stdout.write(
+      context.output === "json"
+        ? `${JSON.stringify(parsed.data)}\n`
+        : `${secretLine(parsed.data)}\nThe running release keeps the previous version until \`embody rollout ${app.name ?? app.appId}\` (or the next deploy).\n`,
+    );
+    return 0;
+  }
+  // Roll the new version out, then (rotate) revoke every older enabled version.
+  const fresh = await resolveApp(client, app.appId);
+  const rolled = await submitRollout(client, fresh, context, {
+    wait: true,
+    waitTimeoutMs: seconds(options.values["wait-timeout"], "wait-timeout", 1_800),
+  });
+  if (rolled.code !== 0) {
+    context.io.stderr.write(
+      `The new version is stored but not rolled out; older versions were not revoked. Fix the cause and run \`embody rollout ${app.name ?? app.appId}\`.\n`,
+    );
+    return rolled.code;
+  }
+  let status = parsed.data;
+  if (sub === "rotate")
+    for (const old of parsed.data.versions)
+      if (old.state === "enabled" && old.secretVersion < written)
+        status = await revoke(old.secretVersion);
+  context.io.stdout.write(
+    context.output === "json"
+      ? `${JSON.stringify({ secret: status, deployment: rolled.status })}\n`
+      : `${sub === "rotate" ? "Rotated" : "Set and rolled out"} ${name} of ${label(app)}: release ${rolled.status!.releaseId} uses version ${written}${sub === "rotate" ? "; older versions are revoked" : ""}.\n${secretLine(status)}\n`,
+  );
+  return 0;
+}
+
+async function logs(args: readonly string[], context: ManageContext): Promise<number> {
+  const options = parse(args, ["workspace", "limit", "since", "cursor"], []);
+  if (options.positionals.length !== 1) throw new Failure(EXIT.usage, USAGE);
+  const limit = options.values["limit"];
+  if (
+    limit !== undefined &&
+    (!/^\d{1,3}$/.test(limit) ||
+      Number(limit) < 1 ||
+      Number(limit) > MANAGEMENT_LIMITS.maxLogEntries)
+  )
+    throw new Failure(EXIT.usage, `--limit must be 1–${MANAGEMENT_LIMITS.maxLogEntries}`);
+  const since = options.values["since"];
+  if (since !== undefined && !Number.isFinite(Date.parse(since)))
+    throw new Failure(EXIT.usage, "--since must be an ISO date/time");
+  const cursor = options.values["cursor"];
+  if (cursor !== undefined && !/^[A-Za-z0-9_-]{1,200}$/.test(cursor))
+    throw new Failure(EXIT.usage, "--cursor must be a value printed by a previous `embody logs`");
+  const client = api(context, options.values["workspace"]);
+  const app = await resolveApp(client, options.positionals[0]);
+  const query = new URLSearchParams({
+    ...(limit ? { limit } : {}),
+    ...(since ? { since: new Date(since).toISOString() } : {}),
+    ...(cursor ? { cursor } : {}),
+  }).toString();
+  const reply = await client.call("GET", `apps/${app.appId}/logs${query ? `?${query}` : ""}`);
+  if (reply.status !== 200)
+    throw rejection(reply, {
+      permission: "deployment:read",
+      app: label(app),
+      workspace: client.target.workspaceId,
+    });
+  const parsed = LogPageSchema.safeParse(reply.json);
+  if (!parsed.success) throw new Failure(EXIT.remote, "Unexpected log reply.");
+  if (context.output === "json") {
+    context.io.stdout.write(`${JSON.stringify(parsed.data)}\n`);
+    return 0;
+  }
+  for (const entry of parsed.data.entries)
+    context.io.stdout.write(
+      `${entry.time}  ${entry.kind.padEnd(10)} ${entry.id}  ${entry.target}  ${entry.outcome}${entry.errorCode ? ` ${entry.errorCode}` : ""}${entry.durationMs !== undefined ? ` ${entry.durationMs}ms` : ""}${entry.surface ? ` ${entry.surface}` : ""}\n`,
+    );
+  if (!parsed.data.entries.length)
+    context.io.stdout.write("No log entries in the retained window.\n");
+  if (parsed.data.nextCursor)
+    context.io.stderr.write(
+      `Older entries: embody logs ${app.name ?? app.appId} --cursor ${parsed.data.nextCursor}\n`,
+    );
+  return 0;
+}
+
+async function deploymentLogs(args: readonly string[], context: ManageContext): Promise<number> {
+  const options = parse(args, ["app", "workspace", "attempt"], []);
+  const id = options.positionals[0];
+  if (options.positionals.length !== 1 || !id || !DEPLOYMENT_ID.test(id))
+    throw new Failure(EXIT.usage, `A deployment ID (dep_…) is required.\n${USAGE}`);
+  const attempt = options.values["attempt"];
+  if (attempt !== undefined && !/^[1-3]$/.test(attempt))
+    throw new Failure(EXIT.usage, "--attempt must be 1, 2 or 3");
+  const client = api(context, options.values["workspace"]);
+  const app = await resolveApp(client, options.values["app"]);
+  const reply = await client.call(
+    "GET",
+    `apps/${app.appId}/deployments/${id}/logs${attempt ? `?attempt=${attempt}` : ""}`,
+  );
+  if (reply.status !== 200)
+    throw rejection(reply, {
+      permission: "deployment:read",
+      app: label(app),
+      workspace: client.target.workspaceId,
+    });
+  const parsed = DeploymentLogSchema.safeParse(reply.json);
+  if (!parsed.success) throw new Failure(EXIT.remote, "Unexpected build log reply.");
+  if (context.output === "json") context.io.stdout.write(`${JSON.stringify(parsed.data)}\n`);
+  else {
+    context.io.stdout.write(parsed.data.text ? `${parsed.data.text.replace(/\n?$/, "\n")}` : "");
+    context.io.stderr.write(
+      `Build log of ${id}, attempt ${parsed.data.attempt}${parsed.data.text ? "" : " (empty)"}${parsed.data.truncated ? ", truncated" : ""}; secrets and credentials are redacted.\n`,
+    );
+  }
   return 0;
 }

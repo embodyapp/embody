@@ -498,6 +498,22 @@ export class GoogleReleaseProvider
       throw new ReleaseProviderError("Invalid secret version");
     return version;
   }
+  /** M15: disables one version (revocation). An already disabled or destroyed one is success. */
+  public async disableSecretVersion(
+    secretId: string,
+    version: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (!/^\d+$/.test(version)) throw new ReleaseProviderError("Invalid secret version");
+    const name = `${SECRETS}/projects/${this.options.project}/secrets/${secretId}/versions/${version}`;
+    const result = await this.ok(`${name}:disable`, "POST", {}, signal, [400]);
+    if (result.status === 400) {
+      // FAILED_PRECONDITION: destroyed versions cannot change state; confirm it is not enabled.
+      const current = await this.ok(name, "GET", undefined, signal, [404]);
+      if (current.status !== 404 && current.body["state"] === "ENABLED")
+        throw new ReleaseProviderError("Secret version still enabled");
+    }
+  }
   public async ensureWakeQueue(
     queueId: string,
     invokerAccount: string,

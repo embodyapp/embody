@@ -286,6 +286,30 @@ export class ConflictError extends EmbodyError {
     constructor(message?: string);
 }
 
+// @public (undocumented)
+export const DEAD_LETTER_LIMIT = 100;
+
+// @public
+export function deadLetterActions(pluginId: string): Record<string, ActionManifest>;
+
+// @public
+export interface DeadLetterRow {
+    // (undocumented)
+    readonly attempts: number;
+    // (undocumented)
+    readonly eventName: string;
+    // (undocumented)
+    readonly id: string;
+    // (undocumented)
+    readonly lastError?: string;
+    // (undocumented)
+    readonly occurredAt: string;
+    // (undocumented)
+    readonly orgId: string;
+    // (undocumented)
+    readonly status: string;
+}
+
 // @public
 export function definePlugin<const TId extends string, const TEntities extends Readonly<Record<string, EntityDefinition>>, const TExtension extends PluginExtension>(plugin: TypedPluginBase<TId, TEntities>, extend: (helpers: PluginDefinitionHelpers<TEntities>) => TExtension): EmbodyPlugin & TypedPluginBase<TId, TEntities> & Omit<TExtension, "hooks">;
 
@@ -526,6 +550,12 @@ export interface EntityTransaction {
             readonly producerPluginId?: string;
             readonly schemaVersion?: string;
         }): Promise<unknown>;
+        list?(options?: {
+            readonly status?: "dead_letter";
+            readonly limit?: number;
+        }): Promise<readonly DeadLetterRow[]>;
+        retryDeadLetter?(id: string, now: string): Promise<DeadLetterRow | null>;
+        purgeDeadLetter?(id: string): Promise<DeadLetterRow | null>;
     };
     // (undocumented)
     readonly workflows?: WorkflowRepositoryPort;

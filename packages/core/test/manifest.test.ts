@@ -34,6 +34,10 @@ describe("manifest compiler", () => {
       "kanban.card.get",
       "kanban.card.list",
       "kanban.card.update",
+      // M15: plugins that handle events get dead-letter controls.
+      "kanban.deadLetters.list",
+      "kanban.deadLetters.purge",
+      "kanban.deadLetters.retry",
       "kanban.exportBoard",
     ]);
     expect(manifest.eventSubscriptions).toEqual(["kanban.card.ready_for_review"]);

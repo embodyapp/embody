@@ -109,6 +109,14 @@ export interface OutboxRepository {
     readonly status?: OutboxStatus;
     readonly limit?: number;
   }): Promise<readonly OutboxEvent[]>;
+  /**
+   * M15: a dead letter becomes pending again with its attempts reset, due at `now`. Handlers that
+   * already completed it stay completed (inbox), so a retry delivers only what failed. Null
+   * unless the event was dead-lettered.
+   */
+  retryDeadLetter?(id: string, now: string): Promise<OutboxEvent | null>;
+  /** M15: removes one dead letter (explicit resolution, ADR 0004). Null unless dead-lettered. */
+  purgeDeadLetter?(id: string): Promise<OutboxEvent | null>;
 }
 
 export interface EventDelivery {

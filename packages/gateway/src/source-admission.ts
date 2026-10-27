@@ -299,6 +299,8 @@ export interface SourceRequestContext {
   readonly credential: WorkspaceCredential;
   readonly principal: Principal;
   readonly catalog: readonly CatalogApp[];
+  /** M15: an operator emergency stop covers the workspace (uploads and deploys are refused). */
+  readonly suspended?: boolean;
 }
 
 function deadline<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -370,6 +372,7 @@ export function registerSourceRoutes(
     )
       throw new SourceAdmissionError("FORBIDDEN");
     if (target.state === "disabled") throw new SourceAdmissionError("FORBIDDEN");
+    if (deps.current().suspended) throw new SourceAdmissionError("FORBIDDEN");
     return { workspace, appId, principal };
   };
   const audited = async <T>(

@@ -29,9 +29,15 @@ import {
   compileEntity,
   generatedEntityActions,
   type CompiledEntity,
+  type DeadLetterRow,
   type EntityTransaction,
 } from "./entities.js";
-import { compileManifest, type AppManifest, type AppMetadata } from "./manifest.js";
+import {
+  DEAD_LETTER_LIMIT,
+  compileManifest,
+  type AppManifest,
+  type AppMetadata,
+} from "./manifest.js";
 import { formatTarget } from "./target.js";
 import { progressUpdateSchema } from "./protocol.js";
 import {
@@ -573,7 +579,64 @@ export class Kernel {
         handlers.push({ id: `${plugin.id}.${name}`, handler });
         this.eventHandlers.set(name, handlers);
       }
+      if (Object.keys(plugin.events ?? {}).length > 0)
+        this.registerDeadLetterActions(plugin.id, Object.keys(plugin.events ?? {}));
     }
+  }
+  /**
+   * M15 dead-letter controls for the events one plugin handles. Every operation runs in the
+   * caller's tenant transaction (row-level security in PostgreSQL) and re-checks the tenant and
+   * event name; a mismatch throws, rolling back anything the storage call changed.
+   */
+  private registerDeadLetterActions(pluginId: string, eventNames: readonly string[]): void {
+    const target = formatTarget([pluginId, "deadLetters"]);
+    const handled = new Set(eventNames);
+    const outbox = (ctx: KernelContext) => {
+      const tx = (ctx as KernelContext & { readonly transaction?: EntityTransaction }).transaction;
+      const port = tx?.outbox;
+      if (!port?.list || !port.retryDeadLetter || !port.purgeDeadLetter)
+        throw new DependencyError("Storage does not support dead-letter controls");
+      return port as Required<NonNullable<EntityTransaction["outbox"]>>;
+    };
+    const visible = (row: DeadLetterRow | null, ctx: KernelContext): row is DeadLetterRow =>
+      row !== null && row.orgId === ctx.orgId && handled.has(row.eventName);
+    const view = (row: DeadLetterRow) => ({
+      id: row.id,
+      eventName: row.eventName,
+      occurredAt: row.occurredAt,
+      attempts: row.attempts,
+      ...(row.lastError === undefined ? {} : { lastError: row.lastError.slice(0, 500) }),
+    });
+    const id = z.object({ id: z.string().min(1).max(200) });
+    this.registerAction(`${target}.list`, {
+      input: z.object({ limit: z.number().int().min(1).max(DEAD_LETTER_LIMIT).optional() }),
+      handler: async (request: { limit?: number }, ctx: KernelContext) => {
+        const rows = await outbox(ctx).list({ status: "dead_letter", limit: DEAD_LETTER_LIMIT });
+        return {
+          deadLetters: rows
+            .filter((row) => visible(row, ctx))
+            .slice(0, request.limit ?? DEAD_LETTER_LIMIT)
+            .map(view),
+        };
+      },
+    });
+    this.registerAction(`${target}.retry`, {
+      input: id,
+      handler: async (request: { id: string }, ctx: KernelContext) => {
+        const now = (this.options.now?.() ?? new Date()).toISOString();
+        const row = await outbox(ctx).retryDeadLetter(request.id, now);
+        if (!visible(row, ctx)) throw new NotFoundError("Dead letter was not found");
+        return { id: row.id, status: row.status };
+      },
+    });
+    this.registerAction(`${target}.purge`, {
+      input: id,
+      handler: async (request: { id: string }, ctx: KernelContext) => {
+        const row = await outbox(ctx).purgeDeadLetter(request.id);
+        if (!visible(row, ctx)) throw new NotFoundError("Dead letter was not found");
+        return { id: row.id, purged: true };
+      },
+    });
   }
   private registerWorkflowActions(target: string): void {
     const workflow = this.workflows.get(target)!;

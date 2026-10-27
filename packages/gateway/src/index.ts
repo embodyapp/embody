@@ -191,6 +191,22 @@ export {
   type GoogleReleaseProviderOptions,
 } from "./cloud-release.js";
 export { registerDeploymentRoutes, type DeploymentRouteOptions } from "./deployment-routes.js";
+export {
+  MemorySecretVault,
+  customerSecretName,
+  currentReferences,
+  resolveReferences,
+  secretManagerVault,
+  type LifecycleInput,
+  type LifecycleOperation,
+  type LifecycleResult,
+  type ManagementStore,
+  type SecretNaming,
+  type SecretRecord,
+  type SecretVault,
+  type StopScope,
+} from "./management.js";
+export { type BuildLogReader, type SecretRouteOptions } from "./management-routes.js";
 export { hostedSigningIdentity } from "./identity.js";
 export { cloudRunInvocationToken, type CloudRunInvocationOptions } from "./cloud-run.js";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";

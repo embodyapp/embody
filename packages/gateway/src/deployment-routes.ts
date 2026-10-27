@@ -32,10 +32,20 @@ import {
   type PublicErrorCode,
 } from "./deployment.js";
 import { deploymentWakeHook, reconcileDeployments } from "./deployment-controller.js";
+import { currentReferences, resolveReferences, type ManagementStore } from "./management.js";
+import {
+  registerManagementRoutes,
+  type BuildLogReader,
+  type SecretRouteOptions,
+} from "./management-routes.js";
 
 export interface DeploymentRouteOptions {
+  /** M15 customer secrets; absent means the secret routes are not served. */
+  readonly secrets?: SecretRouteOptions;
+  /** M15 bounded, redacted build logs of one deployment attempt; absent means not served. */
+  readonly buildLogs?: BuildLogReader;
   /** Defaults to the workspace gateway store when it implements DeploymentStore. */
-  readonly store?: DeploymentStore & Pick<SourceStore, "source">;
+  readonly store?: DeploymentStore & ManagementStore & Pick<SourceStore, "source">;
   /** The controller queue; tasks target the deployment worker, never the gateway. */
   readonly queue: TaskQueue<DeploymentTaskBody>;
   readonly storageTimeoutMs?: number;
@@ -54,6 +64,8 @@ const STATUS: Record<PublicErrorCode, number> = {
   CHECK_FAILED: 409,
   DEPENDENCY_UNAVAILABLE: 503,
   ROLLBACK_INCOMPATIBLE: 409,
+  SUSPENDED: 403,
+  SECRET_IN_USE: 409,
 };
 const AUDIT_CODE: Partial<Record<PublicErrorCode, EmbodyErrorCode>> = {
   FORBIDDEN: "FORBIDDEN",
@@ -63,8 +75,10 @@ const AUDIT_CODE: Partial<Record<PublicErrorCode, EmbodyErrorCode>> = {
   LIMIT_EXCEEDED: "RATE_LIMITED",
   DEPENDENCY_UNAVAILABLE: "DEPENDENCY_ERROR",
   ROLLBACK_INCOMPATIBLE: "CONFLICT",
+  SUSPENDED: "FORBIDDEN",
+  SECRET_IN_USE: "CONFLICT",
 };
-function deadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+export function deadline<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   return Promise.race([
     promise,
@@ -75,7 +89,7 @@ function deadline<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]).finally(() => clearTimeout(timer));
 }
 /** Store, queue and provider failures surface as one fixed retryable error. */
-const opaque = (error: unknown): never => {
+export const opaque = (error: unknown): never => {
   if (error instanceof DeploymentError) throw error;
   throw new DeploymentError("DEPENDENCY_UNAVAILABLE");
 };
@@ -93,10 +107,12 @@ export function registerDeploymentRoutes(
   deps: {
     current: () => SourceRequestContext;
     admission: Pick<GatewayStore, "admit" | "complete">;
-    store: DeploymentStore & Pick<SourceStore, "source">;
+    store: DeploymentStore & ManagementStore & Pick<SourceStore, "source">;
     queue: TaskQueue<DeploymentTaskBody>;
     clock: { now(): Date };
     storageTimeoutMs?: number;
+    secrets?: SecretRouteOptions;
+    buildLogs?: BuildLogReader;
   },
 ): void {
   const timeout = deps.storageTimeoutMs ?? 10_000;
@@ -104,21 +120,33 @@ export function registerDeploymentRoutes(
   const prefix = "/v1/workspaces/:workspace/apps/:app";
   const fail = (reply: FastifyReply, code: PublicErrorCode) =>
     reply.status(STATUS[code]).send({ error: publicError(code) });
-  const authorize = (request: FastifyRequest, permission: Permission) => {
+  /**
+   * `mutation`: refused while an operator emergency stop covers the workspace (reads, logs,
+   * cancellation, disable and revocation stay available). `allowDeleted`: delete replays and the
+   * deletion receipt still answer for a deleted app.
+   */
+  const authorize = (
+    request: FastifyRequest,
+    permission: Permission,
+    options: { readonly mutation?: boolean; readonly allowDeleted?: boolean } = {},
+  ) => {
     const { workspace, app: appId } = request.params as { workspace: string; app: string };
-    const { credential, catalog, principal } = deps.current();
+    const { credential, catalog, principal, suspended } = deps.current();
     if (credential.workspaceId !== workspace) throw new UnauthenticatedError();
     const grants = credential.grants.filter(
       (grant) => grant.workspaceId === workspace && grant.appId === appId,
     );
-    const target = catalog.find((entry) => entry.appId === appId && entry.state !== "deleted");
+    const target = catalog.find(
+      (entry) => entry.appId === appId && (options.allowDeleted || entry.state !== "deleted"),
+    );
     // Do not reveal apps the caller holds no grant for.
     if (!grants.length || !target) throw new DeploymentError("NOT_FOUND");
     if (
       !grants.some((grant) => hasPermission(grant, { workspaceId: workspace, appId }, permission))
     )
       throw new DeploymentError("FORBIDDEN");
-    return { workspace, appId, principal };
+    if (options.mutation && suspended) throw new DeploymentError("SUSPENDED");
+    return { workspace, appId, principal, target };
   };
   const recover = async (workspace: string) => {
     const now = deps.clock.now();
@@ -258,7 +286,7 @@ export function registerDeploymentRoutes(
   });
 
   app.post(`${prefix}/deployments`, routeOptions, async (request, reply) => {
-    const scope = authorize(request, "deployment:submit");
+    const scope = authorize(request, "deployment:submit", { mutation: true });
     const parsed = DeploymentSubmissionSchema.safeParse(request.body);
     if (
       !parsed.success ||
@@ -269,6 +297,15 @@ export function registerDeploymentRoutes(
     const submission = parsed.data;
     const result = await audited(request, reply, scope, "deployment.submit", async () => {
       const now = deps.clock.now();
+      // M15: references must name this app's current, enabled secret versions.
+      if (submission.secretReferences.length) {
+        const records = await deadline(
+          deps.store.secrets(scope.workspace, scope.appId),
+          timeout,
+        ).catch(opaque);
+        if (typeof resolveReferences(submission.secretReferences, records) === "string")
+          throw new DeploymentError("INVALID_INPUT");
+      }
       // M10: the upload must be this app's verified source with the submitted digest and size.
       // The transaction re-checks it under lock and pins it.
       await deadline(verifySubmissionSource(deps.store, submission, now), timeout).catch(
@@ -302,7 +339,7 @@ export function registerDeploymentRoutes(
   // M13 rollback: a fenced deployment of a retained release's artifact (fresh candidate, fresh
   // checks, same promotion CAS). A target that cannot be rolled back to is refused explicitly.
   app.post(`${prefix}/rollback`, routeOptions, async (request, reply) => {
-    const scope = authorize(request, "app:rollback");
+    const scope = authorize(request, "app:rollback", { mutation: true });
     const parsed = AppManagementSchema.safeParse(request.body);
     if (
       !parsed.success ||
@@ -313,26 +350,73 @@ export function registerDeploymentRoutes(
       throw new DeploymentError("INVALID_INPUT");
     const { releaseId, expectedGeneration } = parsed.data;
     const result = await audited(request, reply, scope, "app.rollback", () =>
-      deadline(
-        deps.store.submitRollback(
-          {
-            workspaceId: scope.workspace,
-            appId: scope.appId,
-            releaseId,
-            expectedGeneration,
-            actorId: scope.principal.actorId,
-            now: deps.clock.now(),
-          },
-          wake,
-        ),
-        timeout,
-      ).catch((error: unknown) => {
-        if (error instanceof ConflictError) throw new DeploymentError("DEPENDENCY_UNAVAILABLE");
-        return opaque(error);
-      }),
+      submitRedeploy(scope, releaseId, expectedGeneration, false),
     );
     await recover(scope.workspace);
     return reply.status(result.replay ? 200 : 202).send(deploymentStatus(result.record));
+  });
+
+  /**
+   * A rollback or (M15) a rollout: a fenced deployment of a retained release's artifact with the
+   * app's current secret versions. A secret the target needs that has no enabled version left is
+   * an explicit refusal, so a rotated and revoked value never comes back.
+   */
+  const submitRedeploy = async (
+    scope: { workspace: string; appId: string; principal: Principal },
+    releaseId: string,
+    expectedGeneration: number,
+    rollout: boolean,
+  ) => {
+    const now = deps.clock.now();
+    const [records, target] = await deadline(
+      Promise.all([
+        deps.store.secrets(scope.workspace, scope.appId),
+        deps.store.release(scope.workspace, scope.appId, releaseId),
+      ]),
+      timeout,
+    ).catch(opaque);
+    const references = currentReferences(records);
+    if (
+      target &&
+      target.manifest.secretReferences.some(
+        (ref) => !references.some((current) => current.name === ref.name),
+      )
+    )
+      throw new DeploymentError("ROLLBACK_INCOMPATIBLE");
+    return deadline(
+      deps.store.submitRollback(
+        {
+          workspaceId: scope.workspace,
+          appId: scope.appId,
+          releaseId,
+          expectedGeneration,
+          actorId: scope.principal.actorId,
+          now,
+          secretReferences: references,
+          ...(rollout ? { rollout: true } : {}),
+        },
+        wake,
+      ),
+      timeout,
+    ).catch((error: unknown) => {
+      if (error instanceof ConflictError) throw new DeploymentError("DEPENDENCY_UNAVAILABLE");
+      return opaque(error);
+    });
+  };
+
+  registerManagementRoutes(app, {
+    prefix,
+    routeOptions,
+    authorize,
+    audited,
+    recover,
+    submitRedeploy,
+    store: deps.store,
+    clock: deps.clock,
+    timeout,
+    wake,
+    ...(deps.secrets ? { secrets: deps.secrets } : {}),
+    ...(deps.buildLogs ? { buildLogs: deps.buildLogs } : {}),
   });
 
   app.get(`${prefix}/deployments/:deployment`, routeOptions, async (request, reply) => {
