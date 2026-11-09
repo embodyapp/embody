@@ -12,8 +12,8 @@
     "deploy:preview": "pnpm build && npx firebase-tools deploy --project nimrod-experiments --config firebase.preview.json --only hosting"
   },
   "dependencies": {
-    "gsap": "^3.15.0",
-    "posthog-js": "^1.435.8"
+    "gsap": "^3.15.1",
+    "posthog-js": "^1.447.3"
   },
   "devDependencies": {
     "typescript": "^5.9.3",
