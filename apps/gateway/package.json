@@ -12,7 +12,7 @@
   "dependencies": {
     "@embody/core": "workspace:*",
     "@embody/gateway": "workspace:*",
-    "fastify": "^5.12.7"
+    "fastify": "^5.12.8"
   },
   "devDependencies": {
     "@types/node": "^22.20.1"
